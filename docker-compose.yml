@@ -1,18 +1,24 @@
 services:
   market-data-service:
-    build: ./market-data-service
+    build:
+      context: .
+      dockerfile: market-data-service/Dockerfile
     container_name: market-data-service
     ports:
       - "8001:8001"
     restart: unless-stopped
   pricing-service:
-    build: ./pricing-service
+    build:
+      context: .
+      dockerfile: pricing-service/Dockerfile
     container_name: pricing-service
     ports:
       - "8002:8002"
     restart: unless-stopped
   monitoring-service:
-    build: ./monitoring-service
+    build:
+      context: .
+      dockerfile: monitoring-service/Dockerfile
     container_name: monitoring-service
     ports:
       - "8003:8003"
