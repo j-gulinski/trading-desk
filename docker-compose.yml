@@ -11,10 +11,14 @@ services:
     build:
       context: .
       dockerfile: pricing-service/Dockerfile
+    environment:
+      - STREAM_URL=http://market-data-service:8001/stream
     container_name: pricing-service
     ports:
       - "8002:8002"
     restart: unless-stopped
+    depends_on:
+      - market-data-service
   monitoring-service:
     build:
       context: .

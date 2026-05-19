@@ -2,11 +2,13 @@ import datetime
 
 INSTRUMENTS = {
     "EQ_ACME": {
+        "instrument_id": "EQ_ACME",
         "type": "EQUITY",
         "market_symbol": "ACME",
         "currency": "USD"
     },
     "BOND_GOVT_5Y": {
+        "instrument_id": "BOND_GOVT_5Y",
         "type": "BOND",
         "market_symbol": "GOVT_5Y",
         "currency": "USD",
@@ -16,6 +18,7 @@ INSTRUMENTS = {
         "payments_per_year": 1
     },
     "FX_EURUSD_1Y": {
+        "instrument_id": "FX_EURUSD_1Y",
         "type": "FX_FORWARD",
         "market_symbol": "EURUSD",
         "currency": "USD",
