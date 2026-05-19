@@ -23,6 +23,9 @@ services:
     build:
       context: .
       dockerfile: monitoring-service/Dockerfile
+    environment:
+      - MARKET_DATA_SERVICE_HEALTHCHECK_URL=http://market-data-service:8001/health
+      - PRICING_SERVICE_HEALTHCHECK_URL=http://pricing-service:8002/health
     container_name: monitoring-service
     ports:
       - "8003:8003"

@@ -16,6 +16,7 @@ STREAM_URL = os.getenv("STREAM_URL")
 
 app = bottle.Bottle()
 
+lock = threading.Lock()
 market_data_connection = 'DISCONNECTED'
 ticks_received = 0
 last_event_timestamp = None
@@ -31,7 +32,8 @@ def market_data_stream_consumer():
         try:
             request = urllib.request.Request(STREAM_URL)
             with urllib.request.urlopen(request) as stream:
-                market_data_connection = 'CONNECTED'
+                with lock:
+                    market_data_connection = 'CONNECTED'
                 for line in stream:
                     decoded_line = line.decode('utf-8').strip()
                     if not decoded_line:
@@ -41,17 +43,20 @@ def market_data_stream_consumer():
                         raw_json = decoded_line[6:]
                         tick = json.loads(raw_json)
                         
-                        ticks_received += 1
-                        last_event_timestamp = tick['timestamp']
-                        
-                        update_pricing(tick)
+                        with lock:
+                            ticks_received += 1
+                            last_event_timestamp = tick['timestamp']
+                            update_pricing(tick)
+                            
         except urllib.error.URLError as e:
             logging.error(f"Stream connection failed: {e}. Retrying in 5 seconds...")
         except Exception as e:
             logging.error(f"Unexpected error: {e}. Retrying in 5 seconds...")
         finally:
-            market_data_connection = 'DISCONNECTED'
-        market_data_connection = 'RECONNECTING'
+            with lock:
+                market_data_connection = 'DISCONNECTED'
+        with lock:
+            market_data_connection = 'RECONNECTING'
         time.sleep(5)
         
 def update_pricing(tick):
@@ -63,24 +68,31 @@ def update_pricing(tick):
             market_state[instrument_id]['ask'] = tick['ask']
             market_state[instrument_id]['last'] = tick['last']
             market_state[instrument_id]['fair_value'] = (tick['bid'] + tick['ask']) / 2
+                
 
 @app.route('/valuations')
 def get_valuations():
     response.content_type = 'application/json'
-    return json.dumps(market_state)
+    with lock:
+        return market_state.copy()
 
 @app.route('/valuation/<instrument_id>')
 def get_valuation(instrument_id):
     response.content_type = 'application/json'
-    return json.dumps(market_state.get(instrument_id, {"error": "Instrument not found"}))
+    with lock:
+        if instrument_id in market_state:
+            return market_state[instrument_id].copy()
+        return {"error": "Instrument not found"}
 
 @app.route('/health')
 def health():
     global market_data_connection, ticks_received, last_event_timestamp
-    return {
-        "service": "pricing-service",
-        "status": "UP",
-        "market_data_connection": market_data_connection,
+
+    with lock:
+        return {
+            "service": "pricing-service",
+            "status": "UP",
+            "market_data_connection": market_data_connection,
         "received_events": ticks_received,
         "last_market_event_time": last_event_timestamp,
     }

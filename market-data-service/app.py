@@ -103,17 +103,19 @@ def stream():
 def get_snapshot():
     response.content_type = 'application/json'
     with lock:
-        return snapshot
+        return json.dumps(snapshot)
     
 @app.route('/health')
 def health():
     global ticks_generated, last_event_timestamp
-    return {
-        "service": "market-data-service",
-        "status": "UP",
-        "generated_events": ticks_generated,
-        "last_event_timestamp": last_event_timestamp
-    }
+
+    with lock:
+        return {
+            "service": "market-data-service",
+            "status": "UP",
+            "generated_events": ticks_generated,
+            "last_event_timestamp": last_event_timestamp
+        }
 
 
 class ThreadedServer(ServerAdapter):
