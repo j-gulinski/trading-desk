@@ -17,38 +17,91 @@ lock = threading.Lock()
 ticks_generated = 0
 last_event_timestamp = None
 client_event_queues = []
+snapshot = {}
 
-snapshot = {
-    inst["market_symbol"]: {
+for inst in INSTRUMENTS.values():
+    data = {
         "asset_type": inst["type"],
-        "market_symbol": inst["market_symbol"]
+        "instrument_id": inst["instrument_id"],
+        "market_symbol": inst["market_symbol"],
     }
-    for inst in INSTRUMENTS.values()
-}
+    
+    if inst["type"] == "BOND":
+        data.update({
+            "face_value": inst["face_value"],
+            "coupon_rate": inst["coupon_rate"],
+            "maturity_years": inst["maturity_years"],
+            "payments_per_year": inst["payments_per_year"]
+        })
+    elif inst["type"] == "FX_FORWARD":
+        data["tenor_years"] = inst["tenor_years"]
+        
+    snapshot[inst["instrument_id"]] = data
 
-snapshot["ACME"].update({"bid": 99.95, "ask": 100.05, "last": 100.01})
+snapshot["EQ_ACME"].update({"bid": 99.95, "ask": 100.05, "last": 100.00})
+snapshot["BOND_GOVT_5Y"].update({"yield": 0.05})
+# order in pair (?)
+snapshot["FX_EURUSD_1Y"].update({"spot": 1.16, "domestic_rate": 0.0375, "foreign_rate": 0.0215})
 
 
 def generate_equity_tick(timestamp):
     global ticks_generated, last_event_timestamp, snapshot
     
-    current_equity_mid = (snapshot["ACME"]["bid"] + snapshot["ACME"]["ask"]) / 2
+    current_equity_mid = (snapshot["EQ_ACME"]["bid"] + snapshot["EQ_ACME"]["ask"]) / 2
 
     new_equity_mid = max(1.0, current_equity_mid + random.uniform(-0.2, 0.2))
     
     equity_tick = {
         "event_id": ticks_generated,
         "timestamp": timestamp,
-        "instrument_id": "EQ_ACME",
-        "asset_type": "EQUITY",
-        "symbol": "ACME",
+        "instrument_id": snapshot["EQ_ACME"]["instrument_id"],
+        "asset_type": snapshot["EQ_ACME"]["asset_type"],
+        "market_symbol": snapshot["EQ_ACME"]["market_symbol"],
         "bid": round(new_equity_mid - 0.05, 4),
         "ask": round(new_equity_mid + 0.05, 4),
         "last": round(new_equity_mid + random.uniform(-0.02, 0.02), 4)
     }
-    snapshot["ACME"].update({"bid": equity_tick["bid"], "ask": equity_tick["ask"], "last": equity_tick["last"]})
+    snapshot["EQ_ACME"].update({"bid": equity_tick["bid"], "ask": equity_tick["ask"], "last": equity_tick["last"]})
     
     return equity_tick
+
+def generate_bond_tick(timestamp):
+    global ticks_generated, last_event_timestamp, snapshot
+    
+    current_bond_yield = snapshot["BOND_GOVT_5Y"]["yield"]
+    new_bond_yield = max(0.03, min(0.06, current_bond_yield + random.uniform(-0.003, 0.003)))
+    
+    bond_tick = {
+        "event_id": ticks_generated,
+        "timestamp": timestamp,
+        "instrument_id": snapshot["BOND_GOVT_5Y"]["instrument_id"],
+        "asset_type": snapshot["BOND_GOVT_5Y"]["asset_type"],
+        "market_symbol": snapshot["BOND_GOVT_5Y"]["market_symbol"],
+        "yield": round(new_bond_yield, 4)
+    }
+    snapshot["BOND_GOVT_5Y"].update({"yield": bond_tick["yield"]})
+    
+    return bond_tick
+
+def generate_fx_forward_tick(timestamp):
+    global ticks_generated, last_event_timestamp, snapshot
+    
+    current_spot = snapshot["FX_EURUSD_1Y"]["spot"]
+    new_spot = max(1.10, min(1.20, current_spot + random.uniform(-0.01, 0.01)))
+    
+    fx_forward_tick = {
+        "event_id": ticks_generated,
+        "timestamp": timestamp,
+        "instrument_id": snapshot["FX_EURUSD_1Y"]["instrument_id"],
+        "asset_type": snapshot["FX_EURUSD_1Y"]["asset_type"],
+        "market_symbol": snapshot["FX_EURUSD_1Y"]["market_symbol"],
+        "spot": round(new_spot, 4),
+        "domestic_rate": snapshot["FX_EURUSD_1Y"]["domestic_rate"],
+        "foreign_rate": snapshot["FX_EURUSD_1Y"]["foreign_rate"]
+    }
+    snapshot["FX_EURUSD_1Y"].update({"spot": fx_forward_tick["spot"]})
+    
+    return fx_forward_tick
 
 def market_data_generator():
     global ticks_generated, last_event_timestamp, snapshot
@@ -58,12 +111,15 @@ def market_data_generator():
         tick = None
 
         with lock:
-            # tick_type = random.choice(['EQUITY', 'BOND', 'FX_FORWARD'])
-            tick_type = random.choice(['EQUITY'])
+            tick_type = random.choice(['EQUITY', 'BOND', 'FX_FORWARD'])
             if tick_type == 'EQUITY':
                 tick = generate_equity_tick(now)
-            
-            logging.debug(f"Generated tick for {tick['symbol']}: {tick}")
+            elif tick_type == 'BOND':
+                tick = generate_bond_tick(now)
+            elif tick_type == 'FX_FORWARD':
+                tick = generate_fx_forward_tick(now)
+
+            logging.debug(f"Generated tick for {tick['market_symbol']}: {tick}")
 
             ticks_generated += 1
             last_event_timestamp = now

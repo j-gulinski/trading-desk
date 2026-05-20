@@ -37,9 +37,9 @@ def monitoring_loop(url, service_name):
         start_time = time.time()
         current_time = get_iso_timestamp()
         try:
-            reqest = urllib.request.Request(url)
-            with urllib.request.urlopen(reqest, timeout=3) as response:
-                raw_data = response.read()
+            request = urllib.request.Request(url)
+            with urllib.request.urlopen(request, timeout=3) as http_response:
+                raw_data = http_response.read()
                 response_time_ms = int((time.time() - start_time) * 1000)
                 try:
                     health_data = json.loads(raw_data.decode('utf-8'))
@@ -70,7 +70,7 @@ def monitoring_loop(url, service_name):
 def get_system_status():
     response.content_type = 'application/json'
     with lock:
-        return monitoring_state
+        return monitoring_state.copy()
     
 @app.route('/health')
 def health():
