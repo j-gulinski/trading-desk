@@ -118,7 +118,7 @@ def get_valuations():
     with lock:
         return market_state.copy()
 
-@app.route('/valuation/<instrument_id>')
+@app.route('/valuations/<instrument_id>')
 def get_valuation(instrument_id):
     response.content_type = 'application/json'
     with lock:
