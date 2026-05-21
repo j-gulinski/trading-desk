@@ -1,3 +1,4 @@
+import os
 import time
 import threading
 import queue
@@ -11,6 +12,8 @@ from socketserver import ThreadingMixIn
 
 from shared import INSTRUMENTS, get_iso_timestamp
 
+TIME_INTERVAL_MS = os.getenv("TIME_INTERVAL_MS", 100)
+
 app = bottle.Bottle()
 
 lock = threading.Lock()
@@ -18,6 +21,8 @@ ticks_generated = 0
 last_event_timestamp = None
 client_event_queues = []
 snapshot = {}
+queues = {}
+ticks_kept = 100
 
 for inst in INSTRUMENTS.values():
     data = {
@@ -37,6 +42,7 @@ for inst in INSTRUMENTS.values():
         data["tenor_years"] = inst["tenor_years"]
         
     snapshot[inst["instrument_id"]] = data
+    queues[inst["market_symbol"]] = queue.Queue()
 
 snapshot["EQ_ACME"].update({"bid": 99.95, "ask": 100.05, "last": 100.00})
 snapshot["BOND_GOVT_5Y"].update({"yield": 0.05})
@@ -118,6 +124,11 @@ def market_data_generator():
                 tick = generate_bond_tick(now)
             elif tick_type == 'FX_FORWARD':
                 tick = generate_fx_forward_tick(now)
+            
+            if queues[tick['market_symbol']].qsize() == ticks_kept:
+                queues[tick['market_symbol']].get()
+            queues[tick['market_symbol']].put(tick)
+
 
             logging.debug(f"Generated tick for {tick['market_symbol']}: {tick}")
 
@@ -128,7 +139,7 @@ def market_data_generator():
             for q in client_event_queues:
                 q.put(tick)
         
-        time.sleep(0.1)
+        time.sleep(TIME_INTERVAL_MS / 1000.0)
         
 @app.route('/stream')
 def stream():
@@ -160,6 +171,15 @@ def get_snapshot():
     response.content_type = 'application/json'
     with lock:
         return json.dumps(snapshot)
+    
+@app.route('/history/<symbol>')
+def get_history(symbol):
+    response.content_type = 'application/json'
+    with lock:
+        queue = queues.get(symbol)
+        if queue:
+            return json.dumps(list(queue.queue))
+        return json.dumps([])
     
 @app.route('/health')
 def health():
