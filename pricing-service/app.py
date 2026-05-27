@@ -55,7 +55,10 @@ def market_data_stream_consumer():
                             with clients_lock:
                                 targets = list(client_event_queues)
                             for q in targets:
-                                q.put(pricing_event)
+                                try:
+                                    q.put_nowait(tick)
+                                except queue.Full:
+                                    logging.debug("Dropped tick for slow client")
 
         except urllib.error.URLError as e:
             logging.error(f"Stream connection failed: {e}. Retrying in 5 seconds...")

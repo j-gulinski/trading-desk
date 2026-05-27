@@ -142,13 +142,16 @@ def market_data_generator():
 
             ticks_generated += 1
             last_event_timestamp = now
-            logging.debug(f"Generated tick for {tick['market_symbol']}: {tick}")
+            logging.debug(f"Total ticks generated: {ticks_generated}")
 
         with clients_lock:
             targets = list(client_event_queues)
 
-        for q in client_event_queues:
-            q.put(tick)
+        for q in targets:
+            try:
+                q.put_nowait(tick)
+            except queue.Full:
+                logging.debug("Dropped tick for slow client")
 
         logging.debug(f"Total ticks generated: {ticks_generated}")
         time.sleep(TIME_INTERVAL_MS / 1000.0)
