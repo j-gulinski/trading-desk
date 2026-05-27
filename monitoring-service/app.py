@@ -21,14 +21,17 @@ app = bottle.Bottle()
 lock = threading.Lock()
 monitoring_state = {
     "market-data-service": {"status": "UNKNOWN"},
-    "pricing-service": {"status": "UNKNOWN"}
+    "pricing-service": {"status": "UNKNOWN"},
 }
+
 
 def market_data_monitoring_loop():
     monitoring_loop(MARKET_DATA_SERVICE_HEALTHCHECK_URL, "market-data-service")
 
+
 def pricing_monitoring_loop():
     monitoring_loop(PRICING_SERVICE_HEALTHCHECK_URL, "pricing-service")
+
 
 def monitoring_loop(url, service_name):
     global monitoring_state
@@ -42,53 +45,62 @@ def monitoring_loop(url, service_name):
                 raw_data = http_response.read()
                 response_time_ms = int((time.time() - start_time) * 1000)
                 try:
-                    health_data = json.loads(raw_data.decode('utf-8'))
+                    health_data = json.loads(raw_data.decode("utf-8"))
                     service_status = health_data.get("status", "UNKNOWN")
                 except json.JSONDecodeError:
                     service_status = "UNKNOWN"
-                    logging.error(f"Failed to decode health check response from {service_name}: {raw_data}")
-                
+                    logging.error(
+                        f"Failed to decode health check response from {service_name}: {raw_data}"
+                    )
+
                 with lock:
-                    if service_status == "UP" and monitoring_state[service_name].get("status") != "UP":
+                    if (
+                        service_status == "UP"
+                        and monitoring_state[service_name].get("status") != "UP"
+                    ):
                         logging.info(f"{service_name} is now UP")
                     monitoring_state[service_name] = {
                         "status": service_status,
                         "response_time_ms": response_time_ms,
-                        "last_checked": current_time
+                        "last_checked": current_time,
                     }
         except Exception as e:
             with lock:
                 monitoring_state[service_name] = {
                     "status": "DOWN",
                     "last_checked": current_time,
-                    "error": str(e)
+                    "error": str(e),
                 }
             logging.error(f"Health check failed for {service_name}: {e}")
         time.sleep(1)
-    
-@app.route('/status')
+
+
+@app.route("/status")
 def get_system_status():
-    response.content_type = 'application/json'
+    response.content_type = "application/json"
     with lock:
         return monitoring_state.copy()
-    
-@app.route('/health')
+
+
+@app.route("/health")
 def health():
-    return {
-        "service": "monitoring-service",
-        "status": "UP"
-    }
+    return {"service": "monitoring-service", "status": "UP"}
+
 
 class ThreadedServer(ServerAdapter):
     def run(self, handler):
         class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
             daemon_threads = True
-        server = make_server(self.host, self.port, handler, server_class=ThreadingWSGIServer)
+
+        server = make_server(
+            self.host, self.port, handler, server_class=ThreadingWSGIServer
+        )
         server.serve_forever()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logging.info("Starting Monitoring Service...")
     threading.Thread(target=market_data_monitoring_loop, daemon=True).start()
     threading.Thread(target=pricing_monitoring_loop, daemon=True).start()
-    app.run(host='0.0.0.0', port=8003, server=ThreadedServer)
+    app.run(host="0.0.0.0", port=8003, server=ThreadedServer)
