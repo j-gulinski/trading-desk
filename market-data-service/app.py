@@ -147,8 +147,8 @@ def market_data_generator():
         with clients_lock:
             targets = list(client_event_queues)
 
-            for q in client_event_queues:
-                q.put(tick)
+        for q in client_event_queues:
+            q.put(tick)
 
         logging.debug(f"Total ticks generated: {ticks_generated}")
         time.sleep(TIME_INTERVAL_MS / 1000.0)

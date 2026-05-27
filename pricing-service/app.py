@@ -142,7 +142,7 @@ def calculate_bond_fair_value(
 def get_valuations():
     response.content_type = "application/json"
     with data_lock:
-        return market_state.copy()
+        return json.dumps(market_state)
 
 
 @app.route("/valuations/<instrument_id>")
