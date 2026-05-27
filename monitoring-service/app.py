@@ -5,7 +5,6 @@ import threading
 import urllib.request
 import urllib.error
 import json
-import socket
 from datetime import datetime, timezone
 from wsgiref.simple_server import make_server, WSGIServer
 from socketserver import ThreadingMixIn
@@ -79,7 +78,7 @@ def monitoring_loop(url, service_name):
 def get_system_status():
     response.content_type = "application/json"
     with lock:
-        return monitoring_state.copy()
+        return json.dumps(monitoring_state)
 
 
 @app.route("/health")
