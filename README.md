@@ -60,3 +60,24 @@ You can test the system using `curl` or any web browser:
 ## 9. Implementation Problems Encountered
 - overcoming initial lack of knowledge of python threading - (GIL, threads, multiprocessing)
 - no parallel threads in single process - deamon processes for continous tasks
+
+## 10. Fixed concurrency potential problems
+- scalling consumers with one single lock
+	- everything locked until all events added to queue
+	- data lock time linearly connected with number of consumers, locked other endpoints eg: snapshot
+	- solution: 2 locks - data lock only aquired for quick generation of data and updating snapshot - mitigating race conditions
+- shallow copy locking
+	- when returning market data object the lock was aquired for shallow copy with .copy()
+	- might return inconsistant data for instruments mid-update
+	- lock and map whole object (not only copy) to JSON so we keep consistent state
+- healthcheck false fail
+	- when market data generator had a lot of clients, healtheckeck request could be starved resulting in false failed healtcheck
+	- mitigated by reducing time of data lock to calculations and data assignment only
+- new client could connect and miss first tick
+	- fixed by locking creation and adding queue to consumer queues together
+- O(n) client disconnecting
+    - switched client list to set do make disconnecting clients more efficient
+- slow consumer - overflow potential
+    - add max size for event queues, dropping events when client is slow
+- lock could block new clients from connecting
+    - client lock only for making snapshot snapshot, released for sending events 

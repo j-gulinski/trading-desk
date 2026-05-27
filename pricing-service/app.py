@@ -17,23 +17,25 @@ STREAM_URL = os.getenv("STREAM_URL")
 
 app = bottle.Bottle()
 
-lock = threading.Lock()
+data_lock = threading.Lock()
+clients_lock = threading.Lock()
+
 market_data_connection = "DISCONNECTED"
 ticks_received = 0
-client_event_queues = []
+client_event_queues = set()
 last_event_timestamp = None
 
 market_state = {data["instrument_id"]: data.copy() for key, data in INSTRUMENTS.items()}
 
 
 def market_data_stream_consumer():
-    global market_data_connection, ticks_received, last_event_timestamp, market_state
+    global market_data_connection, ticks_received, last_event_timestamp
     while True:
         logging.info(f"Connecting to Market Data Stream at {STREAM_URL}...")
         try:
             request = urllib.request.Request(STREAM_URL)
             with urllib.request.urlopen(request) as stream:
-                with lock:
+                with data_lock:
                     market_data_connection = "CONNECTED"
                 for line in stream:
                     decoded_line = line.decode("utf-8").strip()
@@ -44,18 +46,28 @@ def market_data_stream_consumer():
                         raw_json = decoded_line[6:]
                         tick = json.loads(raw_json)
 
-                        with lock:
+                        with data_lock:
                             ticks_received += 1
                             last_event_timestamp = tick["timestamp"]
-                            update_pricing(tick)
+                            pricing_event = update_pricing(tick)
+
+                        if pricing_event:
+                            with clients_lock:
+                                targets = list(client_event_queues)
+                            for q in targets:
+                                try:
+                                    q.put_nowait(tick)
+                                except queue.Full:
+                                    logging.debug("Dropped tick for slow client")
+
         except urllib.error.URLError as e:
             logging.error(f"Stream connection failed: {e}. Retrying in 5 seconds...")
         except Exception as e:
             logging.error(f"Unexpected error: {e}. Retrying in 5 seconds...")
         finally:
-            with lock:
+            with data_lock:
                 market_data_connection = "DISCONNECTED"
-        with lock:
+        with data_lock:
             market_data_connection = "RECONNECTING"
         time.sleep(5)
 
@@ -63,58 +75,55 @@ def market_data_stream_consumer():
 def update_pricing(tick):
     instrument_id = tick["instrument_id"]
     asset_type = tick["asset_type"]
-    if instrument_id in market_state:
-        if asset_type == "EQUITY":
-            market_state[instrument_id]["bid"] = tick["bid"]
-            market_state[instrument_id]["ask"] = tick["ask"]
-            market_state[instrument_id]["last"] = tick["last"]
+    if instrument_id not in market_state:
+        return None
 
-            market_state[instrument_id]["fair_value"] = round(
-                (tick["bid"] + tick["ask"]) / 2, 4
-            )
-        elif asset_type == "BOND":
-            market_state[instrument_id]["yield"] = tick["yield"]
+    if asset_type == "EQUITY":
+        market_state[instrument_id]["bid"] = tick["bid"]
+        market_state[instrument_id]["ask"] = tick["ask"]
+        market_state[instrument_id]["last"] = tick["last"]
+        market_state[instrument_id]["fair_value"] = round(
+            (tick["bid"] + tick["ask"]) / 2, 4
+        )
+    elif asset_type == "BOND":
+        market_state[instrument_id]["yield"] = tick["yield"]
+        market_state[instrument_id]["fair_value"] = round(
+            calculate_bond_fair_value(
+                market_state[instrument_id]["face_value"],
+                market_state[instrument_id]["coupon_rate"],
+                market_state[instrument_id]["maturity_years"],
+                market_state[instrument_id]["payments_per_year"],
+                tick["yield"],
+            ),
+            4,
+        )
+    elif asset_type == "FX_FORWARD":
+        market_state[instrument_id]["spot"] = tick["spot"]
+        market_state[instrument_id]["domestic_rate"] = tick["domestic_rate"]
+        market_state[instrument_id]["foreign_rate"] = tick["foreign_rate"]
+        market_state[instrument_id]["fair_value"] = round(
+            (
+                tick["spot"]
+                * (
+                    1
+                    + tick["domestic_rate"] * market_state[instrument_id]["tenor_years"]
+                )
+                / (
+                    1
+                    + tick["foreign_rate"] * market_state[instrument_id]["tenor_years"]
+                )
+            ),
+            4,
+        )
+    else:
+        return None
 
-            market_state[instrument_id]["fair_value"] = round(
-                calculate_bond_fair_value(
-                    market_state[instrument_id]["face_value"],
-                    market_state[instrument_id]["coupon_rate"],
-                    market_state[instrument_id]["maturity_years"],
-                    market_state[instrument_id]["payments_per_year"],
-                    tick["yield"],
-                ),
-                4,
-            )
-        elif asset_type == "FX_FORWARD":
-            market_state[instrument_id]["spot"] = tick["spot"]
-            market_state[instrument_id]["domestic_rate"] = tick["domestic_rate"]
-            market_state[instrument_id]["foreign_rate"] = tick["foreign_rate"]
-
-            market_state[instrument_id]["fair_value"] = round(
-                (
-                    tick["spot"]
-                    * (
-                        1
-                        + tick["domestic_rate"]
-                        * market_state[instrument_id]["tenor_years"]
-                    )
-                    / (
-                        1
-                        + tick["foreign_rate"]
-                        * market_state[instrument_id]["tenor_years"]
-                    )
-                ),
-                4,
-            )
-        for q in client_event_queues:
-            q.put(
-                {
-                    "instrument_id": market_state[instrument_id]["instrument_id"],
-                    "fair_value": market_state[instrument_id]["fair_value"],
-                    "currency": market_state[instrument_id]["currency"],
-                    "timestamp": tick["timestamp"],
-                }
-            )
+    return {
+        "instrument_id": market_state[instrument_id]["instrument_id"],
+        "fair_value": market_state[instrument_id]["fair_value"],
+        "currency": market_state[instrument_id]["currency"],
+        "timestamp": tick["timestamp"],
+    }
 
 
 def calculate_bond_fair_value(
@@ -125,10 +134,8 @@ def calculate_bond_fair_value(
     price = 0
     for t in range(1, total_periods + 1):
         cashflow = annual_coupon / payments_per_year
-
         if t == total_periods:
             cashflow += face_value
-
         present_value = cashflow / (1 + yield_rate / payments_per_year) ** t
         price += present_value
     return price
@@ -137,28 +144,27 @@ def calculate_bond_fair_value(
 @app.route("/valuations")
 def get_valuations():
     response.content_type = "application/json"
-    with lock:
-        return market_state.copy()
+    with data_lock:
+        return json.dumps(market_state)
 
 
 @app.route("/valuations/<instrument_id>")
 def get_valuation(instrument_id):
     response.content_type = "application/json"
-    with lock:
+    with data_lock:
         if instrument_id in market_state:
-            return market_state[instrument_id].copy()
-        return {"error": "Instrument not found"}
+            return json.dumps(market_state[instrument_id])
+        return json.dumps({"error": "Instrument not found"})
 
 
 @app.route("/stream")
 def stream():
     response.content_type = "text/event-stream"
 
-    client_q = queue.Queue()
+    with clients_lock:
+        client_q = queue.Queue(maxsize=500)
+        client_event_queues.add(client_q)
     logging.info("New client connected to /stream endpoint")
-
-    with lock:
-        client_event_queues.append(client_q)
 
     def generate_events():
         try:
@@ -168,10 +174,9 @@ def stream():
         except Exception:
             pass
         finally:
-            with lock:
-                if client_q in client_event_queues:
-                    client_event_queues.remove(client_q)
-                    logging.info("Client disconnected from /stream endpoint")
+            with clients_lock:
+                client_event_queues.discard(client_q)
+            logging.info("Client disconnected from /stream endpoint")
 
     return generate_events()
 
@@ -180,7 +185,7 @@ def stream():
 def health():
     global market_data_connection, ticks_received, last_event_timestamp
 
-    with lock:
+    with data_lock:
         return {
             "service": "pricing-service",
             "status": "UP",
