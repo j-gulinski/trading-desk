@@ -56,7 +56,7 @@ def market_data_stream_consumer():
                                 targets = list(client_event_queues)
                             for q in targets:
                                 try:
-                                    q.put_nowait(tick)
+                                    q.put_nowait(pricing_event)
                                 except queue.Full:
                                     logging.debug("Dropped tick for slow client")
 
