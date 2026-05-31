@@ -16,6 +16,17 @@ services:
       timeout: 5s
       retries: 5
 
+  db-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    container_name: db-migrate
+    environment:
+      - DATABASE_MIGRATION_URL=${DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   market-data-service:
     build:
       context: .
@@ -28,8 +39,8 @@ services:
       - "8001:8001"
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
   pricing-service:
     build:
@@ -43,8 +54,8 @@ services:
       - "8002:8002"
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       market-data-service:
         condition: service_started
 
@@ -61,8 +72,8 @@ services:
       - "8003:8003"
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

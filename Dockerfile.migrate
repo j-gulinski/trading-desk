@@ -1,0 +1,11 @@
+FROM python:3.14
+
+WORKDIR /app
+
+COPY alembic.ini .
+COPY models.py .
+COPY db/ db/
+
+RUN pip install alembic sqlalchemy "psycopg"
+
+CMD ["alembic", "upgrade", "head"]
