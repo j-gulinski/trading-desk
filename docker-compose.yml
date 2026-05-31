@@ -1,34 +1,68 @@
 services:
+  postgres:
+    image: postgres:18
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   market-data-service:
     build:
       context: .
       dockerfile: market-data-service/Dockerfile
     container_name: market-data-service
     environment:
-      - TICK_INTERVAL_MS=100
+      - TICK_INTERVAL_MS=${TICK_INTERVAL_MS}
+      - DATABASE_URL=${DATABASE_URL}
     ports:
       - "8001:8001"
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   pricing-service:
     build:
       context: .
       dockerfile: pricing-service/Dockerfile
-    environment:
-      - STREAM_URL=http://market-data-service:8001/stream
     container_name: pricing-service
+    environment:
+      - STREAM_URL=${MARKET_DATA_STREAM_URL}
+      - DATABASE_URL=${DATABASE_URL}
     ports:
       - "8002:8002"
     restart: unless-stopped
     depends_on:
-      - market-data-service
+      postgres:
+        condition: service_healthy
+      market-data-service:
+        condition: service_started
+
   monitoring-service:
     build:
       context: .
       dockerfile: monitoring-service/Dockerfile
-    environment:
-      - MARKET_DATA_SERVICE_HEALTHCHECK_URL=http://market-data-service:8001/health
-      - PRICING_SERVICE_HEALTHCHECK_URL=http://pricing-service:8002/health
     container_name: monitoring-service
+    environment:
+      - MARKET_DATA_SERVICE_HEALTHCHECK_URL=${MARKET_DATA_SERVICE_HEALTHCHECK_URL}
+      - PRICING_SERVICE_HEALTHCHECK_URL=${PRICING_SERVICE_HEALTHCHECK_URL}
+      - DATABASE_URL=${DATABASE_URL}
     ports:
       - "8003:8003"
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

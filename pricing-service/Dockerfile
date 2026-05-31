@@ -9,4 +9,4 @@ EXPOSE 8002
 
 RUN pip install -r requirements.txt
 
-CMD ["python", "app.py"]
+CMD ["python", "-m", "app.main"]

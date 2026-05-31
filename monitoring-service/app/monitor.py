@@ -1,21 +1,11 @@
-import os
 import time
+import json
 import logging
 import threading
 import urllib.request
 import urllib.error
-import json
-from datetime import datetime, timezone
-from wsgiref.simple_server import make_server, WSGIServer
-from socketserver import ThreadingMixIn
-import bottle
-from bottle import route, run, response, ServerAdapter
 from shared import get_iso_timestamp
-
-MARKET_DATA_SERVICE_HEALTHCHECK_URL = os.getenv("MARKET_DATA_SERVICE_HEALTHCHECK_URL")
-PRICING_SERVICE_HEALTHCHECK_URL = os.getenv("PRICING_SERVICE_HEALTHCHECK_URL")
-
-app = bottle.Bottle()
+from app.config import MARKET_DATA_SERVICE_HEALTHCHECK_URL, PRICING_SERVICE_HEALTHCHECK_URL
 
 lock = threading.Lock()
 monitoring_state = {
@@ -33,7 +23,6 @@ def pricing_monitoring_loop():
 
 
 def monitoring_loop(url, service_name):
-    global monitoring_state
     while True:
         logging.debug(f"Checking health of {service_name}...")
         start_time = time.time()
@@ -53,10 +42,7 @@ def monitoring_loop(url, service_name):
                     )
 
                 with lock:
-                    if (
-                        service_status == "UP"
-                        and monitoring_state[service_name].get("status") != "UP"
-                    ):
+                    if service_status == "UP" and monitoring_state[service_name].get("status") != "UP":
                         logging.info(f"{service_name} is now UP")
                     monitoring_state[service_name] = {
                         "status": service_status,
@@ -72,34 +58,3 @@ def monitoring_loop(url, service_name):
                 }
             logging.error(f"Health check failed for {service_name}: {e}")
         time.sleep(1)
-
-
-@app.route("/status")
-def get_system_status():
-    response.content_type = "application/json"
-    with lock:
-        return json.dumps(monitoring_state)
-
-
-@app.route("/health")
-def health():
-    return {"service": "monitoring-service", "status": "UP"}
-
-
-class ThreadedServer(ServerAdapter):
-    def run(self, handler):
-        class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
-            daemon_threads = True
-
-        server = make_server(
-            self.host, self.port, handler, server_class=ThreadingWSGIServer
-        )
-        server.serve_forever()
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    logging.info("Starting Monitoring Service...")
-    threading.Thread(target=market_data_monitoring_loop, daemon=True).start()
-    threading.Thread(target=pricing_monitoring_loop, daemon=True).start()
-    app.run(host="0.0.0.0", port=8003, server=ThreadedServer)
