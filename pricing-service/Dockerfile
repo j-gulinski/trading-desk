@@ -3,7 +3,7 @@ FROM python:3.14
 WORKDIR /app
 
 COPY pricing-service/ .
-COPY shared.py .
+COPY shared/ shared/
 
 EXPOSE 8002
 

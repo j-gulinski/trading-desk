@@ -16,11 +16,11 @@ services:
       timeout: 5s
       retries: 5
 
-  db-migrate:
+  db-migrations:
     build:
       context: .
       dockerfile: Dockerfile.migrate
-    container_name: db-migrate
+    container_name: db-migrations
     environment:
       - DATABASE_MIGRATION_URL=${DATABASE_URL}
     depends_on:
@@ -35,11 +35,12 @@ services:
     environment:
       - TICK_INTERVAL_MS=${TICK_INTERVAL_MS}
       - DATABASE_URL=${DATABASE_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
     ports:
       - "8001:8001"
     restart: unless-stopped
     depends_on:
-      db-migrate:
+      db-migrations:
         condition: service_completed_successfully
 
   pricing-service:
@@ -48,13 +49,14 @@ services:
       dockerfile: pricing-service/Dockerfile
     container_name: pricing-service
     environment:
-      - STREAM_URL=${MARKET_DATA_STREAM_URL}
+      - MARKET_DATA_STREAM_URL=${MARKET_DATA_STREAM_URL}
       - DATABASE_URL=${DATABASE_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
     ports:
       - "8002:8002"
     restart: unless-stopped
     depends_on:
-      db-migrate:
+      db-migrations:
         condition: service_completed_successfully
       market-data-service:
         condition: service_started
@@ -68,11 +70,12 @@ services:
       - MARKET_DATA_SERVICE_HEALTHCHECK_URL=${MARKET_DATA_SERVICE_HEALTHCHECK_URL}
       - PRICING_SERVICE_HEALTHCHECK_URL=${PRICING_SERVICE_HEALTHCHECK_URL}
       - DATABASE_URL=${DATABASE_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
     ports:
       - "8003:8003"
     restart: unless-stopped
     depends_on:
-      db-migrate:
+      db-migrations:
         condition: service_completed_successfully
 
 volumes:

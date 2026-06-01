@@ -2,7 +2,7 @@ FROM python:3.14
 
 WORKDIR /app
 
-COPY shared.py .
+COPY shared/ shared/
 COPY market-data-service/ .
 
 EXPOSE 8001

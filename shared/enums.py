@@ -1,0 +1,54 @@
+from enum import Enum
+
+class AssetClass(str, Enum):
+    EQUITY = "EQUITY"
+    COMMODITY = "COMMODITY"
+    FUTURES = "FUTURES"
+    FX = "FX"
+    BOND = "BOND"
+
+class Side(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+class TradeStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    CLOSED = "CLOSED"
+    CANCELLED = "CANCELLED"
+
+class TradeSource(str, Enum):
+    GENERATED = "GENERATED"
+    MANUAL = "MANUAL"
+    SYSTEM = "SYSTEM"
+
+class AuditEventType(str, Enum):
+    BOOK_CREATED = "BOOK_CREATED"
+    BOOK_UPDATED = "BOOK_UPDATED"
+    BOOK_DELETED = "BOOK_DELETED"
+    TRADE_CREATED = "TRADE_CREATED"
+    TRADE_CLOSED = "TRADE_CLOSED"
+    TRADE_CANCELLED = "TRADE_CANCELLED"
+    ACTION_ACCEPTED = "ACTION_ACCEPTED"
+    VALUATION_WRITTEN = "VALUATION_WRITTEN"
+    STREAM_CONNECTED = "STREAM_CONNECTED"
+    STREAM_DISCONNECTED = "STREAM_DISCONNECTED"
+    WORKER_STARTED = "WORKER_STARTED"
+    WORKER_STOPPED = "WORKER_STOPPED"
+    DB_WRITE_ERROR = "DB_WRITE_ERROR"
+    SNAPSHOT_WRITTEN = "SNAPSHOT_WRITTEN"
+
+class Severity(str, Enum):
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+class CurveType(str, Enum):
+    YIELD = "YIELD"
+    DISCOUNT = "DISCOUNT"
+    FX_FORWARD = "FX_FORWARD"
+
+class SnapshotType(str, Enum):
+    FULL = "FULL"
+    SPOT = "SPOT"
+    CURVE = "CURVE"

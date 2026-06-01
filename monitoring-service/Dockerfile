@@ -3,7 +3,7 @@ FROM python:3.14
 WORKDIR /app
 
 COPY monitoring-service/ .
-COPY shared.py .
+COPY shared/ shared/
 
 EXPOSE 8003
 

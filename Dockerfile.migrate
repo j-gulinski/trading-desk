@@ -3,7 +3,7 @@ FROM python:3.14
 WORKDIR /app
 
 COPY alembic.ini .
-COPY models.py .
+COPY shared/ shared/
 COPY db/ db/
 
 RUN pip install alembic sqlalchemy "psycopg"
