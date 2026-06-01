@@ -3,6 +3,7 @@ import queue
 import logging
 import bottle
 from bottle import response
+
 from app import persistence
 from app.publisher import clients_lock, client_event_queues
 from app.health import get_health
@@ -21,8 +22,8 @@ def stream():
     def generate_events():
         try:
             while True:
-                tick = client_q.get()
-                yield f"data: {json.dumps(tick)}\n\n"
+                message = client_q.get()
+                yield f"event: {message['event']}\ndata: {json.dumps(message['data'])}\n\n"
         except Exception:
             pass
         finally:
@@ -37,17 +38,10 @@ def stream():
 def get_snapshot():
     response.content_type = "application/json"
     with persistence.data_lock:
-        return json.dumps(persistence.snapshot)
-
-
-@app.route("/history/<symbol>")
-def get_history(symbol):
-    response.content_type = "application/json"
-    with persistence.data_lock:
-        q = persistence.queues.get(symbol)
-        if q:
-            return json.dumps(list(q.queue))
-        return json.dumps([])
+        return json.dumps({
+            "spots": persistence.spots,
+            "curves": persistence.curves,
+        })
 
 
 @app.route("/health")

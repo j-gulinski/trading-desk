@@ -1,4 +1,7 @@
-import os
-from shared import INSTRUMENTS, get_iso_timestamp
+from shared.config import TICK_INTERVAL_MS, SNAPSHOT_INTERVAL_MS, LOG_LEVEL
 
-TIME_INTERVAL_MS = int(os.getenv("TIME_INTERVAL_MS", 100))
+SERVICE_NAME = "market-data-service"
+HOST = "0.0.0.0"
+PORT = 8001
+
+SNAPSHOT_INTERVAL_SECONDS = SNAPSHOT_INTERVAL_MS / 1000.0

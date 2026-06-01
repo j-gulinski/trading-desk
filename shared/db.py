@@ -1,21 +1,20 @@
-import time
-import logging
-
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from trading_shared.config import DATABASE_URL
+from shared.config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionFactory = sessionmaker(bind=engine)
+        
+class session_scope:
+    def __enter__(self):
+        self.session = SessionFactory()
+        return self.session
 
-def session_scope():
-    session = SessionFactory()
-    try:
-        yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self.session.commit()
+        else:
+            self.session.rollback()
+        self.session.close()
+        return False

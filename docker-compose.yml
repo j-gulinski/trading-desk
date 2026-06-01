@@ -32,10 +32,7 @@ services:
       context: .
       dockerfile: market-data-service/Dockerfile
     container_name: market-data-service
-    environment:
-      - TICK_INTERVAL_MS=${TICK_INTERVAL_MS}
-      - DATABASE_URL=${DATABASE_URL}
-      - LOG_LEVEL=${LOG_LEVEL}
+    env_file: .env
     ports:
       - "8001:8001"
     restart: unless-stopped
