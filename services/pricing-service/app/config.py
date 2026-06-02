@@ -1,0 +1,7 @@
+from shared.config import MARKET_DATA_STREAM_URL, LOG_LEVEL
+
+SERVICE_NAME = "pricing-service"
+HOST = "0.0.0.0"
+PORT = 8002
+
+TRADE_REFRESH_SECONDS = 2

@@ -2,10 +2,10 @@ FROM python:3.14
 
 WORKDIR /app
 
-COPY monitoring-service/ .
 COPY shared/ shared/
+COPY services/market-data-service/ .
 
-EXPOSE 8003
+EXPOSE 8001
 
 RUN pip install -r requirements.txt
 

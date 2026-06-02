@@ -11,7 +11,7 @@ class Book(Base):
     __tablename__ = "books"
 
     book_id = Column(UUID(as_uuid=True), primary_key=True)
-    name = Column(Text, nullable=False)
+    name = Column(Text, nullable=False, unique=True)
     description = Column(Text, nullable=True)
     expected_asset_class = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, server_default="TRUE")
@@ -40,7 +40,8 @@ class Trade(Base):
     close_price = Column(Numeric, nullable=True)
     close_reason = Column(Text, nullable=True)
     source = Column(Text, nullable=False)
-    client_request_id = Column(Text, nullable=True)
+    client_request_id = Column(Text, nullable=True, unique=True)
+    valuation_finalized = Column(Boolean, nullable=False, server_default="FALSE")
     trade_metadata = Column("metadata", JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)

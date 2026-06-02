@@ -1,10 +1,10 @@
 import queue
 import logging
-from app import persistence
+from app import cache
 
 def publish_valuation(pricing_event):
-    with persistence.clients_lock:
-        targets = list(persistence.client_event_queues)
+    with cache.clients_lock:
+        targets = list(cache.client_event_queues)
     for q in targets:
         try:
             q.put_nowait(pricing_event)

@@ -2,10 +2,10 @@ FROM python:3.14
 
 WORKDIR /app
 
-COPY pricing-service/ .
 COPY shared/ shared/
+COPY services/books-service/ .
 
-EXPOSE 8002
+EXPOSE 8004
 
 RUN pip install -r requirements.txt
 

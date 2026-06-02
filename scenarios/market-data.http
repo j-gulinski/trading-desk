@@ -1,0 +1,7 @@
+@marketData = http://localhost:8001
+
+### health
+GET {{marketData}}/health
+
+### snapshot - current spots (ACME/XAUUSD/ES_FUT/EURUSD) + USD_GOV curve
+GET {{marketData}}/snapshot

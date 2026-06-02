@@ -3,8 +3,10 @@ import threading
 from wsgiref.simple_server import make_server, WSGIServer
 from socketserver import ThreadingMixIn
 from bottle import ServerAdapter
+
 from app.api import app
-from app.monitor import market_data_monitoring_loop, pricing_monitoring_loop
+from app.trade_processor import worker_loop
+from app.config import HOST, PORT, LOG_LEVEL, SERVICE_NAME
 
 
 class ThreadedServer(ServerAdapter):
@@ -17,8 +19,7 @@ class ThreadedServer(ServerAdapter):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    logging.info("Starting Monitoring Service...")
-    threading.Thread(target=market_data_monitoring_loop, daemon=True).start()
-    threading.Thread(target=pricing_monitoring_loop, daemon=True).start()
-    app.run(host="0.0.0.0", port=8003, server=ThreadedServer)
+    logging.basicConfig(level=getattr(logging, (LOG_LEVEL or "INFO").upper(), logging.INFO))
+    logging.info("Starting %s...", SERVICE_NAME)
+    threading.Thread(target=worker_loop, daemon=True).start()
+    app.run(host=HOST, port=PORT, server=ThreadedServer)

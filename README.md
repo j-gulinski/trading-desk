@@ -1,67 +1,99 @@
-# Market Data Streaming System
+# Trading Microservices System
 
 ## 1. System Description
-The Market Data Streaming system is a lightweight, real-time microservices architecture built in Python. It simulates a financial ecosystem where market data (ticks for Equities, Bonds, and FX Forwards) is generated in real-time, consumed by a pricing engine to calculate live fair values, and monitored by a centralized health-checking service.
+A simplified trading/risk stack built in Python. Market data is generated, streamed and persisted; trading books are managed; trades are opened and closed through an internal action queue; active positions are continuously valued (fair value + realized/unrealized PnL) off the live market stream and written to the database; a monitoring service watches everything. PostgreSQL is the single durable store and its schema is created by Alembic migrations.
 
 ## 2. Architecture Description
-The system is composed of three primary microservices:
-*   **Market Data Service (Port 8001)**: Acts as the source of truth for raw market data. It continuously generates randomized ticks for configured financial instruments and broadcasts them to connected clients.
-*   **Pricing Service (Port 8002)**: Subscribes to the Market Data Service. It applies financial models (e.g., discounted cash flow for bonds, interest rate parity for FX forwards) to calculate the real-time fair value of the instruments and re-broadcasts the updated valuations.
-*   **Monitoring Service (Port 8003)**: A watchdog service that continuously polls the health status of both the Market Data and Pricing services, keeping track of their uptime, response times, and connection statuses.
+*   **Market Data Service (8001)**: generates randomized ticks for every catalog instrument, streams them via SSE (`market_tick` + a multi-tenor `USD_GOV` `curve_tick`), and persists spots/curves/snapshots to the database.
+*   **Pricing Service (8002)**: subscribes to the market stream, keeps an in-memory market-state cache, discovers active trades from `Trades`, computes fair value + PnL per asset class, writes `Valuations`, and re-broadcasts `valuation_update` on its own SSE stream.
+*   **Books Service (8004)**: CRUD for trading books (a book = a logical portfolio/desk with an expected asset class).
+*   **Trade Action Service (8008)**: accepts trade intents, queues them, and a background worker writes/closes `Trades` in DB transactions (the concurrency centerpiece).
+*   **Monitoring Service (8003)**: polls every service's `/health` plus an optional DB `SELECT 1` check.
+*   **PostgreSQL + db-migrations**: the durable store; `db-migrations` runs `alembic upgrade head` before the services start.
+*   *Planned (not yet built): Trade Generation (8007), Blotter (8006).*
 
 ## 3. How to Run
-Prerequisites: Docker and Docker Compose installed.
-
-The application must be run using `docker-compose` because the `shared` module is required by all services and must be properly mounted or moved into each service container.
-
-To start the entire system, run the following command in the root of the project:
+Prerequisites: Docker and Docker Compose.
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
-## 4. Endpoints Description
+Migrations run automatically: `db-migrations` waits for Postgres to be healthy, runs `alembic upgrade head`, and the services depend on it completing. Every service gets its config from `.env` (`env_file: .env`).
+
+## 4. Database & Migrations
+Tables: `books`, `trades`, `valuations`, `market_data_spot_prices`, `market_data_curves`, `market_data_snapshots`, `audit_logs`. Money columns are `NUMERIC` and timestamps are `TIMESTAMPTZ`. The schema is built by Alembic (not `create_all`).
+*   `trades.client_request_id` is `UNIQUE` — the idempotency key (a re-sent open cannot create a second trade).
+*   `books.name` is `UNIQUE`.
+*   `trades.metadata` (JSONB) holds the per-instrument pricing terms (e.g. `multiplier`, `tenor_years`, bond coupon/maturity/curve) copied from the instrument catalog at creation, so each trade is self-describing.
+*   `trades.valuation_finalized` (bool) coordinates realized-PnL-on-close: Trade Action sets it `false` on close, Pricing computes realized PnL once and flips it `true`.
+
+## 5. Endpoints Description
 ### Market Data Service (8001)
-*   `GET /stream`: Server-Sent Events (SSE) endpoint broadcasting raw market ticks.
-*   `GET /snapshot`: Returns a JSON snapshot of the current state of all market instruments.
-*   `GET /health`: Returns the health status and the number of generated events.
+*   `GET /stream`: SSE of `market_tick` / `curve_tick` events.
+*   `GET /snapshot`: current spots + the `USD_GOV` curve.
+*   `GET /health`: status + generated-event count.
 
 ### Pricing Service (8002)
-*   `GET /stream`: Server-Sent Events (SSE) endpoint broadcasting calculated valuation updates.
-*   `GET /valuations`: Returns a JSON object containing the latest calculated fair values and states for all tracked instruments.
-*   `GET /valuation/<instrument_id>`: Returns the latest state and valuation for a specific instrument (e.g., `EQ_ACME`).
-*   `GET /health`: Returns the health status, including the connection state to the upstream market data stream.
+*   `GET /valuation-stream`: SSE of `valuation_update` events (fair_value + unrealized/realized/total PnL).
+*   `GET /valuations`: latest computed valuation for every tracked trade (from the cache).
+*   `GET /valuations/<trade_id>`: latest valuation for one trade.
+*   `GET /health`: status + market-data connection state + active-trade count.
+
+### Books Service (8004)
+*   `GET /books`, `GET /books/<id>`, `POST /books`, `PUT /books/<id>`, `DELETE /books/<id>` (soft delete), `GET /health`.
+
+### Trade Action Service (8008)
+*   `POST /trade-actions`: enqueue an `OPEN_TRADE` / `CLOSE_TRADE` intent, returns **202 Accepted** (OPEN also returns the new `trade_id`).
+*   `POST /trade-actions/batch`, `GET /queue/status` (counters), `GET /health`.
 
 ### Monitoring Service (8003)
-*   `GET /status`: Returns a JSON payload with the latest aggregated health metrics and response times for the Market Data and Pricing services.
-*   `GET /health`: Basic health check for the monitoring service itself.
+*   `GET /status`: latest health/response-time per service + DB connectivity.
+*   `GET /health`: self check.
 
-## 5. Inter-service Communication
-*   **Streaming**: The Pricing Service connects to the Market Data Service via a persistent one-way HTTP connection using Server-Sent Events (SSE). It reads the stream line-by-line using standard `urllib.request`.
-*   **Polling**: The Monitoring Service communicates with the other services via periodic asynchronous HTTP GET requests to their `/health` endpoints to evaluate their availability and latency.
+## 6. Trade Lifecycle (the flow)
+`OPEN_TRADE intent -> Trade Action (202 -> queue -> worker validates the book exists + its asset class matches, then inserts Trades ACTIVE) -> Pricing discovers the active trade and values it off the live market -> Valuations + valuation_update`. On `CLOSE_TRADE`, Trade Action runs a guarded close, then Pricing finalizes realized PnL (unrealized -> 0). Execution prices are taken from the live market (BUY fills at the ask, SELL/close at the bid).
 
-## 6. Streaming Mechanism
-The streaming mechanism is implemented using Server-Sent Events (SSE). 
-*   In Bottle, this is achieved by returning a Python generator function (e.g., `yield f"data: {json.dumps(tick)}\n\n"`) from the route handler.
-*   When a client connects to a `/stream` endpoint, a new `queue.Queue()` is created and appended to a globally shared list of client queues. Background threads push new events into these queues, and the generator yields them to the open HTTP socket, keeping the connection alive indefinitely.
+## 7. Streaming Mechanism
+Server-Sent Events, same shape as before: route handlers return a generator that `yield`s `event: <type>\ndata: {json}\n\n` (blank-line terminated). Each connected client gets its own `queue.Queue`; background threads push events into them. Market Data emits `market_tick`/`curve_tick`; Pricing emits `valuation_update`. The WSGI server uses `ThreadingMixIn` so a long-lived `/stream` never blocks `/health`.
 
-## 7. Concurrency Mechanism
-The project uses standard OS threads to achieve concurrency:
-*   **Web Server Concurrency**: The built-in WSGI server is wrapped with Python's `ThreadingMixIn`, allowing it to handle each incoming HTTP request (and long-lived SSE connection) in a separate thread.
-*   **Background Tasks**: Dedicated daemon threads are spawned on startup (`threading.Thread(..., daemon=True).start()`) to handle continuous background loops (e.g., generating market data, consuming SSE streams, polling health checks).
-*   **Thread Safety**: A `threading.Lock()` is heavily utilized across all services to protect shared state (like instrument dictionaries, metric counters, and client queue lists) from race conditions and concurrent mutation errors.
+## 8. Concurrency Mechanism
+*   **Web server**: built-in WSGI server wrapped with `ThreadingMixIn`; each request (and SSE connection) runs in its own thread.
+*   **Background tasks**: daemon threads for the generators, the market-data consumer, the trade-refresh/finalize loop, and the monitoring pollers.
+*   **Thread safety**: `threading.Lock` guards shared in-memory state (market snapshot, valuation cache, client-queue sets, counters).
+*   **Trade Action — the centerpiece**: a `queue.Queue` decouples fast HTTP intake (202) from DB writes done by a single background worker.
+    *   **Double-close protection**: the close is a guarded `UPDATE ... WHERE trade_id=:id AND status='ACTIVE'` with a `rowcount` check — of two racing closes only one matches a row; the other is a no-op (rejected).
+    *   **Idempotency**: `client_request_id` is `UNIQUE`; a duplicate open raises `IntegrityError` and is skipped, so no second trade is created.
+    *   **Limitation**: `queue.Queue` is in-process, not durable — in-flight intents are lost on restart. Idempotency makes a re-sent intent safe.
 
-## 8. How to Test the System
-You can test the system using `curl` or any web browser:
-1.  **Check System Health**: Run `curl http://localhost:8003/status` to ensure all services are recognized as "UP".
-2.  **Verify Live Valuations**: Run `curl http://localhost:8002/valuations` multiple times to see the fair values updating as new market data arrives.
-3.  **Test Streams**: Run `curl http://localhost:8001/stream` or `curl http://localhost:8002/stream` in your terminal. You should see a continuous flow of JSON objects printing to your screen in real time.
+## 9. Fair Value & PnL per Asset Class
+*   **EQUITY**: `mid * qty`  ·  **COMMODITY**: `spot * qty`
+*   **FUTURES**: `price * multiplier * qty`
+*   **FX**: `forward(spot, r_d, r_f, T) * notional`, `forward = spot * (1 + r_d*T) / (1 + r_f*T)`
+*   **BOND**: PV of future coupons + face discounted off the interpolated `USD_GOV` curve, `* qty`
+*   **PnL**: BUY `unrealized = (current - trade_price) * qty * mult`; SELL flips the sign. Closed trades: `realized` is fixed at the close price and `unrealized = 0, total = realized`.
 
-## 9. Implementation Problems Encountered
+## 10. How to Test the System
+Bring the stack up with `docker compose up --build`, then drive the `scenarios/*.http` files with the VS Code REST Client (or `curl`):
+*   `health.http`, `market-data.http`, `open-and-price-all-assets.http`, `close-and-realized-pnl.http`, `idempotency.http`.
+*   SSE streams can't be rendered by the REST Client — test them with `curl -N http://localhost:8001/stream` and `curl -N http://localhost:8002/valuation-stream`.
+*   `curl http://localhost:8003/status` shows the health of every service + the database.
+
+## 11. Known Limitations / Not Yet Done
+*   **AuditLogs** are not yet written (the table + model exist) — a spec requirement still outstanding.
+*   Trade Action enforces business validation in the worker (book exists + asset-class match); deeper intake-shape validation is still minimal (POC).
+*   Structured logging still uses stdlib `logging` rather than `structlog`.
+*   Trade Generation and Blotter services are not implemented yet (Monitoring shows them DOWN until they exist).
+
+## 12. Implementation Problems Encountered
 - overcoming initial lack of knowledge of python threading - (GIL, threads, multiprocessing)
 - no parallel threads in single process - deamon processes for continous tasks
+- `postgres:18` rejects a volume mounted at the data root - mount the parent `/var/lib/postgresql` on a clean volume
+- alembic could not see the models/`DATABASE_URL` inside the migrate container - fixed env.py import path + `COPY shared/ shared/`
+- `Decimal` is not JSON-serializable - custom encoder (serialize as string to keep precision); money stays `NUMERIC`
+- same PnL formula for BUY and SELL is the #1 domain bug - the short side has the opposite sign
 
-## 10. Fixed concurrency potential problems
+## 13. Fixed Concurrency Potential Problems
 - scalling consumers with one single lock
 	- everything locked until all events added to queue
 	- data lock time linearly connected with number of consumers, locked other endpoints eg: snapshot
@@ -80,4 +112,7 @@ You can test the system using `curl` or any web browser:
 - slow consumer - overflow potential
     - add max size for event queues, dropping events when client is slow
 - lock could block new clients from connecting
-    - client lock only for making snapshot snapshot, released for sending events 
+    - client lock only for making snapshot snapshot, released for sending events
+- double-close race (Trade Action)
+    - two intents closing the same position could both succeed
+    - guarded `UPDATE ... WHERE status='ACTIVE'` + `rowcount` check so only one wins

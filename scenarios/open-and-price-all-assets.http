@@ -1,0 +1,121 @@
+###############################################################################
+# Scenario: open one trade per asset class and watch EACH get priced
+# EQUITY/COMMODITY/FUTURES/FX price off market_tick; BOND off the USD_GOV curve.
+# A book's expected_asset_class must match the trade, so we create one book per
+# class. We query each trade by id (no global list). Wait ~3s before the GETs.
+###############################################################################
+
+@marketData = http://localhost:8001
+@books      = http://localhost:8004
+@actions    = http://localhost:8008
+@pricing    = http://localhost:8002
+
+### Books - one per asset class (expected_asset_class must match the trade)
+# @name bookEq
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "EQUITY_{{$timestamp}}", "expected_asset_class": "EQUITY" }
+###
+# @name bookCo
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "COMMODITY_{{$timestamp}}", "expected_asset_class": "COMMODITY" }
+###
+# @name bookFu
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "FUTURES_{{$timestamp}}", "expected_asset_class": "FUTURES" }
+###
+# @name bookFx
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "FX_{{$timestamp}}", "expected_asset_class": "FX" }
+###
+# @name bookBo
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "BOND_{{$timestamp}}", "expected_asset_class": "BOND" }
+
+###
+@eqBook = {{bookEq.response.body.$.book_id}}
+@coBook = {{bookCo.response.body.$.book_id}}
+@fuBook = {{bookFu.response.body.$.book_id}}
+@fxBook = {{bookFx.response.body.$.book_id}}
+@boBook = {{bookBo.response.body.$.book_id}}
+
+### Live market to fill the spot orders
+# @name snap
+GET {{marketData}}/snapshot
+
+###
+@acme = {{snap.response.body.$.spots.ACME.ask}}
+@xau  = {{snap.response.body.$.spots.XAUUSD.last}}
+@es   = {{snap.response.body.$.spots.ES_FUT.last}}
+@eur  = {{snap.response.body.$.spots.EURUSD.spot}}
+
+### EQUITY   - fair_value = price x qty
+# @name openEq
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "OPEN_TRADE", "client_request_id": "eq-{{$timestamp}}", "book_id": "{{eqBook}}", "asset_class": "EQUITY", "symbol": "ACME", "side": "BUY", "quantity": 100, "trade_price": {{acme}} }
+###
+@eqId = {{openEq.response.body.$.trade_id}}
+
+### COMMODITY - fair_value = spot x qty
+# @name openCo
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "OPEN_TRADE", "client_request_id": "co-{{$timestamp}}", "book_id": "{{coBook}}", "asset_class": "COMMODITY", "symbol": "XAUUSD", "side": "BUY", "quantity": 10, "trade_price": {{xau}} }
+###
+@coId = {{openCo.response.body.$.trade_id}}
+
+### FUTURES   - fair_value = price x multiplier(50) x qty
+# @name openFu
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "OPEN_TRADE", "client_request_id": "fu-{{$timestamp}}", "book_id": "{{fuBook}}", "asset_class": "FUTURES", "symbol": "ES_FUT", "side": "BUY", "quantity": 2, "trade_price": {{es}} }
+###
+@fuId = {{openFu.response.body.$.trade_id}}
+
+### FX        - fair_value = forward(spot, rd, rf, T) x notional
+# @name openFx
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "OPEN_TRADE", "client_request_id": "fx-{{$timestamp}}", "book_id": "{{fxBook}}", "asset_class": "FX", "symbol": "EURUSD", "side": "BUY", "quantity": 100000, "trade_price": {{eur}} }
+###
+@fxId = {{openFx.response.body.$.trade_id}}
+
+### BOND      - fair_value = PV of cashflows off the USD_GOV curve x qty
+# @name openBo
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "OPEN_TRADE", "client_request_id": "bo-{{$timestamp}}", "book_id": "{{boBook}}", "asset_class": "BOND", "symbol": "GOVT_5Y", "side": "BUY", "quantity": 10, "trade_price": 1000 }
+###
+@boId = {{openBo.response.body.$.trade_id}}
+
+### --- wait ~3s (incl. a curve_tick for the bond) ---
+
+### EQUITY valuation
+GET {{pricing}}/valuations/{{eqId}}
+
+### COMMODITY valuation
+GET {{pricing}}/valuations/{{coId}}
+
+### FUTURES valuation (note the x50 multiplier in fair_value)
+GET {{pricing}}/valuations/{{fuId}}
+
+### FX valuation (forward-based)
+GET {{pricing}}/valuations/{{fxId}}
+
+### BOND valuation (priced off the curve)
+GET {{pricing}}/valuations/{{boId}}

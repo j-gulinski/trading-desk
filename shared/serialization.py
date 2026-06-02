@@ -8,7 +8,7 @@ from enum import Enum
 class TradingJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
-            return float(obj)
+            return str(obj)
         if isinstance(obj, (datetime.datetime, datetime.date)):
             return obj.isoformat()
         if isinstance(obj, uuid.UUID):
@@ -27,7 +27,7 @@ def model_to_dict(model_instance) -> dict:
     for col in model_instance.__table__.columns:
         val = getattr(model_instance, col.name)
         if isinstance(val, Decimal):
-            val = float(val)
+            val = str(val)
         elif isinstance(val, (datetime.datetime, datetime.date)):
             val = val.isoformat()
         elif isinstance(val, uuid.UUID):

@@ -1,0 +1,25 @@
+###############################################################################
+# Scenario: service health
+# Every running service answers /health.
+###############################################################################
+
+@marketData = http://localhost:8001
+@pricing    = http://localhost:8002
+@monitoring = http://localhost:8003
+@books      = http://localhost:8004
+@actions    = http://localhost:8008
+
+### market-data-service
+GET {{marketData}}/health
+
+### pricing-service
+GET {{pricing}}/health
+
+### books-service
+GET {{books}}/health
+
+### trade-action-service
+GET {{actions}}/health
+
+### monitoring-service
+GET {{monitoring}}/status

@@ -30,7 +30,7 @@ services:
   market-data-service:
     build:
       context: .
-      dockerfile: market-data-service/Dockerfile
+      dockerfile: services/market-data-service/Dockerfile
     container_name: market-data-service
     env_file: .env
     ports:
@@ -43,12 +43,9 @@ services:
   pricing-service:
     build:
       context: .
-      dockerfile: pricing-service/Dockerfile
+      dockerfile: services/pricing-service/Dockerfile
     container_name: pricing-service
-    environment:
-      - MARKET_DATA_STREAM_URL=${MARKET_DATA_STREAM_URL}
-      - DATABASE_URL=${DATABASE_URL}
-      - LOG_LEVEL=${LOG_LEVEL}
+    env_file: .env
     ports:
       - "8002:8002"
     restart: unless-stopped
@@ -61,15 +58,37 @@ services:
   monitoring-service:
     build:
       context: .
-      dockerfile: monitoring-service/Dockerfile
+      dockerfile: services/monitoring-service/Dockerfile
     container_name: monitoring-service
-    environment:
-      - MARKET_DATA_SERVICE_HEALTHCHECK_URL=${MARKET_DATA_SERVICE_HEALTHCHECK_URL}
-      - PRICING_SERVICE_HEALTHCHECK_URL=${PRICING_SERVICE_HEALTHCHECK_URL}
-      - DATABASE_URL=${DATABASE_URL}
-      - LOG_LEVEL=${LOG_LEVEL}
+    env_file: .env
     ports:
       - "8003:8003"
+    restart: unless-stopped
+    depends_on:
+      db-migrations:
+        condition: service_completed_successfully
+
+  books-service:
+    build:
+      context: .
+      dockerfile: services/books-service/Dockerfile
+    container_name: books-service
+    env_file: .env
+    ports:
+      - "8004:8004"
+    restart: unless-stopped
+    depends_on:
+      db-migrations:
+        condition: service_completed_successfully
+
+  trade-action-service:
+    build:
+      context: .
+      dockerfile: services/trade-action-service/Dockerfile
+    container_name: trade-action-service
+    env_file: .env
+    ports:
+      - "8008:8008"
     restart: unless-stopped
     depends_on:
       db-migrations:
