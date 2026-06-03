@@ -1,5 +1,6 @@
 import time
 import logging
+from decimal import Decimal
 
 from app import cache
 from app.pnl import compute_pnl
@@ -45,8 +46,8 @@ def _current_price_and_mult(trade):
         price = spot.get("mid") or spot.get("last") or spot.get("spot")
         if price is None:
             return None, None
-        multiplier = meta.get("multiplier", 1) if asset_class == "FUTURES" else 1
-        return price, multiplier
+        multiplier = int(meta.get("multiplier", 1)) if asset_class == "FUTURES" else 1
+        return Decimal(str(price)), multiplier
 
     if asset_class == "FX":
         spot = cache.get_spot(trade["symbol"])
@@ -57,13 +58,13 @@ def _current_price_and_mult(trade):
         rf = spot.get("foreign_rate", 0.0)
         T = meta.get("tenor_years", 1.0)
         forward = s * (1 + rd * T) / (1 + rf * T)
-        return forward, 1
+        return Decimal(str(forward)), 1
 
     if asset_class == "BOND":
         curve = cache.get_curve(meta.get("curve", "USD_GOV"))
         if not curve:
             return None, None
-        return _bond_pv(meta, curve), 1
+        return Decimal(str(_bond_pv(meta, curve))), 1
 
     return None, None
 
@@ -72,7 +73,7 @@ def value_trade(trade):
     price, multiplier = _current_price_and_mult(trade)
     if price is None:
         return None
-    quantity = trade["quantity"]
+    quantity = trade["quantity"]  # Decimal
     fair_value = price * quantity * multiplier
     unrealized, realized, total = compute_pnl(
         trade["side"], price, trade["trade_price"], quantity, multiplier
@@ -83,13 +84,13 @@ def value_trade(trade):
         "asset_class": trade["asset_class"],
         "symbol": trade["symbol"],
         "currency": trade["currency"],
-        "fair_value": round(fair_value, 4),
-        "market_value": round(fair_value, 4),
-        "unrealized_pnl": round(unrealized, 4),
-        "realized_pnl": round(realized, 4),
-        "total_pnl": round(total, 4),
+        "fair_value": fair_value,
+        "market_value": fair_value,
+        "unrealized_pnl": unrealized,
+        "realized_pnl": realized,
+        "total_pnl": total,
         "valuation_time": get_iso_timestamp(),
-        "valuation_payload": {"current_price": round(price, 6), "multiplier": multiplier},
+        "valuation_payload": {"current_price": str(price), "multiplier": multiplier},
     }
 
 

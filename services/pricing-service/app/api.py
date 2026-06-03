@@ -1,4 +1,3 @@
-import json
 import queue
 import logging
 import bottle
@@ -6,6 +5,7 @@ from bottle import response
 
 from app import cache
 from app.config import SERVICE_NAME
+from shared.serialization import to_json
 
 app = bottle.Bottle()
 
@@ -13,7 +13,7 @@ app = bottle.Bottle()
 @app.route("/valuations")
 def get_valuations():
     response.content_type = "application/json"
-    return json.dumps(cache.all_valuations())
+    return to_json(cache.all_valuations())
 
 
 @app.route("/valuations/<trade_id>")
@@ -22,8 +22,8 @@ def get_valuation(trade_id):
     valuation = cache.get_valuation(trade_id)
     if valuation is None:
         response.status = 404
-        return json.dumps({"error": "valuation not found", "trade_id": trade_id})
-    return json.dumps(valuation)
+        return to_json({"error": "valuation not found", "trade_id": trade_id})
+    return to_json(valuation)
 
 
 @app.route("/valuation-stream")
@@ -38,7 +38,7 @@ def valuation_stream():
         try:
             while True:
                 event = client_q.get()
-                yield f"event: valuation_update\ndata: {json.dumps(event)}\n\n"
+                yield f"event: valuation_update\ndata: {to_json(event)}\n\n"
         except Exception:
             pass
         finally:

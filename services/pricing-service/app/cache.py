@@ -1,6 +1,7 @@
 import uuid
 import logging
 import threading
+from decimal import Decimal
 
 from shared.db import session_scope
 from shared.models import Trade, Valuation
@@ -77,8 +78,8 @@ def refresh_active_trades():
                 "asset_class": t.asset_class,
                 "symbol": t.symbol,
                 "side": t.side,
-                "quantity": float(t.quantity),
-                "trade_price": float(t.trade_price),
+                "quantity": t.quantity,
+                "trade_price": t.trade_price,
                 "currency": t.trade_currency,
                 "metadata": t.trade_metadata or {},
             }
@@ -122,10 +123,10 @@ def finalize_closed_trades():
             .all()
         )
         for t in rows:
-            qty = float(t.quantity)
-            trade_price = float(t.trade_price)
-            close_price = float(t.close_price) if t.close_price is not None else trade_price
-            multiplier = (t.trade_metadata or {}).get("multiplier", 1)
+            qty = t.quantity
+            trade_price = t.trade_price
+            close_price = t.close_price if t.close_price is not None else trade_price
+            multiplier = int((t.trade_metadata or {}).get("multiplier", 1))
             if t.side == "SELL":
                 realized = (trade_price - close_price) * qty * multiplier
             else:
@@ -138,13 +139,13 @@ def finalize_closed_trades():
                 "asset_class": t.asset_class,
                 "symbol": t.symbol,
                 "currency": t.trade_currency,
-                "fair_value": round(fair_value, 4),
-                "market_value": round(fair_value, 4),
-                "unrealized_pnl": 0.0,
-                "realized_pnl": round(realized, 4),
-                "total_pnl": round(realized, 4),
+                "fair_value": fair_value,
+                "market_value": fair_value,
+                "unrealized_pnl": Decimal("0"),
+                "realized_pnl": realized,
+                "total_pnl": realized,
                 "valuation_time": get_iso_timestamp(),
-                "valuation_payload": {"close_price": close_price, "multiplier": multiplier, "final": True},
+                "valuation_payload": {"close_price": str(close_price), "multiplier": multiplier, "final": True},
             }
             session.add(Valuation(
                 valuation_id=uuid.uuid4(),
@@ -152,11 +153,11 @@ def finalize_closed_trades():
                 book_id=t.book_id,
                 asset_class=t.asset_class,
                 valuation_time=utcnow(),
-                fair_value=valuation["fair_value"],
-                market_value=valuation["market_value"],
-                unrealized_pnl=0,
-                realized_pnl=valuation["realized_pnl"],
-                total_pnl=valuation["total_pnl"],
+                fair_value=fair_value,
+                market_value=fair_value,
+                unrealized_pnl=Decimal("0"),
+                realized_pnl=realized,
+                total_pnl=realized,
                 currency=t.trade_currency,
                 valuation_payload=valuation["valuation_payload"],
                 created_at=utcnow(),

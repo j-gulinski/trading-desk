@@ -57,4 +57,3 @@ def worker_loop():
             logging.exception("Failed to process intent")
         finally:
             action_queue.incr("processed")
-            action_queue.intents.task_done()
