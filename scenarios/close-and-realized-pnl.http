@@ -38,7 +38,7 @@ Content-Type: application/json
 ###
 @tradeId = {{openTrade.response.body.$.trade_id}}
 
-### --- wait ~2s --- BEFORE close: unrealized live, realized 0
+### BEFORE close: unrealized live, realized 0
 GET {{pricing}}/valuations/{{tradeId}}
 
 
@@ -59,8 +59,6 @@ Content-Type: application/json
 
 { "action_type": "CLOSE_TRADE", "client_request_id": "close-{{$timestamp}}", "trade_id": "{{tradeId}}", "close_price": {{bid}}, "close_reason": "RANDOM_TRADE_OUT" }
 
-### --- wait ~3s for pricing to finalize --- AFTER close: unrealized=0, realized set, total=realized
+### Valuation
 GET {{pricing}}/valuations/{{tradeId}}
 
-### Cleanup
-DELETE {{books}}/books/{{bookId}}
