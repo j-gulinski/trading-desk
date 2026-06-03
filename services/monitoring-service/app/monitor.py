@@ -6,7 +6,7 @@ import urllib.request
 import urllib.error
 
 from shared.functions import get_iso_timestamp
-from app.config import TARGETS, POLL_INTERVAL_SECONDS, DB_CHECK_ENABLED, SERVICE_NAME
+from app.config import TARGETS, POLL_INTERVAL_SECONDS, SERVICE_NAME
 
 lock = threading.Lock()
 state = {SERVICE_NAME: {"status": "UP"}}

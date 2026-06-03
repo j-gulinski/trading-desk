@@ -3,18 +3,18 @@ import uuid
 from shared.db import session_scope
 from shared.models import Book
 from shared.functions import utcnow
-from shared.serialization import model_to_dict
+from app.schemas import book_to_dict
 
 
 def list_books():
     with session_scope() as session:
-        return [model_to_dict(b) for b in session.query(Book).order_by(Book.created_at).all()]
+        return [book_to_dict(b) for b in session.query(Book).order_by(Book.created_at).all()]
 
 
 def get_book(book_id):
     with session_scope() as session:
         book = session.get(Book, uuid.UUID(book_id))
-        return model_to_dict(book) if book else None
+        return book_to_dict(book) if book else None
 
 
 def create_book(body):
@@ -31,7 +31,7 @@ def create_book(body):
         )
         session.add(book)
         session.flush()
-        return model_to_dict(book)
+        return book_to_dict(book)
 
 
 def update_book(book_id, body):
@@ -44,7 +44,7 @@ def update_book(book_id, body):
                 setattr(book, field, body[field])
         book.updated_at = utcnow()
         session.flush()
-        return model_to_dict(book)
+        return book_to_dict(book)
 
 
 def deactivate_book(book_id):

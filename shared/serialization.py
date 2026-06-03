@@ -5,34 +5,16 @@ from decimal import Decimal
 from enum import Enum
 
 
-class TradingJSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            return str(obj)
-        if isinstance(obj, (datetime.datetime, datetime.date)):
-            return obj.isoformat()
-        if isinstance(obj, uuid.UUID):
-            return str(obj)
-        if isinstance(obj, Enum):
-            return obj.value
-        return super().default(obj)
-
-
 def to_json(obj) -> str:
-    return json.dumps(obj, cls=TradingJSONEncoder)
+    def convert(o):
+        if isinstance(o, Decimal):
+            return str(o)
+        if isinstance(o, (datetime.datetime, datetime.date)):
+            return o.isoformat()
+        if isinstance(o, uuid.UUID):
+            return str(o)
+        if isinstance(o, Enum):
+            return o.value
+        raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
 
-
-def model_to_dict(model_instance) -> dict:
-    result = {}
-    for col in model_instance.__table__.columns:
-        val = getattr(model_instance, col.name)
-        if isinstance(val, Decimal):
-            val = str(val)
-        elif isinstance(val, (datetime.datetime, datetime.date)):
-            val = val.isoformat()
-        elif isinstance(val, uuid.UUID):
-            val = str(val)
-        elif isinstance(val, Enum):
-            val = val.value
-        result[col.name] = val
-    return result
+    return json.dumps(obj, default=convert)

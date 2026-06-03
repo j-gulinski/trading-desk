@@ -1,9 +1,9 @@
-import json
 import bottle
 from bottle import request, response
 
 from app import repository
 from app.config import SERVICE_NAME
+from shared.serialization import to_json
 
 app = bottle.Bottle()
 
@@ -11,7 +11,7 @@ app = bottle.Bottle()
 def _json(data, status=200):
     response.status = status
     response.content_type = "application/json"
-    return json.dumps(data)
+    return to_json(data)
 
 
 @app.route("/health")
