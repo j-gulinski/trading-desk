@@ -9,6 +9,7 @@ from app.config import MARKET_DATA_STREAM_URL
 from app.valuation_engine import value_symbol, value_curve
 from app.valuation_publisher import publish_valuation
 
+market_data_connection = "DISCONNECTED"
 
 def _handle(event_type, tick):
     with cache.data_lock:

@@ -1,0 +1,106 @@
+###############################################################################
+# Scenario: the blotter read side (Trades + live valuation cache + DB history)
+#
+# Open a trade, then read it back through the blotter every way the UI would:
+#   - /books/summary       per-book active count + aggregated PnL (cache-sourced)
+#   - /trades              list + filters, each row carrying live PnL from cache
+#   - /trades/<id>         trade + latest_valuation (cache) + valuation_history
+#                          (DB) + audit_logs (DB)
+#   - /trades/<id>/valuations   history straight from the Valuations table
+#   - /trades/<id>/audit-logs   audit rows from AuditLogs
+# Then close it and re-read: status flips to CLOSED and realized PnL appears.
+#
+# Needs the full stack (market-data, pricing, books, trade-action, blotter).
+# Send top-to-bottom; wait ~3s where noted so a valuation can stream in.
+###############################################################################
+
+@marketData = http://localhost:8001
+@books      = http://localhost:8004
+@actions    = http://localhost:8008
+@blotter    = http://localhost:8006
+
+### blotter is up (shows cached_trades / cached_valuations)
+GET {{blotter}}/health
+
+### Book
+# @name createBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "BLOTTER_DEMO_{{$timestamp}}", "expected_asset_class": "EQUITY" }
+
+###
+@bookId = {{createBook.response.body.$.book_id}}
+
+### Live market (BUY fills at the ask)
+# @name snap
+GET {{marketData}}/snapshot
+
+###
+@ask = {{snap.response.body.$.spots.ACME.ask}}
+@bid = {{snap.response.body.$.spots.ACME.bid}}
+
+### Open a BUY at the live ask
+# @name openTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "OPEN_TRADE", "client_request_id": "blotter-open-{{$timestamp}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "ACME", "side": "BUY", "quantity": 100, "trade_price": {{ask}} }
+
+###
+@tradeId = {{openTrade.response.body.$.trade_id}}
+
+# ----- wait ~3s: pricing values the trade, blotter caches the valuation_update
+
+### Per-book summary: active_trades=1, unrealized PnL live from the cache
+GET {{blotter}}/books/summary
+
+### List live (ACTIVE) trades from the cache (each row has latest_valuation, source: valuation-stream)
+GET {{blotter}}/trades
+
+### Filter: book + asset_class + status compose into one indexed query
+GET {{blotter}}/trades?book_id={{bookId}}&asset_class=EQUITY&status=ACTIVE
+
+### Filter by symbol only
+GET {{blotter}}/trades?symbol=ACME
+
+### Filter that should be empty (wrong status) -> []
+GET {{blotter}}/trades?book_id={{bookId}}&status=CLOSED
+
+### Trade detail: trade + latest_valuation (cache) + valuation_history (DB) + audit_logs (DB)
+GET {{blotter}}/trades/{{tradeId}}
+
+### Valuation history straight from the Valuations table (grows over time)
+GET {{blotter}}/trades/{{tradeId}}/valuations
+
+### Audit logs for the trade (TRADE_CREATED from trade-action-service)
+GET {{blotter}}/trades/{{tradeId}}/audit-logs
+
+# ============================ CLOSE THE TRADE ============================
+
+### Live market again (close the long at the bid)
+# @name snapClose
+GET {{marketData}}/snapshot
+
+###
+@closeBid = {{snapClose.response.body.$.spots.ACME.bid}}
+
+### Close it
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "blotter-close-{{$timestamp}}", "trade_id": "{{tradeId}}", "close_price": {{closeBid}}, "close_reason": "RANDOM_TRADE_OUT" }
+
+# ----- wait ~3s: pricing finalizes (unrealized->0, realized set); the final
+#       valuation_update lands and the blotter reloads the trade as CLOSED
+
+### Detail again: status=CLOSED, close_price/close_reason set,
+### latest_valuation realized set + unrealized 0
+GET {{blotter}}/trades/{{tradeId}}
+
+### Summary again: active_trades drops to 0, but realized_pnl now reflects the
+### closed trade (realized from the close, unrealized back to 0)
+GET {{blotter}}/books/summary
+
+### The closed trade still lists (filter by CLOSED now returns it)
+GET {{blotter}}/trades?book_id={{bookId}}&status=CLOSED

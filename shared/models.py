@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Numeric, Text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Numeric, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase
 
@@ -23,6 +23,12 @@ class Book(Base):
 
 class Trade(Base):
     __tablename__ = "trades"
+    __table_args__ = (
+        Index("ix_trades_status", "status"),
+        Index("ix_trades_book_id", "book_id"),
+        Index("ix_trades_symbol", "symbol"),
+        Index("ix_trades_asset_class", "asset_class"),
+    )
 
     trade_id = Column(UUID(as_uuid=True), primary_key=True)
     book_id = Column(UUID(as_uuid=True), ForeignKey("books.book_id"), nullable=False)
@@ -49,6 +55,9 @@ class Trade(Base):
 
 class Valuation(Base):
     __tablename__ = "valuations"
+    __table_args__ = (
+        Index("ix_valuations_trade_id_time", "trade_id", "valuation_time"),
+    )
 
     valuation_id = Column(UUID(as_uuid=True), primary_key=True)
     trade_id = Column(UUID(as_uuid=True), ForeignKey("trades.trade_id"), nullable=False)
@@ -113,6 +122,10 @@ class MarketDataSpotPrice(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        # /trades/<id>/audit-logs lookups by entity id
+        Index("ix_audit_logs_entity_id", "entity_id"),
+    )
 
     audit_id = Column(UUID(as_uuid=True), primary_key=True)
     service_name = Column(Text, nullable=False)

@@ -94,5 +94,20 @@ services:
       db-migrations:
         condition: service_completed_successfully
 
+  blotter-service:
+    build:
+      context: .
+      dockerfile: services/blotter-service/Dockerfile
+    container_name: blotter-service
+    env_file: .env
+    ports:
+      - "8006:8006"
+    restart: unless-stopped
+    depends_on:
+      db-migrations:
+        condition: service_completed_successfully
+      pricing-service:
+        condition: service_started
+
 volumes:
   postgres_data:

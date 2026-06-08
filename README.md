@@ -1,118 +1,213 @@
-# Trading Microservices System
+# Trading Microservices
 
-## 1. System Description
-A simplified trading/risk stack built in Python. Market data is generated, streamed and persisted; trading books are managed; trades are opened and closed through an internal action queue; active positions are continuously valued (fair value + realized/unrealized PnL) off the live market stream and written to the database; a monitoring service watches everything. PostgreSQL is the single durable store and its schema is created by Alembic migrations.
+A miniature trading / risk stack: market data is generated and streamed, trades
+are opened and closed, active positions are continuously revalued and their PnL
+published, and a blotter backend serves the data a future UI would show.
+Postgres is the single source of truth; SSE carries the live streams; everything
+runs via Docker Compose.
 
-## 2. Architecture Description
-*   **Market Data Service (8001)**: generates randomized ticks for every catalog instrument, streams them via SSE (`market_tick` + a multi-tenor `USD_GOV` `curve_tick`), and persists spots/curves/snapshots to the database.
-*   **Pricing Service (8002)**: subscribes to the market stream, keeps an in-memory market-state cache, discovers active trades from `Trades`, computes fair value + PnL per asset class, writes `Valuations`, and re-broadcasts `valuation_update` on its own SSE stream.
-*   **Books Service (8004)**: CRUD for trading books (a book = a logical portfolio/desk with an expected asset class).
-*   **Trade Action Service (8008)**: accepts trade intents, queues them, and a background worker writes/closes `Trades` in DB transactions (the concurrency centerpiece).
-*   **Monitoring Service (8003)**: polls every service's `/health` plus an optional DB `SELECT 1` check.
-*   **PostgreSQL + db-migrations**: the durable store; `db-migrations` runs `alembic upgrade head` before the services start.
-*   *Planned (not yet built): Trade Generation (8007), Blotter (8006).*
+> _TODO (your input): one or two sentences in your own words on what you built and why._
 
-## 3. How to Run
-Prerequisites: Docker and Docker Compose.
+---
+
+## Architecture
+
+```
+ Market Data --SSE /stream--> Pricing --SSE /valuation-stream--> Blotter
+   (8001)                      (8002)                             (8006)
+     |                           |                                   |
+     |                           | reads active Trades, writes       | reads Trades +
+     |                           | Valuations                        | Valuations + AuditLogs
+     v                           v                                   v
+                              Postgres  <------------------------------
+                                 ^
+        +------------+-----------+-----------+
+      Books      Trade Action          (Trade Generation)
+      (8004)        (8008)                 (8007, TODO)
+                      ^
+                  OPEN/CLOSE intents
+
+ Monitoring (8003) polls every service's /health.
+```
+
+| Service | Port | Responsibility |
+|---|---|---|
+| market-data-service | 8001 | generate + persist market data; publish `/stream` (SSE) |
+| pricing-service | 8002 | value active Trades, write Valuations, publish `/valuation-stream` (SSE) |
+| monitoring-service | 8003 | poll `/health` of all services |
+| books-service | 8004 | CRUD trading books, validate asset class |
+| blotter-service | 8006 | read side: live cache + DB history for the UI |
+| trade-generation-service | 8007 | **not yet implemented** -- generate OPEN/CLOSE intents |
+| trade-action-service | 8008 | queue + worker that writes/closes Trades |
+
+---
+
+## Running
 
 ```bash
+cp .env.example .env        # then set POSTGRES_PASSWORD etc.
 docker compose up --build
 ```
 
-Migrations run automatically: `db-migrations` waits for Postgres to be healthy, runs `alembic upgrade head`, and the services depend on it completing. Every service gets its config from `.env` (`env_file: .env`).
+Compose starts Postgres, runs Alembic migrations once (`db-migrations` one-shot
+container, gated on the Postgres healthcheck), then starts the services. Schema
+is created by Alembic -- **not** `Base.metadata.create_all`. All timestamps are
+`TIMESTAMPTZ`; money is `NUMERIC`.
 
-## 4. Database & Migrations
-Tables: `books`, `trades`, `valuations`, `market_data_spot_prices`, `market_data_curves`, `market_data_snapshots`, `audit_logs`. Money columns are `NUMERIC` and timestamps are `TIMESTAMPTZ`. The schema is built by Alembic (not `create_all`).
-*   `trades.client_request_id` is `UNIQUE` — the idempotency key (a re-sent open cannot create a second trade).
-*   `books.name` is `UNIQUE`.
-*   `trades.metadata` (JSONB) holds the per-instrument pricing terms (e.g. `multiplier`, `tenor_years`, bond coupon/maturity/curve) copied from the instrument catalog at creation, so each trade is self-describing.
-*   `trades.valuation_finalized` (bool) coordinates realized-PnL-on-close: Trade Action sets it `false` on close, Pricing computes realized PnL once and flips it `true`.
+Migrations only (if needed):
 
-## 5. Endpoints Description
-### Market Data Service (8001)
-*   `GET /stream`: SSE of `market_tick` / `curve_tick` events.
-*   `GET /snapshot`: current spots + the `USD_GOV` curve.
-*   `GET /health`: status + generated-event count.
+```bash
+docker compose run --rm db-migrations
+```
 
-### Pricing Service (8002)
-*   `GET /valuation-stream`: SSE of `valuation_update` events (fair_value + unrealized/realized/total PnL).
-*   `GET /valuations`: latest computed valuation for every tracked trade (from the cache).
-*   `GET /valuations/<trade_id>`: latest valuation for one trade.
-*   `GET /health`: status + market-data connection state + active-trade count.
+### Endpoints
 
-### Books Service (8004)
-*   `GET /books`, `GET /books/<id>`, `POST /books`, `PUT /books/<id>`, `DELETE /books/<id>` (soft delete), `GET /health`.
+- **market-data**: `GET /health`, `GET /snapshot`, `GET /stream`
+- **pricing**: `GET /health`, `GET /valuations`, `GET /valuations/<trade_id>`, `GET /valuation-stream`
+- **monitoring**: `GET /health`, `GET /status`
+- **books**: `GET /health`, `GET/POST /books`, `GET/PUT/DELETE /books/<book_id>`
+- **trade-action**: `GET /health`, `POST /trade-actions`, `POST /trade-actions/batch`, `GET /queue/status`
+- **blotter**: `GET /health`, `GET /books/summary`, `GET /trades`, `GET /trades/<id>`, `GET /trades/<id>/valuations`, `GET /trades/<id>/audit-logs`
 
-### Trade Action Service (8008)
-*   `POST /trade-actions`: enqueue an `OPEN_TRADE` / `CLOSE_TRADE` intent, returns **202 Accepted** (OPEN also returns the new `trade_id`).
-*   `POST /trade-actions/batch`, `GET /queue/status` (counters), `GET /health`.
+---
 
-### Monitoring Service (8003)
-*   `GET /status`: latest health/response-time per service + DB connectivity.
-*   `GET /health`: self check.
+## Database schema (rationale for the key columns)
 
-## 6. Trade Lifecycle (the flow)
-`OPEN_TRADE intent -> Trade Action (202 -> queue -> worker validates the book exists + its asset class matches, then inserts Trades ACTIVE) -> Pricing discovers the active trade and values it off the live market -> Valuations + valuation_update`. On `CLOSE_TRADE`, Trade Action runs a guarded close, then Pricing finalizes realized PnL (unrealized -> 0). Execution prices are taken from the live market (BUY fills at the ask, SELL/close at the bid).
+Tables: `books`, `trades`, `valuations`, `market_data_spot_prices`,
+`market_data_curves`, `market_data_snapshots`, `audit_logs`.
 
-## 7. Streaming Mechanism
-Server-Sent Events, same shape as before: route handlers return a generator that `yield`s `event: <type>\ndata: {json}\n\n` (blank-line terminated). Each connected client gets its own `queue.Queue`; background threads push events into them. Market Data emits `market_tick`/`curve_tick`; Pricing emits `valuation_update`. The WSGI server uses `ThreadingMixIn` so a long-lived `/stream` never blocks `/health`.
+- **`trades.metadata` (JSONB, mapped as `trade_metadata`)** -- per-trade pricing
+  terms copied from the instrument catalog at creation (e.g. `multiplier` for
+  futures, bond coupon/maturity/curve). Trades are self-describing so Pricing
+  never reads the catalog at runtime. JSONB because the shape varies per asset
+  class.
+- **`trades.client_request_id` UNIQUE** -- idempotency key; a re-sent intent
+  can't create a second trade.
+- **money columns are `NUMERIC`** -- never float. `Decimal` is serialised to JSON
+  as a string (the custom encoder), since `json.dumps` can't emit `Decimal`.
+- **`valuations`** keeps `fair_value` + `unrealized/realized/total_pnl`; the final
+  (close) row is tagged `valuation_payload.final = true`.
 
-## 8. Concurrency Mechanism
-*   **Web server**: built-in WSGI server wrapped with `ThreadingMixIn`; each request (and SSE connection) runs in its own thread.
-*   **Background tasks**: daemon threads for the generators, the market-data consumer, the trade-refresh/finalize loop, and the monitoring pollers.
-*   **Thread safety**: `threading.Lock` guards shared in-memory state (market snapshot, valuation cache, client-queue sets, counters).
-*   **Trade Action — the centerpiece**: a `queue.Queue` decouples fast HTTP intake (202) from DB writes done by a single background worker.
-    *   **Double-close protection**: the close is a guarded `UPDATE ... WHERE trade_id=:id AND status='ACTIVE'` with a `rowcount` check — of two racing closes only one matches a row; the other is a no-op (rejected).
-    *   **Idempotency**: `client_request_id` is `UNIQUE`; a duplicate open raises `IntegrityError` and is skipped, so no second trade is created.
-    *   **Limitation**: `queue.Queue` is in-process, not durable — in-flight intents are lost on restart. Idempotency makes a re-sent intent safe.
+> _TODO (your input): expand on any column choices you want to justify._
 
-## 9. Fair Value & PnL per Asset Class
-*   **EQUITY**: `mid * qty`  ·  **COMMODITY**: `spot * qty`
-*   **FUTURES**: `price * multiplier * qty`
-*   **FX**: `forward(spot, r_d, r_f, T) * notional`, `forward = spot * (1 + r_d*T) / (1 + r_f*T)`
-*   **BOND**: PV of future coupons + face discounted off the interpolated `USD_GOV` curve, `* qty`
-*   **PnL**: BUY `unrealized = (current - trade_price) * qty * mult`; SELL flips the sign. Closed trades: `realized` is fixed at the close price and `unrealized = 0, total = realized`.
+---
 
-## 10. How to Test the System
-Bring the stack up with `docker compose up --build`, then drive the `scenarios/*.http` files with the VS Code REST Client (or `curl`):
-*   `health.http`, `market-data.http`, `open-and-price-all-assets.http`, `close-and-realized-pnl.http`, `idempotency.http`.
-*   SSE streams can't be rendered by the REST Client — test them with `curl -N http://localhost:8001/stream` and `curl -N http://localhost:8002/valuation-stream`.
-*   `curl http://localhost:8003/status` shows the health of every service + the database.
+## The end-to-end flow
 
-## 11. Known Limitations / Not Yet Done
-*   **AuditLogs** are not yet written (the table + model exist) — a spec requirement still outstanding.
-*   Trade Action enforces business validation in the worker (book exists + asset-class match); deeper intake-shape validation is still minimal (POC).
-*   Structured logging still uses stdlib `logging` rather than `structlog`.
-*   Trade Generation and Blotter services are not implemented yet (Monitoring shows them DOWN until they exist).
+```
+generated/manual intent -> trade-action (queue+worker) -> Trades (ACTIVE)
+   -> pricing values it on the next market tick -> Valuations (+ valuation_update on SSE)
+   -> blotter caches live PnL; on close, pricing finalizes realized PnL
+```
 
-## 12. Implementation Problems Encountered
-- overcoming initial lack of knowledge of python threading - (GIL, threads, multiprocessing)
-- no parallel threads in single process - deamon processes for continous tasks
-- `postgres:18` rejects a volume mounted at the data root - mount the parent `/var/lib/postgresql` on a clean volume
-- alembic could not see the models/`DATABASE_URL` inside the migrate container - fixed env.py import path + `COPY shared/ shared/`
-- `Decimal` is not JSON-serializable - custom encoder (serialize as string to keep precision); money stays `NUMERIC`
-- same PnL formula for BUY and SELL is the #1 domain bug - the short side has the opposite sign
+1. An `OPEN_TRADE` intent hits trade-action, is queued, gets **202 Accepted**, and
+   a worker validates (book exists, asset class matches, idempotency) and inserts
+   an `ACTIVE` trade in one DB transaction.
+2. Pricing's refresh loop (~2s) discovers the new ACTIVE trade and values it on
+   each market tick, writing `Valuations` and publishing `valuation_update`.
+3. A `CLOSE_TRADE` intent flips the trade to `CLOSED` (guarded UPDATE). Pricing
+   then finalizes: writes one valuation with `unrealized=0`, `realized` set,
+   `total=realized`.
 
-## 13. Fixed Concurrency Potential Problems
-- scalling consumers with one single lock
-	- everything locked until all events added to queue
-	- data lock time linearly connected with number of consumers, locked other endpoints eg: snapshot
-	- solution: 2 locks - data lock only aquired for quick generation of data and updating snapshot - mitigating race conditions
-- shallow copy locking
-	- when returning market data object the lock was aquired for shallow copy with .copy()
-	- might return inconsistant data for instruments mid-update
-	- lock and map whole object (not only copy) to JSON so we keep consistent state
-- healthcheck false fail
-	- when market data generator had a lot of clients, healtheckeck request could be starved resulting in false failed healtcheck
-	- mitigated by reducing time of data lock to calculations and data assignment only
-- new client could connect and miss first tick
-	- fixed by locking creation and adding queue to consumer queues together
-- O(n) client disconnecting
-    - switched client list to set do make disconnecting clients more efficient
-- slow consumer - overflow potential
-    - add max size for event queues, dropping events when client is slow
-- lock could block new clients from connecting
-    - client lock only for making snapshot snapshot, released for sending events
-- double-close race (Trade Action)
-    - two intents closing the same position could both succeed
-    - guarded `UPDATE ... WHERE status='ACTIVE'` + `rowcount` check so only one wins
+---
+
+## SSE
+
+Both `/stream` (market data) and `/valuation-stream` (valuations) are
+Server-Sent Events. Each event is `event: <type>\ndata: <json>\n\n` (blank line
+terminates). Servers run on a `ThreadingMixIn` WSGI server so a long-lived
+`/stream` connection never blocks `/health`. Consumers (Pricing, Blotter)
+reconnect forever -- a refused connection or dropped client never crashes the
+producer.
+
+---
+
+## Trade Action concurrency
+
+A `queue.Queue` decouples fast HTTP intake (202) from DB writes. A single worker
+serialises writes. **Double-close** is prevented in the DB, not just in Python:
+`UPDATE trades SET status='CLOSED' WHERE trade_id=:id AND status='ACTIVE'` and
+the close only "wins" if `rowcount == 1`. The in-process queue is **not durable**
+-- in-flight intents are lost on restart; idempotency (`client_request_id`) makes
+a re-sent intent safe.
+
+---
+
+## Fair value & PnL per asset class
+
+| Asset class | Fair value | Notes |
+|---|---|---|
+| EQUITY / COMMODITY | `price * qty` | price = mid/last/spot |
+| FUTURES | `price * multiplier * qty` | `multiplier` from metadata |
+| FX (forward) | `forward * notional` | `forward = spot*(1+r_d*T)/(1+r_f*T)` |
+| BOND | `sum CF_t / (1+r(t))^t * qty` | rate interpolated off the `USD_GOV` curve |
+
+PnL sign depends on side -- the classic domain bug:
+- BUY: `unrealized = (current - trade) * qty * multiplier`
+- SELL: `unrealized = (trade - current) * qty * multiplier`
+
+Pricing owns **all** PnL math (one place for the signs). Realized PnL is
+finalized on close (`unrealized=0`, `total=realized`).
+
+---
+
+## Blotter design (read side)
+
+The blotter is the CQRS-lite read model. The important distinction (from the
+spec): **live lists/PnL come from the valuation-stream cache; single-trade
+history comes from the DB.**
+
+- **Live working set (`cache.IndexedStore`)** -- holds **only ACTIVE trades**,
+  indexed on `book_id / asset_class / status / symbol`. `query()` intersects the
+  per-field id-sets smallest-first instead of scanning. Bootstrapped from the DB
+  (ACTIVE rows) at startup, kept current off the stream, and **evicted on close**
+  -- so memory is bounded by open positions, not by total trade history.
+- **Live PnL cache** -- latest `valuation_update` per ACTIVE trade, dropped on
+  close.
+- **Closed / historical** trades and their valuations are served from the **DB**
+  (paginated via `limit`/`offset`).
+- **Realized PnL** in `/books/summary` is aggregated **from the DB** (the final
+  valuation rows tagged `valuation_payload.final=true`), so it's correct for
+  closed trades and survives restarts; **unrealized** PnL is summed live from the
+  cache.
+
+Stream projection (`service.handle_valuation`): a `final` valuation evicts the
+trade + drops its live PnL; an active valuation refreshes live PnL and
+lazy-loads the trade into the store the first time it's seen (only if the DB
+confirms it's still ACTIVE -- this also drops stale post-close ticks).
+
+---
+
+## Known limitations / not yet implemented
+
+- **trade-generation-service (8007)** is not implemented -- trades are created by
+  POSTing intents to trade-action directly (see `scenarios/`).
+- **Audit logs** (`audit_logs` table) and **structlog** are not yet wired across
+  services; the blotter's `/trades/<id>/audit-logs` reads the table but it stays
+  empty until producers write to it.
+- `queue.Queue` in trade-action is in-process and non-durable.
+- Blotter live caches are empty for a moment after restart until the first
+  valuations stream in (optional "replay from Valuations" extension would close
+  this gap).
+
+---
+
+## Test scenarios
+
+`.http` files under `scenarios/` (REST Client format), e.g.:
+
+- `health.http` -- every service answers `/health`
+- `open-and-price-all-assets.http` -- one trade per asset class, each priced
+- `close-and-realized-pnl.http` -- close -> realized PnL finalized
+- `idempotency.http` -- idempotent open + double-close guard
+- `blotter.http` -- the full read side: `/books/summary`, `/trades` + filters,
+  `/trades/<id>`, valuation history, audit logs; open -> price -> close
+
+---
+
+## Problems encountered
+
+> _TODO (your input): the spec requires a short write-up of the typical problems
+> you hit (Postgres readiness, Alembic import paths, SQLAlchemy session
+> lifecycle, double-close, Decimal->JSON, PnL sign, blotter stream-vs-DB, ...).
+> Fill this in from your own experience._

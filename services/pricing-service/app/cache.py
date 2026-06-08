@@ -10,7 +10,6 @@ from shared.functions import utcnow, get_iso_timestamp
 data_lock = threading.Lock()
 clients_lock = threading.Lock()
 
-market_data_connection = "DISCONNECTED"
 ticks_received = 0
 last_event_timestamp = None
 client_event_queues = set()
