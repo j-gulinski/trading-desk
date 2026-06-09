@@ -103,8 +103,6 @@ Content-Type: application/json
 ###
 @boId = {{openBo.response.body.$.trade_id}}
 
-### --- wait ~3s (incl. a curve_tick for the bond) ---
-
 ### EQUITY valuation
 GET {{pricing}}/valuations/{{eqId}}
 

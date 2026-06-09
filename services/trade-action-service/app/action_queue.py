@@ -19,9 +19,9 @@ def enqueue(intent):
     incr("accepted")
 
 
-def incr(key):
+def incr(key, n=1):
     with _stats_lock:
-        stats[key] += 1
+        stats[key] += n
 
 
 def queue_status():

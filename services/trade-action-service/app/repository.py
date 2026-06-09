@@ -54,3 +54,19 @@ def close_trade(session, trade_id, close_price, close_reason) -> int:
         )
     )
     return result.rowcount
+
+
+def close_all_trades(session, close_reason) -> int:
+    now = utcnow()
+    result = session.execute(
+        update(Trade)
+        .where(Trade.status == "ACTIVE")
+        .values(
+            status="CLOSED",
+            close_reason=close_reason,
+            closed_at=now,
+            updated_at=now,
+            valuation_finalized=False,
+        )
+    )
+    return result.rowcount

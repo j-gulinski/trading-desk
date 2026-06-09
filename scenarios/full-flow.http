@@ -1,0 +1,59 @@
+###############################################################################
+# Whole stack, driven by Trade Generation Service:
+#   generation -> trade-action -> Trades -> pricing -> Valuations -> blotter
+# Start the generator, let it run, stop it, read the blotter, flatten all.
+# Needs the full stack. Send top-to-bottom; wait where noted.
+###############################################################################
+
+@books      = http://localhost:8004
+@actions    = http://localhost:8008
+@blotter    = http://localhost:8006
+@generation = http://localhost:8007
+
+### generation is up
+GET {{generation}}/health
+
+### default books auto-seeded on boot, one per asset class
+GET {{books}}/books
+
+### start the generation loop
+POST {{generation}}/start
+
+# ----- wait ~5s: generator opens/closes trades every TRADE_GENERATION_INTERVAL_MS
+
+### stop the generation loop
+POST {{generation}}/stop
+
+### counters: opened / closed / failed / open_trades / running=false
+GET {{generation}}/status
+
+# ----- wait ~3s: pricing values the trades, blotter caches the valuations
+
+### per-book active counts + aggregated live PnL
+GET {{blotter}}/books/summary
+
+### active trades, each with latest_valuation from the stream
+GET {{blotter}}/trades?status=ACTIVE
+
+### filter by asset class
+GET {{blotter}}/trades?asset_class=EQUITY
+
+### flatten every active position
+POST {{actions}}/trade-actions/close-all
+Content-Type: application/json
+
+{ "close_reason": "END_OF_DAY_FLATTEN" }
+
+# ----- wait ~3s: pricing finalizes each close (unrealized->0, realized set)
+
+### no active trades left
+GET {{blotter}}/trades?status=ACTIVE
+
+### closed trades now carry realized PnL
+GET {{blotter}}/trades?status=CLOSED
+
+### summary: active=0, realized_pnl reflects the closes
+GET {{blotter}}/books/summary
+
+### trade-action counters: closed jumped by the number flattened
+GET {{actions}}/queue/status

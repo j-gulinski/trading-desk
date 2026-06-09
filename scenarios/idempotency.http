@@ -10,7 +10,6 @@
 #     (guarded UPDATE ... WHERE status='ACTIVE'); the second is a no-op, so the
 #     finalized realized PnL does NOT change.
 #
-# Needs the full stack. Send top-to-bottom; wait ~3s where noted.
 ###############################################################################
 
 @marketData = http://localhost:8001
@@ -59,7 +58,6 @@ Content-Type: application/json
 ###
 @t2 = {{openDup.response.body.$.trade_id}}
 
-### --- wait ~3s --- T1 was created and is priced
 GET {{pricing}}/valuations/{{t1}}
 
 ### T2 (the duplicate) was NOT created -> 404 (idempotency held: one crid = one trade)
@@ -77,7 +75,6 @@ Content-Type: application/json
 
 { "action_type": "CLOSE_TRADE", "client_request_id": "close-{{$timestamp}}", "trade_id": "{{t1}}", "close_price": {{bid}}, "close_reason": "RANDOM_TRADE_OUT" }
 
-### --- wait ~3s --- realized PnL finalized (unrealized=0)
 GET {{pricing}}/valuations/{{t1}}
 
 ### Close T1 AGAIN at an absurd price -> guarded no-op (already CLOSED)
@@ -86,7 +83,6 @@ Content-Type: application/json
 
 { "action_type": "CLOSE_TRADE", "trade_id": "{{t1}}", "close_price": 1 }
 
-### --- wait ~3s --- realized is UNCHANGED (the second close had no effect)
 GET {{pricing}}/valuations/{{t1}}
 
 ### Trade-action counters: `closed` ticked up once, `rejected` for the double-close

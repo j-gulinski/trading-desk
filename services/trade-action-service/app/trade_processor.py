@@ -9,6 +9,13 @@ from app import action_queue, repository
 
 
 def _process(intent):
+    if intent.get("action_type") == "CLOSE_ALL":
+        with session_scope() as session:
+            closed = repository.close_all_trades(session, intent.get("close_reason") or "CLOSE_ALL")
+        action_queue.incr("closed", closed)
+        logging.info("Closed all active trades: %d", closed)
+        return
+
     if intent.get("action_type") == "CLOSE_TRADE":
         with session_scope() as session:
             updated = repository.close_trade(

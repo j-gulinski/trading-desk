@@ -94,6 +94,25 @@ services:
       db-migrations:
         condition: service_completed_successfully
 
+  trade-generation-service:
+    build:
+      context: .
+      dockerfile: services/trade-generation-service/Dockerfile
+    container_name: trade-generation-service
+    env_file: .env
+    ports:
+      - "8007:8007"
+    restart: unless-stopped
+    depends_on:
+      db-migrations:
+        condition: service_completed_successfully
+      books-service:
+        condition: service_started
+      trade-action-service:
+        condition: service_started
+      market-data-service:
+        condition: service_started
+
   blotter-service:
     build:
       context: .
