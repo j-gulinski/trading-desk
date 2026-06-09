@@ -12,6 +12,7 @@ log = get_logger(SERVICE_NAME)
 
 
 VOL = 0.0002
+CURVE_VOL = 0.00005
 
 
 def generate_equity_tick():
@@ -60,7 +61,7 @@ def generate_fx_tick():
 
 
 def generate_curve_tick():
-    rates = [round(anchor + random.uniform(-0.0008, 0.0008), 6) for anchor in persistence.CURVE_ANCHOR]
+    rates = [round(anchor + random.uniform(-CURVE_VOL, CURVE_VOL), 6) for anchor in persistence.CURVE_ANCHOR]
     return {
         "curve_name": "USD_GOV", "curve_type": "YIELD", "currency": "USD",
         "tenors": list(persistence.CURVE_TENORS),
