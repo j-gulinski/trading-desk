@@ -1,11 +1,15 @@
 import uuid
-import logging
 import datetime
 import threading
 
 from shared.functions import utcnow
 from shared.db import session_scope
+from shared.audit import write_audit
+from shared.logging_config import get_logger
 from shared.models import MarketDataSpotPrice, MarketDataCurve, MarketDataSnapshot
+from app.config import SERVICE_NAME
+
+log = get_logger(SERVICE_NAME)
 
 data_lock = threading.Lock()
 ticks_generated = 0
@@ -45,7 +49,9 @@ def persist(kind: str, tick: dict) -> None:
         else:
             _save_spot(tick)
     except Exception:
-        logging.exception("Failed to persist market data event")
+        log.exception("persist_failed", kind=kind)
+        write_audit(SERVICE_NAME, "DB_WRITE_ERROR", "Failed to persist market data event",
+                    entity_type="MARKET_DATA", severity="ERROR")
 
 
 def _save_spot(tick: dict) -> None:
@@ -101,5 +107,9 @@ def save_snapshot() -> None:
                 created_at=utcnow(),
                 payload=payload,
             ))
+            write_audit(SERVICE_NAME, "SNAPSHOT_WRITTEN", "Market data snapshot persisted",
+                        entity_type="MARKET_DATA", payload={"event_id": event_id}, session=session)
     except Exception:
-        logging.exception("Failed to persist market data snapshot")
+        log.exception("snapshot_persist_failed")
+        write_audit(SERVICE_NAME, "DB_WRITE_ERROR", "Failed to persist snapshot",
+                    entity_type="MARKET_DATA", severity="ERROR")

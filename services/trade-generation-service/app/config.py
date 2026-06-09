@@ -5,6 +5,7 @@ from shared.config import (
     MARKET_DATA_SNAPSHOT_URL,
     TRADE_GENERATION_INTERVAL_MS,
     CLOSE_PROBABILITY,
+    TARGET_NOTIONAL,
 )
 
 SERVICE_NAME = "trade-generation-service"

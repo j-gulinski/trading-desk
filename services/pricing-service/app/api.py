@@ -1,12 +1,13 @@
 import queue
-import logging
 import bottle
 from bottle import response
 
 from app import cache
 from app.config import SERVICE_NAME
 from shared.serialization import to_json
+from shared.logging_config import get_logger
 
+log = get_logger(SERVICE_NAME)
 app = bottle.Bottle()
 
 
@@ -32,7 +33,7 @@ def valuation_stream():
     with cache.clients_lock:
         client_q = queue.Queue(maxsize=500)
         cache.client_event_queues.add(client_q)
-    logging.info("New client connected to /valuation-stream")
+    log.info("stream_client_connected")
 
     def generate_events():
         try:
@@ -44,7 +45,7 @@ def valuation_stream():
         finally:
             with cache.clients_lock:
                 cache.client_event_queues.discard(client_q)
-            logging.info("Client disconnected from /valuation-stream")
+            log.info("stream_client_disconnected")
 
     return generate_events()
 

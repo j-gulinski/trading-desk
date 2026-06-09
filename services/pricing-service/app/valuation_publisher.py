@@ -1,6 +1,10 @@
 import queue
-import logging
 from app import cache
+from app.config import SERVICE_NAME
+from shared.logging_config import get_logger
+
+log = get_logger(SERVICE_NAME)
+
 
 def publish_valuation(pricing_event):
     with cache.clients_lock:
@@ -9,4 +13,4 @@ def publish_valuation(pricing_event):
         try:
             q.put_nowait(pricing_event)
         except queue.Full:
-            logging.debug("Dropped tick for slow client")
+            log.debug("client_dropped")

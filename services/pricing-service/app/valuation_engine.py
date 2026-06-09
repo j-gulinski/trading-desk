@@ -1,13 +1,15 @@
 import time
-import logging
 from decimal import Decimal
 
 from app import cache
 from app.pnl import compute_pnl
 from app.valuation_publisher import publish_valuation
-from app.config import TRADE_REFRESH_SECONDS
+from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
 from shared.functions import get_iso_timestamp
 from shared.pricing_math import bond_pv
+from shared.logging_config import get_logger
+
+log = get_logger(SERVICE_NAME)
 
 
 def _current_price_and_mult(trade):
@@ -99,5 +101,5 @@ def trade_refresh_loop():
                 cache.record_valuation(valuation)
                 publish_valuation(valuation)
         except Exception:
-            logging.exception("Trade refresh/finalize failed; retrying")
+            log.exception("refresh_failed")
         time.sleep(TRADE_REFRESH_SECONDS)

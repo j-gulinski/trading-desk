@@ -3,7 +3,14 @@ import uuid
 from shared.db import session_scope
 from shared.models import Book
 from shared.functions import utcnow
+from shared.audit import write_audit
 from app.schemas import book_to_dict
+from app.config import SERVICE_NAME
+
+
+def _audit(session, event_type, book, message):
+    write_audit(SERVICE_NAME, event_type, message,
+                entity_type="BOOK", entity_id=book.book_id, session=session)
 
 
 def list_books():
@@ -31,6 +38,7 @@ def create_book(body):
         )
         session.add(book)
         session.flush()
+        _audit(session, "BOOK_CREATED", book, f"Book {book.name} created")
         return book_to_dict(book)
 
 
@@ -44,6 +52,8 @@ def update_book(book_id, body):
                 setattr(book, field, body[field])
         book.updated_at = utcnow()
         session.flush()
+        event = "BOOK_DELETED" if body.get("is_active") is False else "BOOK_UPDATED"
+        _audit(session, event, book, f"Book {book.name} updated")
         return book_to_dict(book)
 
 

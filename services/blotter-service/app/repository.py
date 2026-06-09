@@ -37,7 +37,7 @@ def get_trade(trade_id: str) -> CachedTrade | None:
 
 
 def list_trades(*, book_id=None, asset_class=None, status=None, symbol=None,
-                limit: int = 100, offset: int = 0) -> list[CachedTrade]:
+                exclude_active=False, limit: int = 100, offset: int = 0) -> list[CachedTrade]:
     with session_scope() as session:
         q = session.query(Trade)
         if book_id is not None:
@@ -46,6 +46,8 @@ def list_trades(*, book_id=None, asset_class=None, status=None, symbol=None,
             q = q.filter(Trade.asset_class == asset_class)
         if status is not None:
             q = q.filter(Trade.status == status)
+        elif exclude_active:
+            q = q.filter(Trade.status != "ACTIVE")
         if symbol is not None:
             q = q.filter(Trade.symbol == symbol)
         rows = (

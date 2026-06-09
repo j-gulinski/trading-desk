@@ -1,7 +1,10 @@
 import queue
-import logging
 import threading
 
+from shared.logging_config import get_logger
+from app.config import SERVICE_NAME
+
+log = get_logger(SERVICE_NAME)
 clients_lock = threading.Lock()
 client_event_queues = set()
 
@@ -14,4 +17,4 @@ def publish_tick(event_type, tick):
         try:
             q.put_nowait(message)
         except queue.Full:
-            logging.debug("Dropped event for slow client")
+            log.debug("client_dropped")

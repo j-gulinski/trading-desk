@@ -1,7 +1,10 @@
-import logging
 from decimal import Decimal
 
 from app import cache, repository
+from app.config import SERVICE_NAME
+from shared.logging_config import get_logger
+
+log = get_logger(SERVICE_NAME)
 
 
 def handle_valuation(valuation: dict) -> None:
@@ -19,7 +22,7 @@ def handle_valuation(valuation: dict) -> None:
         try:
             loaded = repository.get_trade(trade_id)
         except Exception:
-            logging.exception("Failed to lazy-load trade %s", trade_id)
+            log.exception("lazy_load_failed", trade_id=trade_id)
             return
         if loaded is None or loaded.status != "ACTIVE":
             return
@@ -75,12 +78,20 @@ def _live_valuation(trade_id: str) -> dict | None:
 
 def list_trades(*, book_id=None, asset_class=None, status=None, symbol=None,
                 limit=100, offset=0) -> list[dict]:
+    # ACTIVE rows come live from the valuation-stream cache; non-active rows from
+    # the DB. With no status filter we return both (cache active + DB closed).
+    trades = []
     if status in (None, "ACTIVE"):
-        trades = cache.trades.query(
+        trades += cache.trades.query(
             book_id=book_id, asset_class=asset_class, status="ACTIVE", symbol=symbol
         )
-    else:
-        trades = repository.list_trades(
+    if status is None:
+        trades += repository.list_trades(
+            book_id=book_id, asset_class=asset_class, symbol=symbol,
+            exclude_active=True, limit=limit, offset=offset,
+        )
+    elif status != "ACTIVE":
+        trades += repository.list_trades(
             book_id=book_id, asset_class=asset_class, status=status, symbol=symbol,
             limit=limit, offset=offset,
         )

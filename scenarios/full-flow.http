@@ -13,21 +13,15 @@
 ### generation is up
 GET {{generation}}/health
 
-### default books auto-seeded on boot, one per asset class
-GET {{books}}/books
-
 ### start the generation loop
 POST {{generation}}/start
 
-# ----- wait ~5s: generator opens/closes trades every TRADE_GENERATION_INTERVAL_MS
 
 ### stop the generation loop
 POST {{generation}}/stop
 
 ### counters: opened / closed / failed / open_trades / running=false
 GET {{generation}}/status
-
-# ----- wait ~3s: pricing values the trades, blotter caches the valuations
 
 ### per-book active counts + aggregated live PnL
 GET {{blotter}}/books/summary
@@ -38,19 +32,26 @@ GET {{blotter}}/trades?status=ACTIVE
 ### filter by asset class
 GET {{blotter}}/trades?asset_class=EQUITY
 
-### flatten every active position
+### close every active position
 POST {{actions}}/trade-actions/close-all
 Content-Type: application/json
 
-{ "close_reason": "END_OF_DAY_FLATTEN" }
+{ "close_reason": "MANUAL CLOSE" }
 
 # ----- wait ~3s: pricing finalizes each close (unrealized->0, realized set)
 
 ### no active trades left
 GET {{blotter}}/trades?status=ACTIVE
 
+### equity trades
+# @name closedTrades
+GET {{blotter}}/trades?asset_class=EQUITY&status=CLOSED
+
 ### closed trades now carry realized PnL
 GET {{blotter}}/trades?status=CLOSED
+
+###
+GET {{blotter}}/trades/{{closedTrades.response.body.$[0].trade_id}}
 
 ### summary: active=0, realized_pnl reflects the closes
 GET {{blotter}}/books/summary

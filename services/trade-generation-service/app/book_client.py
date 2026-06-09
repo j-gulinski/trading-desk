@@ -1,9 +1,11 @@
 import json
-import logging
 import urllib.request
 
 from shared.catalog import INSTRUMENT_CATALOG
-from app.config import BOOKS_URL
+from shared.logging_config import get_logger
+from app.config import BOOKS_URL, SERVICE_NAME
+
+log = get_logger(SERVICE_NAME)
 
 ASSET_CLASSES = sorted({terms["asset_class"] for terms in INSTRUMENT_CATALOG.values()})
 
@@ -27,5 +29,5 @@ def ensure_books() -> dict:
             created = _request(BOOKS_URL, {"name": f"{asset_class}_DEFAULT",
                                            "expected_asset_class": asset_class})
             books[asset_class] = created["book_id"]
-            logging.info("Created default book %s (%s)", created["book_id"], asset_class)
+            log.info("default_book_created", book_id=created["book_id"], asset_class=asset_class)
     return books

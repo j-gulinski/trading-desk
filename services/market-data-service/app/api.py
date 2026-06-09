@@ -1,13 +1,15 @@
 import json
 import queue
-import logging
 import bottle
 from bottle import response
 
 from app import persistence
 from app.publisher import clients_lock, client_event_queues
 from app.health import get_health
+from app.config import SERVICE_NAME
+from shared.logging_config import get_logger
 
+log = get_logger(SERVICE_NAME)
 app = bottle.Bottle()
 
 
@@ -17,7 +19,7 @@ def stream():
     with clients_lock:
         client_q = queue.Queue(maxsize=500)
         client_event_queues.add(client_q)
-    logging.info("New client connected to /stream endpoint")
+    log.info("stream_client_connected")
 
     def generate_events():
         try:
@@ -29,7 +31,7 @@ def stream():
         finally:
             with clients_lock:
                 client_event_queues.discard(client_q)
-            logging.info("Client disconnected from /stream endpoint")
+            log.info("stream_client_disconnected")
 
     return generate_events()
 

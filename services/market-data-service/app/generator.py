@@ -1,31 +1,34 @@
 import time
 import random
-import logging
 import threading
 
 from app import persistence
-from app.config import TICK_INTERVAL_MS
+from app.config import TICK_INTERVAL_MS, SERVICE_NAME
 from app.publisher import publish_tick
 from shared.functions import get_iso_timestamp
+from shared.logging_config import get_logger
+
+log = get_logger(SERVICE_NAME)
+
+
+VOL = 0.0002
 
 
 def generate_equity_tick():
-    last = persistence.spots["ACME"]
-    mid = max(1.0, last["mid"] + random.uniform(-0.2, 0.2))
-    half_spread = random.uniform(0.03, 0.08)
+    mid = max(1.0, persistence.spots["ACME"]["mid"] * (1 + random.uniform(-VOL, VOL)))
+    half_spread = mid * 0.0005
     return {
         "symbol": "ACME", "asset_class": "EQUITY", "currency": "USD",
-        "bid": round(mid - half_spread + random.uniform(-0.01, 0.01), 4),
-        "ask": round(mid + half_spread + random.uniform(-0.01, 0.01), 4),
+        "bid": round(mid - half_spread, 4),
+        "ask": round(mid + half_spread, 4),
         "mid": round(mid, 4),
-        "last": round(mid + random.uniform(-0.02, 0.02), 4),
+        "last": round(mid, 4),
         "spot": None,
     }
 
 
 def generate_commodity_tick():
-    last = persistence.spots["XAUUSD"]
-    spot = max(1.0, last["spot"] + random.uniform(-2.0, 2.0))
+    spot = max(1.0, persistence.spots["XAUUSD"]["spot"] * (1 + random.uniform(-VOL, VOL)))
     return {
         "symbol": "XAUUSD", "asset_class": "COMMODITY", "currency": "USD",
         "bid": None, "ask": None, "mid": None,
@@ -35,8 +38,7 @@ def generate_commodity_tick():
 
 
 def generate_futures_tick():
-    last = persistence.spots["ES_FUT"]
-    price = max(1.0, last["last"] + random.uniform(-5.0, 5.0))
+    price = max(1.0, persistence.spots["ES_FUT"]["last"] * (1 + random.uniform(-VOL, VOL)))
     return {
         "symbol": "ES_FUT", "asset_class": "FUTURES", "currency": "USD",
         "bid": None, "ask": None, "mid": None,
@@ -47,11 +49,11 @@ def generate_futures_tick():
 
 def generate_fx_tick():
     last = persistence.spots["EURUSD"]
-    spot = max(1.10, min(1.20, last["spot"] + random.uniform(-0.01, 0.01)))
+    spot = last["spot"] * (1 + random.uniform(-VOL, VOL))
     return {
         "symbol": "EURUSD", "asset_class": "FX", "currency": "USD",
         "bid": None, "ask": None, "mid": None, "last": None,
-        "spot": round(spot, 4),
+        "spot": round(spot, 6),
         "domestic_rate": last["domestic_rate"],
         "foreign_rate": last["foreign_rate"],
     }
@@ -101,5 +103,5 @@ def start_generators():
         )
         thread.start()
         threads.append(thread)
-    logging.info("Started %d market-data generators", len(threads))
+    log.info("generators_started", count=len(threads))
     return threads

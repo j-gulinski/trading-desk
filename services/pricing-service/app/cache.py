@@ -1,11 +1,14 @@
 import uuid
-import logging
 import threading
 from decimal import Decimal
 
 from shared.db import session_scope
 from shared.models import Trade, Valuation
 from shared.functions import utcnow, get_iso_timestamp
+from shared.logging_config import get_logger
+from app.config import SERVICE_NAME
+
+log = get_logger(SERVICE_NAME)
 
 data_lock = threading.Lock()
 clients_lock = threading.Lock()
@@ -108,7 +111,7 @@ def save_valuation(valuation):
                 created_at=utcnow(),
             ))
     except Exception:
-        logging.exception("Failed to persist valuation for trade %s", valuation.get("trade_id"))
+        log.exception("valuation_persist_failed", trade_id=valuation.get("trade_id"))
 
 
 def finalize_closed_trades():

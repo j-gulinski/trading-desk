@@ -1,4 +1,3 @@
-import logging
 import threading
 import time
 import urllib.error
@@ -8,7 +7,10 @@ from bottle import ServerAdapter
 
 from app import book_client, generator
 from app.api import app
-from app.config import HOST, PORT, LOG_LEVEL, SERVICE_NAME
+from app.config import HOST, PORT, SERVICE_NAME
+from shared.logging_config import configure_logging, get_logger
+
+log = get_logger(SERVICE_NAME)
 
 
 class ThreadedServer(ServerAdapter):
@@ -26,13 +28,13 @@ def _worker():
             generator.set_books(book_client.ensure_books())
             break
         except urllib.error.URLError:
-            logging.warning("Books Service not ready, retrying...")
+            log.warning("books_not_ready")
             time.sleep(2)
     generator.run_loop()
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=getattr(logging, (LOG_LEVEL or "INFO").upper(), logging.INFO))
-    logging.info("Starting %s...", SERVICE_NAME)
+    configure_logging()
+    log.info("starting")
     threading.Thread(target=_worker, daemon=True).start()
     app.run(host=HOST, port=PORT, server=ThreadedServer)

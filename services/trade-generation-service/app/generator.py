@@ -1,4 +1,3 @@
-import logging
 import random
 import threading
 import time
@@ -6,8 +5,12 @@ import uuid
 from decimal import Decimal
 
 from shared.catalog import INSTRUMENT_CATALOG
+from shared.logging_config import get_logger
+from shared.audit import write_audit
 from app import action_client, market_data_client
-from app.config import CLOSE_PROBABILITY, TRADE_GENERATION_INTERVAL_MS
+from app.config import SERVICE_NAME, CLOSE_PROBABILITY, TRADE_GENERATION_INTERVAL_MS, TARGET_NOTIONAL
+
+log = get_logger(SERVICE_NAME)
 
 SYMBOL_BY_CLASS = {terms["asset_class"]: symbol for symbol, terms in INSTRUMENT_CATALOG.items()}
 
@@ -45,11 +48,16 @@ def _build_open(snapshot: dict) -> dict | None:
         "asset_class": asset_class,
         "symbol": symbol,
         "side": random.choice(["BUY", "SELL"]),
-        "quantity": random.randint(1, 100),
+        "quantity": _size_quantity(price, terms.get("multiplier", 1)),
         "trade_price": str(price.quantize(Decimal("0.0001"))),
         "currency": terms.get("currency", "USD"),
         "source": "GENERATED",
     }
+
+
+def _size_quantity(price: Decimal, multiplier: int) -> int:
+    notional = TARGET_NOTIONAL * random.uniform(0.5, 1.5)
+    return max(1, round(notional / (float(price) * multiplier)))
 
 
 def _build_close(snapshot: dict) -> dict | None:
@@ -98,7 +106,7 @@ def generate_once() -> dict | None:
         with _lock:
             _open_trades.pop(intent["trade_id"], None)
         _incr("closed")
-    logging.info("Generated %s (%s)", intent["action_type"], intent["client_request_id"])
+    log.info("generated", action=intent["action_type"], crid=intent["client_request_id"])
     return intent
 
 
@@ -109,17 +117,19 @@ def run_loop() -> None:
         try:
             generate_once()
         except Exception:
-            logging.exception("Generation cycle failed")
+            log.exception("generation_failed")
             _incr("failed")
         time.sleep(interval)
 
 
 def start() -> None:
     _running.set()
+    write_audit(SERVICE_NAME, "WORKER_STARTED", "Generation loop started")
 
 
 def stop() -> None:
     _running.clear()
+    write_audit(SERVICE_NAME, "WORKER_STOPPED", "Generation loop stopped")
 
 
 def status() -> dict:

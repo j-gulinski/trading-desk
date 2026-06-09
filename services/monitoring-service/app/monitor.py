@@ -1,13 +1,15 @@
 import time
 import json
-import logging
 import threading
 import urllib.request
 import urllib.error
 
 from shared.functions import get_iso_timestamp
+from shared.logging_config import get_logger
+from shared.audit import write_audit
 from app.config import TARGETS, POLL_INTERVAL_SECONDS, SERVICE_NAME
 
+log = get_logger(SERVICE_NAME)
 lock = threading.Lock()
 state = {SERVICE_NAME: {"status": "UP"}}
 
@@ -45,5 +47,6 @@ def start_monitors():
         thread = threading.Thread(target=_poll_loop, args=(name, url), name=f"mon-{name}", daemon=True)
         thread.start()
         threads.append(thread)
-    logging.info("Started %d monitors", len(threads))
+    log.info("monitors_started", count=len(threads))
+    write_audit(SERVICE_NAME, "WORKER_STARTED", "Monitoring started", payload={"targets": len(threads)})
     return threads

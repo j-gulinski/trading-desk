@@ -1,11 +1,13 @@
 import json
-import logging
 import urllib.request
 import urllib.error
 from decimal import Decimal
 
 from shared.pricing_math import bond_pv
-from app.config import SNAPSHOT_URL
+from shared.logging_config import get_logger
+from app.config import SNAPSHOT_URL, SERVICE_NAME
+
+log = get_logger(SERVICE_NAME)
 
 
 def fetch_snapshot() -> dict | None:
@@ -13,7 +15,7 @@ def fetch_snapshot() -> dict | None:
         with urllib.request.urlopen(SNAPSHOT_URL, timeout=5) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.URLError as e:
-        logging.warning("Failed to fetch market-data snapshot: %s", e)
+        log.warning("snapshot_fetch_failed", error=str(e))
         return None
 
 

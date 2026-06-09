@@ -19,5 +19,6 @@ TICK_INTERVAL_MS = int(os.environ.get("TICK_INTERVAL_MS"))
 SNAPSHOT_INTERVAL_MS = int(os.environ.get("SNAPSHOT_INTERVAL_MS"))
 TRADE_GENERATION_INTERVAL_MS = int(os.environ.get("TRADE_GENERATION_INTERVAL_MS"))
 CLOSE_PROBABILITY = float(os.environ.get("CLOSE_PROBABILITY", "0.3"))
+TARGET_NOTIONAL = float(os.environ.get("TARGET_NOTIONAL", "100000"))
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL")

@@ -1,50 +1,66 @@
 import uuid
-import logging
 
 from sqlalchemy.exc import IntegrityError
 
 from shared.db import session_scope
 from shared.catalog import INSTRUMENT_CATALOG
+from shared.audit import write_audit
+from shared.logging_config import get_logger
 from app import action_queue, repository
+from app.config import SERVICE_NAME
+
+log = get_logger(SERVICE_NAME)
 
 
-def _process(intent):
-    if intent.get("action_type") == "CLOSE_ALL":
-        with session_scope() as session:
-            closed = repository.close_all_trades(session, intent.get("close_reason") or "CLOSE_ALL")
-        action_queue.incr("closed", closed)
-        logging.info("Closed all active trades: %d", closed)
-        return
+def _audit(session, event_type, message, intent, severity="INFO"):
+    write_audit(SERVICE_NAME, event_type, message, entity_type="TRADE",
+                entity_id=intent.get("trade_id"), correlation_id=intent.get("client_request_id"),
+                severity=severity, session=session)
 
-    if intent.get("action_type") == "CLOSE_TRADE":
-        with session_scope() as session:
-            updated = repository.close_trade(
-                session, uuid.UUID(intent["trade_id"]),
-                intent.get("close_price"), intent.get("close_reason"),
-            )
-        action_queue.incr("closed" if updated == 1 else "rejected")
-        return
 
+def _open(intent):
     book_id = _parse_uuid(intent.get("book_id"))
     terms = INSTRUMENT_CATALOG.get(intent.get("symbol"))
     try:
         with session_scope() as session:
             book = repository.get_active_book(session, book_id) if book_id else None
-            if book is None:
-                action_queue.incr("rejected")
-                logging.warning("Rejected open: book %s not found or inactive", intent.get("book_id"))
-                return
-            if book.expected_asset_class != intent.get("asset_class"):
-                action_queue.incr("rejected")
-                logging.warning(
-                    "Rejected open: asset_class %s != book.expected_asset_class %s",
-                    intent.get("asset_class"), book.expected_asset_class,
-                )
-                return
+            if book is None or book.expected_asset_class != intent.get("asset_class"):
+                _audit(session, "ACTION_REJECTED", "Open rejected: bad book or asset class", intent, "WARNING")
+                return action_queue.incr("rejected")
             repository.insert_trade(session, intent, terms)
+            _audit(session, "TRADE_CREATED", "Trade created", intent)
         action_queue.incr("created")
     except IntegrityError:
         action_queue.incr("duplicates")
+
+
+def _close(intent):
+    with session_scope() as session:
+        closed = repository.close_trade(session, uuid.UUID(intent["trade_id"]),
+                                        intent.get("close_price"), intent.get("close_reason"))
+        if closed:
+            _audit(session, "TRADE_CLOSED", "Position closed", intent)
+        else:
+            _audit(session, "ACTION_REJECTED", "Close rejected: not ACTIVE", intent, "WARNING")
+    action_queue.incr("closed" if closed else "rejected")
+
+
+def _close_all(intent):
+    with session_scope() as session:
+        closed = repository.close_all_trades(session, intent.get("close_reason") or "CLOSE_ALL")
+        write_audit(SERVICE_NAME, "TRADE_CLOSED", f"Closed all active trades: {closed}",
+                    entity_type="TRADE", payload={"count": closed}, session=session)
+    action_queue.incr("closed", closed)
+
+
+def _process(intent):
+    action = intent.get("action_type")
+    if action == "CLOSE_TRADE":
+        _close(intent)
+    elif action == "CLOSE_ALL":
+        _close_all(intent)
+    else:
+        _open(intent)
 
 
 def _parse_uuid(value):
@@ -55,12 +71,13 @@ def _parse_uuid(value):
 
 
 def worker_loop():
-    logging.info("Trade-action worker started")
+    log.info("worker_started")
+    write_audit(SERVICE_NAME, "WORKER_STARTED", "Trade-action worker started")
     while True:
         intent = action_queue.intents.get()
         try:
             _process(intent)
         except Exception:
-            logging.exception("Failed to process intent")
+            log.exception("process_failed")
         finally:
             action_queue.incr("processed")
