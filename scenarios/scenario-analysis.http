@@ -1,0 +1,156 @@
+###############################################################################
+# Scenario analysis — POST /scenario on pricing service
+#
+# base_price in the request is used directly — no market data stack needed.
+# Omit base_price to use the live price from the pricing service cache.
+#
+# Shock convention (presentation 9, Scenario analysis dla portfela):
+#   EQUITY / COMMODITY / FUTURES / FX  — decimal percentage  (0.10 = +10%)
+#   BOND                               — basis points         (25   = +25 bps)
+#
+# scenario_pnl = scenario_value - base_value
+###############################################################################
+
+@pricing = http://localhost:8002
+
+### EQUITY — ACME +10% spot shock
+POST {{pricing}}/scenario
+Content-Type: application/json
+
+{
+  "position": {
+    "side": "BUY",
+    "quantity": 100,
+    "trade_price": 150.00,
+    "instrument": {
+      "asset_class": "EQUITY",
+      "symbol": "ACME",
+      "current_price": 160.00
+    }
+  },
+  "shock": 0.10
+}
+
+### EQUITY — ACME -10% spot shock (downside)
+POST {{pricing}}/scenario
+Content-Type: application/json
+
+{
+  "position": {
+    "side": "BUY",
+    "quantity": 100,
+    "trade_price": 150.00,
+    "instrument": {
+      "asset_class": "EQUITY",
+      "symbol": "ACME",
+      "current_price": 160.00
+    }
+  },
+  "shock": -0.10
+}
+
+### COMMODITY — XAUUSD +10% spot shock
+POST {{pricing}}/scenario
+Content-Type: application/json
+
+{
+  "position": {
+    "side": "BUY",
+    "quantity": 10,
+    "trade_price": 2000.00,
+    "instrument": {
+      "asset_class": "COMMODITY",
+      "symbol": "XAUUSD",
+      "current_price": 2050.00
+    }
+  },
+  "shock": 0.10
+}
+
+### FUTURES — ES_FUT -5% spot shock (multiplier 50 applies)
+POST {{pricing}}/scenario
+Content-Type: application/json
+
+{
+  "position": {
+    "side": "BUY",
+    "quantity": 2,
+    "trade_price": 5000.00,
+    "instrument": {
+      "asset_class": "FUTURES",
+      "symbol": "ES_FUT",
+      "current_price": 5100.00,
+      "meta": { "multiplier": 50 }
+    }
+  },
+  "shock": -0.05
+}
+
+### FX — EURUSD +1% spot shock
+POST {{pricing}}/scenario
+Content-Type: application/json
+
+{
+  "position": {
+    "side": "BUY",
+    "quantity": 100000,
+    "trade_price": 1.0850,
+    "instrument": {
+      "asset_class": "FX",
+      "symbol": "EURUSD",
+      "current_price": 1.1000,
+      "meta": { "tenor_years": 1.0 }
+    }
+  },
+  "shock": 0.01
+}
+
+### BOND — GOVT_5Y +25 bps rates shock
+POST {{pricing}}/scenario
+Content-Type: application/json
+
+{
+  "position": {
+    "side": "BUY",
+    "quantity": 10,
+    "trade_price": 1000.00,
+    "instrument": {
+      "asset_class": "BOND",
+      "symbol": "GOVT_5Y",
+      "current_price": 1020.00,
+      "meta": {
+        "face_value": 1000,
+        "coupon_rate": 0.05,
+        "payments_per_year": 1,
+        "maturity_years": 5,
+        "curve": "USD_GOV"
+      }
+    }
+  },
+  "shock": 25
+}
+
+### BOND — GOVT_5Y -25 bps rates shock (rally)
+POST {{pricing}}/scenario
+Content-Type: application/json
+
+{
+  "position": {
+    "side": "BUY",
+    "quantity": 10,
+    "trade_price": 1000.00,
+    "instrument": {
+      "asset_class": "BOND",
+      "symbol": "GOVT_5Y",
+      "current_price": 1020.00,
+      "meta": {
+        "face_value": 1000,
+        "coupon_rate": 0.05,
+        "payments_per_year": 1,
+        "maturity_years": 5,
+        "curve": "USD_GOV"
+      }
+    }
+  },
+  "shock": -25
+}

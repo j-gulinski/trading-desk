@@ -1,9 +1,11 @@
 import queue
 import bottle
-from bottle import response
+from bottle import request, response
 
 from app import cache
 from app.config import SERVICE_NAME
+from app.schemas import ScenarioRequest
+from app.scenario import run_scenario
 from shared.serialization import to_json
 from shared.logging_config import get_logger
 
@@ -48,6 +50,28 @@ def valuation_stream():
             log.info("stream_client_disconnected")
 
     return generate_events()
+
+
+@app.route("/scenario", method="POST")
+def post_scenario():
+    response.content_type = "application/json"
+    body = request.json
+    if body is None:
+        response.status = 400
+        return to_json({"error": "invalid JSON or missing Content-Type: application/json"})
+
+    try:
+        req = ScenarioRequest.from_body(body)
+    except ValueError as e:
+        response.status = 400
+        return to_json({"error": str(e)})
+
+    result = run_scenario(req)
+    if result is None:
+        response.status = 404
+        return to_json({"error": "market data not found for instrument"})
+
+    return to_json(result)
 
 
 @app.route("/health")

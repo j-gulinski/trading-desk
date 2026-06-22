@@ -30,12 +30,12 @@ def _current_price_and_mult(trade):
         spot = cache.get_spot(trade["symbol"])
         if not spot or spot.get("spot") is None:
             return None, None
-        s = spot["spot"]
-        rd = spot.get("domestic_rate", 0.0)
-        rf = spot.get("foreign_rate", 0.0)
-        T = meta.get("tenor_years", 1.0)
+        s = Decimal(str(spot["spot"]))
+        rd = Decimal(str(spot.get("domestic_rate", 0.0)))
+        rf = Decimal(str(spot.get("foreign_rate", 0.0)))
+        T = Decimal(str(meta.get("tenor_years", 1.0)))
         forward = s * (1 + rd * T) / (1 + rf * T)
-        return Decimal(str(forward)), 1
+        return forward, 1
 
     if asset_class == "BOND":
         curve = cache.get_curve(meta.get("curve", "USD_GOV"))

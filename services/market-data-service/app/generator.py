@@ -1,6 +1,7 @@
 import time
 import random
 import threading
+from decimal import Decimal
 
 from app import persistence
 from app.config import TICK_INTERVAL_MS, SERVICE_NAME
@@ -15,46 +16,50 @@ VOL = 0.0002
 CURVE_VOL = 0.00005
 
 
+def _dec(value: float, places: int = 4) -> Decimal:
+    return Decimal(str(round(value, places)))
+
+
 def generate_equity_tick():
-    mid = max(1.0, persistence.spots["ACME"]["mid"] * (1 + random.uniform(-VOL, VOL)))
+    mid = max(1.0, float(persistence.spots["ACME"]["mid"]) * (1 + random.uniform(-VOL, VOL)))
     half_spread = mid * 0.0005
     return {
         "symbol": "ACME", "asset_class": "EQUITY", "currency": "USD",
-        "bid": round(mid - half_spread, 4),
-        "ask": round(mid + half_spread, 4),
-        "mid": round(mid, 4),
-        "last": round(mid, 4),
+        "bid": _dec(mid - half_spread),
+        "ask": _dec(mid + half_spread),
+        "mid": _dec(mid),
+        "last": _dec(mid),
         "spot": None,
     }
 
 
 def generate_commodity_tick():
-    spot = max(1.0, persistence.spots["XAUUSD"]["spot"] * (1 + random.uniform(-VOL, VOL)))
+    spot = max(1.0, float(persistence.spots["XAUUSD"]["spot"]) * (1 + random.uniform(-VOL, VOL)))
     return {
         "symbol": "XAUUSD", "asset_class": "COMMODITY", "currency": "USD",
         "bid": None, "ask": None, "mid": None,
-        "last": round(spot, 4),
-        "spot": round(spot, 4),
+        "last": _dec(spot),
+        "spot": _dec(spot),
     }
 
 
 def generate_futures_tick():
-    price = max(1.0, persistence.spots["ES_FUT"]["last"] * (1 + random.uniform(-VOL, VOL)))
+    price = max(1.0, float(persistence.spots["ES_FUT"]["last"]) * (1 + random.uniform(-VOL, VOL)))
     return {
         "symbol": "ES_FUT", "asset_class": "FUTURES", "currency": "USD",
         "bid": None, "ask": None, "mid": None,
-        "last": round(price, 4),
-        "spot": round(price, 4),
+        "last": _dec(price),
+        "spot": _dec(price),
     }
 
 
 def generate_fx_tick():
     last = persistence.spots["EURUSD"]
-    spot = last["spot"] * (1 + random.uniform(-VOL, VOL))
+    spot = float(last["spot"]) * (1 + random.uniform(-VOL, VOL))
     return {
         "symbol": "EURUSD", "asset_class": "FX", "currency": "USD",
         "bid": None, "ask": None, "mid": None, "last": None,
-        "spot": round(spot, 6),
+        "spot": _dec(spot, 6),
         "domestic_rate": last["domestic_rate"],
         "foreign_rate": last["foreign_rate"],
     }
