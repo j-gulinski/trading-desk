@@ -46,11 +46,14 @@ def _close(intent):
 
 
 def _close_all(intent):
+    reason = intent.get("close_reason") or "CLOSE_ALL"
     with session_scope() as session:
-        closed = repository.close_all_trades(session, intent.get("close_reason") or "CLOSE_ALL")
-        write_audit(SERVICE_NAME, "TRADE_CLOSED", f"Closed all active trades: {closed}",
-                    entity_type="TRADE", payload={"count": closed}, session=session)
-    action_queue.incr("closed", closed)
+        trade_ids = repository.close_all_trades(session, reason)
+        for trade_id in trade_ids:
+            write_audit(SERVICE_NAME, "TRADE_CLOSED", "Position closed",
+                        entity_type="TRADE", entity_id=trade_id,
+                        payload={"close_reason": reason}, session=session)
+    action_queue.incr("closed", len(trade_ids))
 
 
 def _process(intent):

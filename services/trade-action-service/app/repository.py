@@ -56,7 +56,7 @@ def close_trade(session, trade_id, close_price, close_reason) -> int:
     return result.rowcount
 
 
-def close_all_trades(session, close_reason) -> int:
+def close_all_trades(session, close_reason) -> list:
     now = utcnow()
     result = session.execute(
         update(Trade)
@@ -68,5 +68,6 @@ def close_all_trades(session, close_reason) -> int:
             updated_at=now,
             valuation_finalized=False,
         )
+        .returning(Trade.trade_id)
     )
-    return result.rowcount
+    return [row[0] for row in result]

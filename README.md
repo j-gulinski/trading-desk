@@ -44,7 +44,7 @@ docker compose run --rm db-migrations
 ### Endpoints
 
 - **market-data**: `GET /health`, `GET /snapshot`, `GET /stream`
-- **pricing**: `GET /health`, `GET /valuations`, `GET /valuations/<trade_id>`, `GET /valuation-stream`
+- **pricing**: `GET /health`, `GET /valuations`, `GET /valuations/<trade_id>`, `GET /valuation-stream`, `POST /scenario`
 - **monitoring**: `GET /health`, `GET /status`
 - **books**: `GET /health`, `GET/POST /books`, `GET/PUT/DELETE /books/<book_id>`
 - **trade-action**: `GET /health`, `POST /trade-actions`, `POST /trade-actions/batch`, `POST /trade-actions/close-all`, `GET /queue/status`
@@ -152,8 +152,6 @@ and posts them to trade-action (the only writer of `Trades`):
 
 ## Audit logs vs technical logging
 
-Two distinct mechanisms, as the spec requires:
-
 - **Technical logs** -- `structlog` (JSON) to stdout, configured once per service
   in `shared/logging_config.py`. For observing the app in the container console.
 - **Audit logs** -- business/operational events written to the `audit_logs`
@@ -174,6 +172,33 @@ Every service writes audit events:
 | blotter | `STREAM_CONNECTED` / `STREAM_DISCONNECTED` |
 | monitoring | `WORKER_STARTED` |
 
+Audit today is written **inline**: the audit row goes to the DB as part of
+handling the event. When there is a business write it joins that write's
+transaction (the `session=` argument) so they commit atomically -- one commit /
+one `fsync` covers both rows.audit_logs` table
+directly and the write sits on the business path.
+
+### Possible extension: file-forwarded audit
+
+A lighter-weight alternative (full write-up in `docs/audit-improvements.md`):
+services stop writing `audit_logs` directly and instead **emit each audit event
+as a structured log line**; a separate **audit-forwarder** tails those log files
+and batch-inserts them into `audit_logs`.
+ The `audit_logs` table and the blotter's `/trades/<id>/audit-logs` read path stay
+unchanged.
+
+| | Inline write (current) | File -> forwarder |
+|---|---|---|
+| Audit on business hot path | yes (1 extra row) | no -- services just log |
+| Writers of `audit_logs` | every service | one (the forwarder) |
+| Efficiency at volume | per-event insert | batched inserts (one commit per batch) |
+| Atomic with business change | **yes** | no |
+| Can lose events | no | **yes** (see below) |
+
+**Trade-off -- with this infra some events can be lost.** The log file is a
+best-effort buffer: if a container dies or a log rotates before the forwarder
+reads the line, that audit event is gone and there is no business transaction to fall back on.
+
 ---
 
 ## Fair value & PnL per asset class
@@ -182,7 +207,7 @@ Every service writes audit events:
 |---|---|---|
 | EQUITY / COMMODITY | `price * qty` | price = mid/last/spot |
 | FUTURES | `price * multiplier * qty` | `multiplier` from metadata |
-| FX (forward) | `forward * notional` | `forward = spot*(1+r_d*T)/(1+r_f*T)` |
+| FX (forward) | `forward * qty` | `forward = spot*(1+r_d*T)/(1+r_f*T)` |
 | BOND | `sum CF_t / (1+r(t))^t * qty` | rate interpolated off the `USD_GOV` curve |
 
 PnL sign depends on side -- the classic domain bug:
@@ -191,6 +216,33 @@ PnL sign depends on side -- the classic domain bug:
 
 Pricing owns **all** PnL math (one place for the signs). Realized PnL is
 finalized on close (`unrealized=0`, `total=realized`).
+
+---
+
+## Scenario analysis (shocks)
+
+`POST /scenario` on pricing re-prices a single ad-hoc position under a market
+shock and returns base vs shocked valuation -- no trade is created and nothing is
+persisted. It reuses the same valuation + PnL engine as live pricing, so a shock
+P&L matches what the position would actually book.
+
+
+| Asset class | Shock unit | Applied to |
+|---|---|---|
+| EQUITY / COMMODITY / FUTURES / FX | decimal percentage (`0.10` = +10%) | spot / forward price |
+| BOND | basis points (`25` = +25 bps) | every tenor on the `USD_GOV` curve, then re-PV |
+
+- `instrument.current_price` (the `base_price`) is used directly when supplied,
+  so the endpoint works **without the market-data stack running**. Omit it to
+  pull the live price from the pricing cache instead.
+- Bonds are shocked on the **curve** (parallel bump of all rates) and re-priced
+  via `bond_pv`
+- Response carries `base` (price / fair_value / unrealized_pnl), `shocked`
+  (price / fair_value), and `scenario_pnl` with
+  `pnl_impact = scenario_pnl - unrealized_pnl`.
+
+See `scenarios/scenario-analysis.http` for one shock per asset class (upside and
+downside).
 
 ---
 
@@ -234,8 +286,8 @@ confirms it's still ACTIVE -- this also drops stale post-close ticks).
   valuations stream in; `bootstrap_trades()` warms the active set from the DB to
   shrink that window.
 - Per-asset PnL is brought *closer* (notional-sized quantities + uniform relative
-  market-data volatility), not made equal -- lot indivisibility (1 futures
-  contract) and large FX unit counts keep some spread.
+  market-data volatility), not made exactly equal -- lot indivisibility (1 futures
+  contract is the smallest step) keeps some spread.
 
 ---
 
@@ -251,5 +303,7 @@ confirms it's still ACTIVE -- this also drops stale post-close ticks).
   `/trades/<id>`, valuation history, audit logs; open -> price -> close
 - `full-flow.http` -- the whole stack driven by trade-generation: start the
   loop, read the blotter, then flatten everything with `/trade-actions/close-all`
+- `scenario-analysis.http` -- `POST /scenario` shocks, one per asset class
+  (equity/commodity/futures/FX percentage shocks, bond bps curve shock)
 
 ---

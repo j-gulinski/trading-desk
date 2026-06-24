@@ -6,7 +6,7 @@ from app.pnl import compute_pnl
 from app.valuation_publisher import publish_valuation
 from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
 from shared.functions import get_iso_timestamp
-from shared.pricing_math import bond_pv
+from shared.pricing_math import bond_pv, fx_forward
 from shared.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
@@ -34,8 +34,7 @@ def _current_price_and_mult(trade):
         rd = Decimal(str(spot.get("domestic_rate", 0.0)))
         rf = Decimal(str(spot.get("foreign_rate", 0.0)))
         T = Decimal(str(meta.get("tenor_years", 1.0)))
-        forward = s * (1 + rd * T) / (1 + rf * T)
-        return forward, 1
+        return fx_forward(s, rd, rf, T), 1
 
     if asset_class == "BOND":
         curve = cache.get_curve(meta.get("curve", "USD_GOV"))

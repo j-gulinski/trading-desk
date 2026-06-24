@@ -3,7 +3,7 @@ from decimal import Decimal
 from app import cache
 from app.pnl import compute_pnl
 from app.schemas import ScenarioRequest
-from shared.pricing_math import bond_pv
+from shared.pricing_math import bond_pv, fx_forward
 
 
 def _shocked_bond_pv(meta: dict, curve: dict, shock_bps: float) -> float:
@@ -28,7 +28,7 @@ def _base_price_from_cache(inst) -> Decimal | None:
         rd = Decimal(str(spot.get("domestic_rate", 0.0)))
         rf = Decimal(str(spot.get("foreign_rate", 0.0)))
         T = Decimal(str(inst.meta.get("tenor_years", 1.0)))
-        return s * (1 + rd * T) / (1 + rf * T)
+        return fx_forward(s, rd, rf, T)
 
     if inst.asset_class == "BOND":
         curve = cache.get_curve(inst.meta.get("curve", "USD_GOV"))
@@ -42,14 +42,7 @@ def _base_price_from_cache(inst) -> Decimal | None:
 def run_scenario(req: ScenarioRequest) -> dict | None:
     """
     Return base vs shocked valuation for an ad-hoc position.
-
-    Shock convention (determined by asset_class):
-      EQUITY / COMMODITY / FUTURES / FX  — decimal percentage (0.10 = +10% spot)
-      BOND                                — basis points       (25   = +25 bps on curve)
-
-    base_price in the request takes precedence over the cache. If omitted the
-    current market price is fetched from the pricing service cache, which
-    requires the market data stack to be running.
+    Base_price in the request takes precedence over the cache.
     """
     inst = req.position.instrument
     pos = req.position

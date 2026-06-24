@@ -1,4 +1,3 @@
-import json
 import queue
 import bottle
 from bottle import response
@@ -7,6 +6,7 @@ from app import persistence
 from app.publisher import clients_lock, client_event_queues
 from app.health import get_health
 from app.config import SERVICE_NAME
+from shared.serialization import to_json
 from shared.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
@@ -25,7 +25,7 @@ def stream():
         try:
             while True:
                 message = client_q.get()
-                yield f"event: {message['event']}\ndata: {json.dumps(message['data'])}\n\n"
+                yield f"event: {message['event']}\ndata: {to_json(message['data'])}\n\n"
         except Exception:
             pass
         finally:
@@ -40,7 +40,7 @@ def stream():
 def get_snapshot():
     response.content_type = "application/json"
     with persistence.data_lock:
-        return json.dumps({
+        return to_json({
             "spots": persistence.spots,
             "curves": persistence.curves,
         })

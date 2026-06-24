@@ -3,7 +3,7 @@ import urllib.request
 import urllib.error
 from decimal import Decimal
 
-from shared.pricing_math import bond_pv
+from shared.pricing_math import bond_pv, fx_forward
 from shared.logging_config import get_logger
 from app.config import SNAPSHOT_URL, SERVICE_NAME
 
@@ -31,6 +31,15 @@ def current_price(snapshot: dict, symbol: str, terms: dict) -> Decimal | None:
     spot = (snapshot.get("spots") or {}).get(symbol)
     if not spot:
         return None
+
+    if asset_class == "FX":
+        if spot.get("spot") is None:
+            return None
+        s = Decimal(str(spot["spot"]))
+        rd = Decimal(str(spot.get("domestic_rate", 0.0)))
+        rf = Decimal(str(spot.get("foreign_rate", 0.0)))
+        T = Decimal(str(terms.get("tenor_years", 1.0)))
+        return fx_forward(s, rd, rf, T)
 
     price = spot.get("mid") or spot.get("spot")
     return Decimal(str(price)) if price is not None else None

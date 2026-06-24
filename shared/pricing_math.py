@@ -1,3 +1,7 @@
+def fx_forward(spot, domestic_rate, foreign_rate, tenor_years):
+    return spot * (1 + domestic_rate * tenor_years) / (1 + foreign_rate * tenor_years)
+
+
 def rate_at(tenors, rates, t):
     if t <= tenors[0]:
         return rates[0]
