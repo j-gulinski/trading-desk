@@ -138,11 +138,16 @@ def finalize_closed_trades():
                 fair_value = close_price * qty * multiplier
                 payload = {"close_price": str(close_price), "multiplier": multiplier, "final": True}
             else:
-                # close all - (presentation only purpose) no close price, so we mark the trade at market and compute realized PnL from the last valuation
-                last = get_valuation(str(t.trade_id))
+                # close all - (presentation only purpose) no close price
+                last = (
+                    session.query(Valuation)
+                    .filter(Valuation.trade_id == t.trade_id)
+                    .order_by(Valuation.valuation_time.desc())
+                    .first()
+                )
                 if last is not None:
-                    realized = Decimal(str(last["unrealized_pnl"]))
-                    fair_value = Decimal(str(last["fair_value"]))
+                    realized = last.unrealized_pnl
+                    fair_value = last.fair_value
                 else:
                     realized = Decimal("0")
                     fair_value = trade_price * qty * multiplier

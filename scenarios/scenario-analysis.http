@@ -13,7 +13,7 @@
 
 @pricing = http://localhost:8002
 
-### EQUITY — ACME +10% spot shock
+### EQUITY - +10% spot shock
 POST {{pricing}}/scenario
 Content-Type: application/json
 
@@ -31,7 +31,7 @@ Content-Type: application/json
   "shock": 0.10
 }
 
-### EQUITY — ACME -10% spot shock (downside)
+### EQUITY - -10% spot shock (downside)
 POST {{pricing}}/scenario
 Content-Type: application/json
 
@@ -49,7 +49,7 @@ Content-Type: application/json
   "shock": -0.10
 }
 
-### COMMODITY — XAUUSD +10% spot shock
+### COMMODITY - +10% spot shock
 POST {{pricing}}/scenario
 Content-Type: application/json
 
@@ -67,7 +67,7 @@ Content-Type: application/json
   "shock": 0.10
 }
 
-### FUTURES — ES_FUT -5% spot shock (multiplier 50 applies)
+### FUTURES - -5% spot shock
 POST {{pricing}}/scenario
 Content-Type: application/json
 
@@ -86,7 +86,7 @@ Content-Type: application/json
   "shock": -0.05
 }
 
-### FX — EURUSD +1% spot shock
+### FX - +1% spot shock
 POST {{pricing}}/scenario
 Content-Type: application/json
 
@@ -105,7 +105,7 @@ Content-Type: application/json
   "shock": 0.01
 }
 
-### BOND — GOVT_5Y +25 bps rates shock
+### BOND - +25 bps rates shock
 POST {{pricing}}/scenario
 Content-Type: application/json
 
@@ -130,7 +130,7 @@ Content-Type: application/json
   "shock": 25
 }
 
-### BOND — GOVT_5Y -25 bps rates shock (rally)
+### BOND - -25 bps rates shock
 POST {{pricing}}/scenario
 Content-Type: application/json
 

@@ -222,9 +222,12 @@ finalized on close (`unrealized=0`, `total=realized`).
 ## Scenario analysis (shocks)
 
 `POST /scenario` on pricing re-prices a single ad-hoc position under a market
-shock and returns base vs shocked valuation -- no trade is created and nothing is
-persisted. It reuses the same valuation + PnL engine as live pricing, so a shock
+shock and returns base vs scenario valuation -- no trade is created and nothing is
+persisted. It reuses the same valuation engine as live pricing, so a shock
 P&L matches what the position would actually book.
+
+**`scenario_pnl = scenario value - base value`** (from the position's side: a long
+gains when value rises, a short when it falls).
 
 
 | Asset class | Shock unit | Applied to |
@@ -232,14 +235,18 @@ P&L matches what the position would actually book.
 | EQUITY / COMMODITY / FUTURES / FX | decimal percentage (`0.10` = +10%) | spot / forward price |
 | BOND | basis points (`25` = +25 bps) | every tenor on the `USD_GOV` curve, then re-PV |
 
-- `instrument.current_price` (the `base_price`) is used directly when supplied,
-  so the endpoint works **without the market-data stack running**. Omit it to
-  pull the live price from the pricing cache instead.
-- Bonds are shocked on the **curve** (parallel bump of all rates) and re-priced
-  via `bond_pv`
-- Response carries `base` (price / fair_value / unrealized_pnl), `shocked`
-  (price / fair_value), and `scenario_pnl` with
-  `pnl_impact = scenario_pnl - unrealized_pnl`.
+- `instrument.current_price` (the `base_price`) is the base when supplied (omit
+  it to pull the live price from the pricing cache). It's honoured for every asset
+  class, bonds included.
+- Bonds are shocked on the **curve** (parallel bump of all rates; the curve must
+  be in cache). The price impact is the exact **PV delta** -- `bond_pv` at the
+  bumped curve minus base PV -- applied to the base price. So the supplied price is
+  kept and the P&L isolates the rate move: a rise (`+25`) lowers value, a rally
+  (`-25`) raises it.
+- Response carries `base` (price / value), `scenario` (price / value),
+  `current_pnl` (position P&L now = base value − entry value) and `scenario_pnl`
+  (the shock's impact = scenario value − base value) -- both side-aware. P&L if
+  the shock happens = `current_pnl + scenario_pnl`.
 
 See `scenarios/scenario-analysis.http` for one shock per asset class (upside and
 downside).

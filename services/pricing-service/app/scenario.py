@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 from app import cache
-from app.pnl import compute_pnl
 from app.schemas import ScenarioRequest
 from shared.pricing_math import bond_pv, fx_forward
 
@@ -39,11 +38,27 @@ def _base_price_from_cache(inst) -> Decimal | None:
     return None
 
 
+def _multiplier(inst) -> int:
+    if inst.asset_class == "FUTURES":
+        return int(inst.meta.get("multiplier", 1))
+    return 1
+
+
+def _shocked_price(inst, base_price: Decimal, shock: float) -> Decimal | None:
+    if inst.asset_class in ("EQUITY", "COMMODITY", "FUTURES", "FX"):
+        return base_price * Decimal(str(1 + shock))
+
+    if inst.asset_class == "BOND":
+        curve = cache.get_curve(inst.meta.get("curve", "USD_GOV"))
+        if not curve:
+            return None
+        rate_impact = Decimal(str(_shocked_bond_pv(inst.meta, curve, shock))) - Decimal(str(bond_pv(inst.meta, curve)))
+        return base_price + rate_impact
+
+    return None
+
+
 def run_scenario(req: ScenarioRequest) -> dict | None:
-    """
-    Return base vs shocked valuation for an ad-hoc position.
-    Base_price in the request takes precedence over the cache.
-    """
     inst = req.position.instrument
     pos = req.position
 
@@ -51,43 +66,30 @@ def run_scenario(req: ScenarioRequest) -> dict | None:
     if base_price is None:
         return None
 
-    if inst.asset_class in ("EQUITY", "COMMODITY", "FUTURES"):
-        multiplier = int(inst.meta.get("multiplier", 1)) if inst.asset_class == "FUTURES" else 1
-        shocked_price = base_price * Decimal(str(1 + req.shock))
-
-    elif inst.asset_class == "FX":
-        multiplier = 1
-        shocked_price = base_price * Decimal(str(1 + req.shock))
-
-    elif inst.asset_class == "BOND":
-        multiplier = 1
-        curve = cache.get_curve(inst.meta.get("curve", "USD_GOV"))
-        if not curve:
-            return None
-        shocked_price = Decimal(str(_shocked_bond_pv(inst.meta, curve, req.shock)))
-
-    else:
+    shocked_price = _shocked_price(inst, base_price, req.shock)
+    if shocked_price is None:
         return None
 
-    base_fv = base_price * pos.quantity * multiplier
-    shocked_fv = shocked_price * pos.quantity * multiplier
-    base_unreal, _, _ = compute_pnl(pos.side, base_price, pos.trade_price, pos.quantity, multiplier)
-    shocked_unreal, _, _ = compute_pnl(pos.side, shocked_price, pos.trade_price, pos.quantity, multiplier)
+    multiplier = _multiplier(inst)
+    direction = Decimal(-1) if pos.side == "SELL" else Decimal(1)
+
+    entry_value = pos.trade_price * pos.quantity * multiplier
+    base_value = base_price * pos.quantity * multiplier
+    scenario_value = shocked_price * pos.quantity * multiplier
+
+    base_pnl = (base_value - entry_value) * direction
+    scenario_pnl = (scenario_value - base_value) * direction
+    current_pnl = base_pnl + scenario_pnl
 
     return {
         "asset_class": inst.asset_class,
         "symbol": inst.symbol,
+        "side": pos.side,
+        "open_value": entry_value,
         "shock": req.shock,
-        "base": {
-            "price": base_price,
-            "fair_value": base_fv,
-            "unrealized_pnl": base_unreal,
-        },
-        "shocked": {
-            "price": shocked_price,
-            "fair_value": shocked_fv,
-        },
-        "unrealized_pnl": base_unreal,
-        "scenario_pnl": shocked_unreal,
-        "pnl_impact": shocked_unreal - base_unreal,
+        "base": {"price": base_price, "value": base_value, "base_pnl": base_pnl},
+        "scenario": {"price": shocked_price, "value": scenario_value, "scenario_pnl": scenario_pnl},
+        "base_pnl": base_pnl,
+        "scenario_pnl": scenario_pnl,        
+        "current_pnl": current_pnl,
     }
