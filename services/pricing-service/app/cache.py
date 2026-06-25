@@ -127,13 +127,26 @@ def finalize_closed_trades():
         for t in rows:
             qty = t.quantity
             trade_price = t.trade_price
-            close_price = t.close_price if t.close_price is not None else trade_price
             multiplier = int((t.trade_metadata or {}).get("multiplier", 1))
-            if t.side == "SELL":
-                realized = (trade_price - close_price) * qty * multiplier
+
+            if t.close_price is not None:
+                close_price = t.close_price
+                if t.side == "SELL":
+                    realized = (trade_price - close_price) * qty * multiplier
+                else:
+                    realized = (close_price - trade_price) * qty * multiplier
+                fair_value = close_price * qty * multiplier
+                payload = {"close_price": str(close_price), "multiplier": multiplier, "final": True}
             else:
-                realized = (close_price - trade_price) * qty * multiplier
-            fair_value = close_price * qty * multiplier
+                # close all - no close price, so we mark the trade at market and compute realized PnL from the last valuation
+                last = get_valuation(str(t.trade_id))
+                if last is not None:
+                    realized = Decimal(str(last["unrealized_pnl"]))
+                    fair_value = Decimal(str(last["fair_value"]))
+                else:
+                    realized = Decimal("0")
+                    fair_value = trade_price * qty * multiplier
+                payload = {"close_price": None, "multiplier": multiplier, "final": True, "marked_at_market": True}
 
             valuation = {
                 "trade_id": str(t.trade_id),
@@ -147,7 +160,7 @@ def finalize_closed_trades():
                 "realized_pnl": realized,
                 "total_pnl": realized,
                 "valuation_time": get_iso_timestamp(),
-                "valuation_payload": {"close_price": str(close_price), "multiplier": multiplier, "final": True},
+                "valuation_payload": payload,
             }
             session.add(Valuation(
                 valuation_id=uuid.uuid4(),
