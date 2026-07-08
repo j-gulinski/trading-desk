@@ -127,6 +127,22 @@ services:
         condition: service_completed_successfully
       pricing-service:
         condition: service_started
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "3000:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    restart: unless-stopped
+    depends_on:
+      - market-data-service
+      - pricing-service
+      - books-service
+      - blotter-service
 
 volumes:
   postgres_data:
