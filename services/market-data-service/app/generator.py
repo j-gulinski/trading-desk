@@ -15,6 +15,13 @@ log = get_logger(SERVICE_NAME)
 VOL = 0.0002
 CURVE_VOL = 0.00005
 
+INDEX_BASE_LEVEL = 1000.0
+INDEX_BASKET = {"ACME": "mid", "XAUUSD": "spot", "ES_FUT": "last"}
+_INDEX_BASE_PRICES = {
+    symbol: float(persistence.spots[symbol][field])
+    for symbol, field in INDEX_BASKET.items()
+}
+
 
 def _dec(value: float, places: int = 4) -> Decimal:
     return Decimal(str(round(value, places)))
@@ -65,6 +72,20 @@ def generate_fx_tick():
     }
 
 
+def generate_index_tick():
+    ratios = [
+        float(persistence.spots[symbol][field]) / _INDEX_BASE_PRICES[symbol]
+        for symbol, field in INDEX_BASKET.items()
+    ]
+    level = INDEX_BASE_LEVEL * sum(ratios) / len(ratios)
+    return {
+        "symbol": "MARKET_INDEX", "asset_class": "INDEX", "currency": "USD",
+        "bid": None, "ask": None, "mid": None,
+        "last": _dec(level),
+        "spot": _dec(level),
+    }
+
+
 def generate_curve_tick():
     rates = [round(anchor + random.uniform(-CURVE_VOL, CURVE_VOL), 6) for anchor in persistence.CURVE_ANCHOR]
     return {
@@ -78,6 +99,7 @@ GENERATORS = [
     ("market_tick", "spot",  "XAUUSD",  generate_commodity_tick),
     ("market_tick", "spot",  "ES_FUT",  generate_futures_tick),
     ("market_tick", "spot",  "EURUSD",  generate_fx_tick),
+    ("market_tick", "spot",  "MARKET_INDEX", generate_index_tick),
     ("curve_tick",  "curve", "USD_GOV", generate_curve_tick),
 ]
 

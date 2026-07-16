@@ -116,6 +116,16 @@ generated/manual intent -> trade-action (queue+worker) -> Trades (ACTIVE)
 
 ---
 
+## Market benchmark
+
+The market-data generator publishes `MARKET_INDEX`, a non-tradable benchmark
+for book alpha/beta. It is an equal-weighted basket of the risky spot
+instruments (ACME, XAUUSD, and ES_FUT), each rebased to a 1000 starting level.
+FX and rates are excluded because their return dynamics are not comparable.
+`INDEX` is deliberately not part of the tradeable `AssetClass` enum.
+
+---
+
 ## SSE
 
 Both `/stream` (market data) and `/valuation-stream` (valuations) are
