@@ -14,11 +14,11 @@ class ThreadedServer(ServerAdapter):
             daemon_threads = True
 
         server = make_server(self.host, self.port, handler, server_class=ThreadingWSGIServer)
+        start_monitors()
         server.serve_forever()
 
 
 if __name__ == "__main__":
     configure_logging()
     get_logger(SERVICE_NAME).info("starting")
-    start_monitors()
     app.run(host=HOST, port=PORT, server=ThreadedServer)
