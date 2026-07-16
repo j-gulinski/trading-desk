@@ -1,0 +1,26 @@
+// Titled content panel (Panel) with a header row and body.
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.panel__title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.panel__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.panel__body {
+  padding: var(--sp-4);
+}

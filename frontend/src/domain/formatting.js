@@ -8,6 +8,13 @@ export function formatElapsedTime(ms) {
   return `${h}h ago`
 }
 
+export function formatClockTime(ms) {
+  if (ms == null || Number.isNaN(ms)) return '—'
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
 export function formatNumber(n) {
   if (n == null || Number.isNaN(n)) return '—'
   return new Intl.NumberFormat('en-US').format(n)

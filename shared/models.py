@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Numeric, Text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase
 
@@ -125,6 +125,11 @@ class AuditLog(Base):
     __table_args__ = (
         # /trades/<id>/audit-logs lookups by entity id
         Index("ix_audit_logs_entity_id", "entity_id"),
+        Index(
+            "ix_audit_logs_severity_recent",
+            "created_at",
+            postgresql_where=text("severity IN ('WARNING', 'ERROR', 'CRITICAL')"),
+        ),
     )
 
     audit_id = Column(UUID(as_uuid=True), primary_key=True)

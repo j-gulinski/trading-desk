@@ -4,13 +4,17 @@ import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { normalizeServiceStatus, summarize } from '../../domain/serviceStatus.js'
+import { normalizeAuditEvents } from '../../domain/auditEvents.js'
 import { formatElapsedTime } from '../../domain/formatting.js'
 import ServiceCard from '../../components/cards/ServiceCard.jsx'
 import Panel from '../../components/Panel.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
 import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
+import AuditEventList from '../../components/audit/AuditEventList.jsx'
+import { ERROR_WINDOW_MS } from '../../config/monitoring.js'
 
 const FILTER_LEVELS = ['healthy', 'degraded', 'stale', 'down', 'unknown']
+const ERROR_SEVERITIES = ['WARNING', 'ERROR', 'CRITICAL']
 
 export default function SystemOverview() {
   const [activeLevel, setActiveLevel] = useState(null)
@@ -19,6 +23,19 @@ export default function SystemOverview() {
   )
 
   const { now, elapsedMs: pollAgeMs } = useElapsedTime(lastPolled)
+
+  const audits = usePolling(({ signal }) =>
+    apiGet(
+      endpoints.monitoring.audits({
+        severity: ERROR_SEVERITIES,
+        since: new Date(Date.now() - ERROR_WINDOW_MS).toISOString(),
+        limit: 100,
+      }),
+      { signal },
+    ),
+  )
+  const auditEvents = normalizeAuditEvents(audits.data)
+
   const services = normalizeServiceStatus(data, {
     now,
     monitoringCheckedAtMs: lastUpdated,
@@ -65,12 +82,27 @@ export default function SystemOverview() {
         </>
       )}
 
-      <div className="overview__panels overview__panels--two">
+      <div className="overview__panels">
         <Panel title="SSE CONNECTIONS">
           <EmptyState message="Live stream status arrives with Market Data." />
         </Panel>
-        <Panel title="ERRORS · LAST 5 MIN">
-          <EmptyState message="No error feed published by the backend yet." />
+      </div>
+
+      <div className="overview__panels">
+        <Panel
+          title="ERRORS & WARNINGS · LAST 5 MIN"
+          meta={audits.error ? 'UNAVAILABLE' : auditEvents.length || null}
+        >
+          {audits.loading && <EmptyState message="Loading recent events…" />}
+          {!audits.loading && audits.error && (
+            <EmptyState message="Audit feed unavailable — retrying." />
+          )}
+          {!audits.loading && !audits.error && auditEvents.length === 0 && (
+            <EmptyState message="No warnings or errors in the last 5 minutes." />
+          )}
+          {!audits.loading && !audits.error && auditEvents.length > 0 && (
+            <AuditEventList events={auditEvents} />
+          )}
         </Panel>
       </div>
 

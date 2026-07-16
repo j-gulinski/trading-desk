@@ -30,5 +30,5 @@ def valuation_stream_consumer():
         except Exception:
             log.exception("stream_error")
         finally:
-            write_audit(SERVICE_NAME, "STREAM_DISCONNECTED", "Valuation stream lost", severity="WARNING")
+            write_audit(SERVICE_NAME, "STREAM_DISCONNECTED", "Valuation stream disconnected", severity="WARNING")
         time.sleep(5)

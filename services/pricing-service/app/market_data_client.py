@@ -55,5 +55,5 @@ def market_data_stream_consumer():
         finally:
             with cache.data_lock:
                 cache.market_data_connection = "RECONNECTING"
-            write_audit(SERVICE_NAME, "STREAM_DISCONNECTED", "Market data stream lost", severity="WARNING")
+            write_audit(SERVICE_NAME, "STREAM_DISCONNECTED", "Market data stream disconnected", severity="WARNING")
         time.sleep(5)

@@ -15,7 +15,7 @@ runs via Docker Compose.
 |---|---|---|
 | market-data-service | 8001 | generate + persist market data; publish `/stream` (SSE) |
 | pricing-service | 8002 | value active Trades, write Valuations, publish `/valuation-stream` (SSE) |
-| monitoring-service | 8003 | poll `/health` of all services |
+| monitoring-service | 8003 | poll `/health` of all services + `SELECT 1` liveness on Postgres |
 | books-service | 8004 | CRUD trading books, validate asset class |
 | blotter-service | 8006 | read side: live cache + DB history for the UI |
 | trade-generation-service | 8007 | generate OPEN/CLOSE intents and post them to trade-action |
@@ -45,7 +45,7 @@ docker compose run --rm db-migrations
 
 - **market-data**: `GET /health`, `GET /snapshot`, `GET /stream`
 - **pricing**: `GET /health`, `GET /valuations`, `GET /valuations/<trade_id>`, `GET /valuation-stream`, `POST /scenario`
-- **monitoring**: `GET /health`, `GET /status`
+- **monitoring**: `GET /health`, `GET /status`, `GET /audits`
 - **books**: `GET /health`, `GET/POST /books`, `GET/PUT/DELETE /books/<book_id>`
 - **trade-action**: `GET /health`, `POST /trade-actions`, `POST /trade-actions/batch`, `POST /trade-actions/close-all`, `GET /queue/status`
 - **trade-generation**: `GET /health`, `POST /generate-once`, `POST /start`, `POST /stop`, `GET /status`
@@ -83,11 +83,17 @@ queries:
 | `ix_trades_symbol` | `trades.symbol` | `/trades?symbol=` |
 | `ix_valuations_trade_id_time` | `valuations.(trade_id, valuation_time)` | `/trades/<id>/valuations` history (lookup by trade, ordered by time) |
 | `ix_audit_logs_entity_id` | `audit_logs.entity_id` | `/trades/<id>/audit-logs` |
+| `ix_audit_logs_severity_recent` | `audit_logs.created_at`, partial `WHERE severity IN ('WARNING','ERROR','CRITICAL')` | monitoring `/audits` "Errors & Warnings" feed |
 
 The composite `(trade_id, valuation_time)` index matches both the filter and the
 `ORDER BY valuation_time` of the valuation-history query, so it's served straight
 from the index. Filters on `/trades` compose (`book_id` + `asset_class` +
 `status`), each backed by its own single-column index.
+
+`ix_audit_logs_severity_recent` (migration `b7e2f1a9c3d4`) is **partial**: it indexes
+only the rare non-`INFO` rows, so it stays tiny while the high-volume
+`TRADE_CREATED`/`TRADE_CLOSED` traffic (~5/s under the generator) never enters it. It
+serves the `/audits` panel query — filter by severity, `ORDER BY created_at DESC`.
 
 ---
 
@@ -167,7 +173,7 @@ Every service writes audit events:
 | books | `BOOK_CREATED` / `BOOK_UPDATED` / `BOOK_DELETED` |
 | trade-action | `TRADE_CREATED`, `TRADE_CLOSED`, `ACTION_REJECTED`, `WORKER_STARTED` |
 | trade-generation | `WORKER_STARTED` / `WORKER_STOPPED` |
-| market-data | `SNAPSHOT_WRITTEN`, `DB_WRITE_ERROR` |
+| market-data | `DB_WRITE_ERROR` |
 | pricing | `STREAM_CONNECTED` / `STREAM_DISCONNECTED` |
 | blotter | `STREAM_CONNECTED` / `STREAM_DISCONNECTED` |
 | monitoring | `WORKER_STARTED` |
@@ -177,6 +183,19 @@ handling the event. When there is a business write it joins that write's
 transaction (the `session=` argument) so they commit atomically -- one commit /
 one `fsync` covers both rows.audit_logs` table
 directly and the write sits on the business path.
+
+### Reading audits: monitoring `GET /audits`
+
+The System Overview "Errors & Warnings" panel reads audit rows back through
+**monitoring-service** — it already has DB access and the frontend's
+`/api/monitoring` proxy
+
+To demo `ERROR`/`CRITICAL` rows without a real fault, monitoring exposes a test
+hook `POST /debug/audit` that writes one real audit row (default a clearly
+labelled `TEST_EVENT`, caller-set `severity`/`message`). A synthetic
+`DB_WRITE_ERROR` is deliberately avoided: a real DB outage can't record its own
+audit (the write needs the DB that's down), so that failure surfaces on the
+Postgres health card.
 
 ### Possible extension: file-forwarded audit
 
@@ -312,5 +331,8 @@ confirms it's still ACTIVE -- this also drops stale post-close ticks).
   loop, read the blotter, then flatten everything with `/trade-actions/close-all`
 - `scenario-analysis.http` -- `POST /scenario` shocks, one per asset class
   (equity/commodity/futures/FX percentage shocks, bond bps curve shock)
+- `errors.http` -- produce a WARNING (`ACTION_REJECTED` via a rejected open) and,
+  with Docker, ERROR rows (`STREAM_DISCONNECTED`, `DB_WRITE_ERROR`), then read them
+  back through monitoring `/audits` — the feed behind the "Errors & Warnings" panel
 
 ---

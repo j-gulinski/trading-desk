@@ -1,0 +1,30 @@
+// System Overview page scaffolding: section headers and the panel rows.
+.overview__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-4);
+}
+.overview__section-title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.overview__summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.overview__panels {
+  margin-top: var(--sp-5);
+}
+.overview__panels--two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+}

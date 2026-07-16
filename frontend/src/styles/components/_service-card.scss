@@ -1,0 +1,55 @@
+// Service-health grid + per-service card (ServiceCard) with big latency readout.
+.service-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--sp-4);
+}
+
+.service-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.service-card--degraded {
+  border-color: rgba(251, 191, 36, 0.4);
+}
+.service-card--stale {
+  border-color: rgba(96, 165, 250, 0.4);
+}
+.service-card--down {
+  border-color: rgba(248, 113, 113, 0.4);
+}
+.service-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.service-card__name {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.service-card__latency-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: var(--sp-2);
+}
+.service-card__latency {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-primary);
+}
+.service-card__latency .unit {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-left: 2px;
+}

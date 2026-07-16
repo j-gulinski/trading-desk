@@ -1,0 +1,21 @@
+###############################################################################
+# Scenario: the "Errors & Warnings" audit feed (monitoring /audits)
+###############################################################################
+
+@actions    = http://localhost:8008
+@monitoring = http://localhost:8003
+
+### monitoring is up
+GET {{monitoring}}/health
+
+### reject an open (nonexistent book) -> ACTION_REJECTED / WARNING
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "OPEN_TRADE", "client_request_id": "reject-{{$timestamp}}", "book_id": "00000000-0000-0000-0000-000000000000", "asset_class": "EQUITY", "symbol": "ACME", "side": "BUY", "quantity": 100, "trade_price": 100 }
+
+### ERROR: emit a synthetic row via the test hook
+POST {{monitoring}}/debug/audit
+Content-Type: application/json
+
+{ "severity": "ERROR" }

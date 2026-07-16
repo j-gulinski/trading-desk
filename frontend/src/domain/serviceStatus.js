@@ -4,6 +4,7 @@ const MONITORING_SERVICE = 'monitoring-service'
 
 const DISPLAY_ORDER = [
   'monitoring-service',
+  'postgres',
   'market-data-service',
   'pricing-service',
   'books-service',
