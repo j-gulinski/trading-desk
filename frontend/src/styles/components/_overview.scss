@@ -28,3 +28,14 @@
   grid-template-columns: 1fr 1fr;
   gap: var(--sp-4);
 }
+.overview__stream-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+@media (max-width: 900px) {
+  .overview__stream-summary {
+    grid-template-columns: 1fr;
+  }
+}

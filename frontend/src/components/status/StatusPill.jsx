@@ -6,9 +6,9 @@ const DEFAULT_LABEL = {
   unknown: 'UNKNOWN',
 }
 
-export default function StatusPill({ level, label }) {
+export default function StatusPill({ level, label, compact = false }) {
   return (
-    <span className={`pill pill--${level}`}>
+    <span className={`pill pill--${level}${compact ? ' pill--compact' : ''}`}>
       <span className="pill__dot" />
       {label ?? DEFAULT_LABEL[level] ?? level}
     </span>

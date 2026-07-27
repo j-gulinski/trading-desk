@@ -1,4 +1,4 @@
-from shared.config import TICK_INTERVAL_MS, SNAPSHOT_INTERVAL_MS, LOG_LEVEL
+from shared.config import TICK_INTERVAL_MS, SNAPSHOT_INTERVAL_MS
 
 SERVICE_NAME = "market-data-service"
 HOST = "0.0.0.0"

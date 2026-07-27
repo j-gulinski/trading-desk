@@ -17,4 +17,4 @@ def publish_tick(event_type, tick):
         try:
             q.put_nowait(message)
         except queue.Full:
-            log.debug("client_dropped")
+            log.debug("client_event_dropped")

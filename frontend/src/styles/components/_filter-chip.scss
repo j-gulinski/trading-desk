@@ -1,4 +1,10 @@
 // Toggleable filter chip (FilterChipGroup) with a coloured status dot.
+.filter-chip-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
 .filter-chip {
   appearance: none;
   display: inline-flex;

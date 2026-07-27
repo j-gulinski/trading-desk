@@ -10,6 +10,11 @@ export default defineConfig({
         target: 'http://monitoring-service:8003',
         changeOrigin: true,
         rewrite: p => p.replace('/api/monitoring', '')
+      },
+      '/api/market-data': {
+        target: 'http://market-data-service:8001',
+        changeOrigin: true,
+        rewrite: p => p.replace('/api/market-data', '')
       }
     }
   }

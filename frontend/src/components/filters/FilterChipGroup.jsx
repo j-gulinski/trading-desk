@@ -11,7 +11,7 @@ export default function FilterChipGroup({
     <div className={classes} role="group" aria-label={ariaLabel}>
       {options.map((option) => {
         const selected = value === option.value
-        const tone = option.tone ?? option.value
+        const tone = option.tone
 
         return (
           <button

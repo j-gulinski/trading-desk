@@ -1,23 +1,30 @@
 import { useState } from 'react'
 import { usePolling } from '../../hooks/usePolling.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
+import { useMarketFeedContext } from '../../providers/marketFeedContext.js'
 import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { normalizeServiceStatus, summarize } from '../../domain/serviceStatus.js'
 import { normalizeAuditEvents } from '../../domain/auditEvents.js'
-import { formatElapsedTime } from '../../domain/formatting.js'
+import { formatElapsedTime, formatNumber } from '../../domain/formatting.js'
+import { summarizeFeed } from '../../domain/marketData.js'
+import { formatStreamTime } from '../../domain/marketFormat.js'
 import ServiceCard from '../../components/cards/ServiceCard.jsx'
+import StatCard from '../../components/cards/StatCard.jsx'
 import Panel from '../../components/Panel.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
 import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
 import AuditEventList from '../../components/audit/AuditEventList.jsx'
+import StatusPill from '../../components/status/StatusPill.jsx'
 import { ERROR_WINDOW_MS } from '../../config/monitoring.js'
+import { MARKET_STATUS_LEVEL } from '../../config/marketData.js'
 
 const FILTER_LEVELS = ['healthy', 'degraded', 'stale', 'down', 'unknown']
 const ERROR_SEVERITIES = ['WARNING', 'ERROR', 'CRITICAL']
 
 export default function SystemOverview() {
   const [activeLevel, setActiveLevel] = useState(null)
+  const marketFeed = useMarketFeedContext()
   const { data, error, loading, lastPolled, lastUpdated } = usePolling(
     ({ signal }) => apiGet(endpoints.monitoring.status, { signal }),
   )
@@ -42,6 +49,7 @@ export default function SystemOverview() {
     monitoringUnavailable: error != null,
   })
   const summary = summarize(services)
+  const marketSummary = summarizeFeed(Object.values(marketFeed.instruments), now)
   const visibleServices = activeLevel
     ? services.filter((service) => service.level === activeLevel)
     : services
@@ -83,8 +91,32 @@ export default function SystemOverview() {
       )}
 
       <div className="overview__panels">
-        <Panel title="SSE CONNECTIONS">
-          <EmptyState message="Live stream status arrives with Market Data." />
+        <Panel
+          title="MARKET DATA STREAM"
+          meta={
+            <StatusPill
+              level={MARKET_STATUS_LEVEL[marketFeed.status] ?? 'unknown'}
+              label={marketFeed.status}
+            />
+          }
+        >
+          <div className="overview__stream-summary">
+            <StatCard
+              label="TICKS RECEIVED"
+              value={formatNumber(marketFeed.tickCount)}
+              sub="this tab session"
+            />
+            <StatCard
+              label="INSTRUMENTS"
+              value={marketSummary.total}
+              sub={`${marketSummary.live} live · ${marketSummary.stale} stale`}
+            />
+            <StatCard
+              label="LAST UPDATE"
+              value={formatStreamTime(marketSummary.lastUpdateMs)}
+              sub="market data"
+            />
+          </div>
         </Panel>
       </div>
 

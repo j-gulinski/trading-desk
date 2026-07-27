@@ -16,6 +16,7 @@ app = bottle.Bottle()
 @app.route("/stream")
 def stream():
     response.content_type = "text/event-stream"
+    response.set_header("Cache-Control", "no-cache")
     with clients_lock:
         client_q = queue.Queue(maxsize=500)
         client_event_queues.add(client_q)
@@ -26,8 +27,8 @@ def stream():
             while True:
                 message = client_q.get()
                 yield f"event: {message['event']}\ndata: {to_json(message['data'])}\n\n"
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("stream_client_error", error=type(exc).__name__)
         finally:
             with clients_lock:
                 client_event_queues.discard(client_q)
@@ -39,11 +40,7 @@ def stream():
 @app.route("/snapshot")
 def get_snapshot():
     response.content_type = "application/json"
-    with persistence.data_lock:
-        return to_json({
-            "spots": persistence.spots,
-            "curves": persistence.curves,
-        })
+    return to_json(persistence.current_snapshot())
 
 
 @app.route("/health")

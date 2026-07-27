@@ -1,27 +1,28 @@
 # Trading Microservices
 
-A miniature trading / risk stack: market data is generated and streamed, trades
-are opened and closed, active positions are continuously revalued and their PnL
-published, and a blotter backend serves the data a future UI would show.
-Postgres is the single source of truth; SSE carries the live streams; everything
-runs via Docker Compose.
+A miniature trading / risk stack: market data is generated and streamed, trades are opened
+and closed, active positions are continuously revalued and their PnL published, and a React
+frontend shows the live market and the blotter. Postgres is the single source of truth, SSE
+carries the live streams, everything runs on Docker Compose.
+
+This README covers the decisions worth knowing. Implementation detail lives in `docs/`.
 
 ---
 
-## Architecture
+## Services
 
+| Service | Port | Responsibility | Key endpoints |
+|---|---|---|---|
+| market-data | 8001 | generate + persist market data, publish the live feed | `/snapshot`, `/stream` (SSE) |
+| pricing | 8002 | value ACTIVE trades, write valuations, publish PnL | `/valuations`, `/valuation-stream` (SSE), `POST /scenario` |
+| monitoring | 8003 | poll every `/health` + `SELECT 1` on Postgres | `/status`, `/audits` |
+| books | 8004 | CRUD trading books, validate asset class | `/books`, `/books/<id>` |
+| blotter | 8006 | read side: live cache + DB history | `/books/summary`, `/trades`, `/trades/<id>/…` |
+| trade-generation | 8007 | simulated order source | `/start`, `/stop`, `/generate-once` |
+| trade-action | 8008 | queue + worker, the only writer of `trades` | `POST /trade-actions`, `/batch`, `/close-all` |
+| frontend | 3000 | React + Vite UI | — |
 
-| Service | Port | Responsibility |
-|---|---|---|
-| market-data-service | 8001 | generate + persist market data; publish `/stream` (SSE) |
-| pricing-service | 8002 | value active Trades, write Valuations, publish `/valuation-stream` (SSE) |
-| monitoring-service | 8003 | poll `/health` of all services + `SELECT 1` liveness on Postgres |
-| books-service | 8004 | CRUD trading books, validate asset class |
-| blotter-service | 8006 | read side: live cache + DB history for the UI |
-| trade-generation-service | 8007 | generate OPEN/CLOSE intents and post them to trade-action |
-| trade-action-service | 8008 | queue + worker that writes/closes Trades |
-
----
+Every service also answers `GET /health`.
 
 ## Running
 
@@ -30,319 +31,210 @@ cp .env.example .env        # then set POSTGRES_PASSWORD etc.
 docker compose up --build
 ```
 
-Compose starts Postgres, runs Alembic migrations once (`db-migrations` one-shot
-container, gated on the Postgres healthcheck), then starts the services. Schema
-is created by Alembic -- **not** `Base.metadata.create_all`. All timestamps are
-`TIMESTAMPTZ`; money is `NUMERIC`.
-
-Migrations only (if needed):
-
-```bash
-docker compose run --rm db-migrations
-```
-
-### Endpoints
-
-- **market-data**: `GET /health`, `GET /snapshot`, `GET /stream`
-- **pricing**: `GET /health`, `GET /valuations`, `GET /valuations/<trade_id>`, `GET /valuation-stream`, `POST /scenario`
-- **monitoring**: `GET /health`, `GET /status`, `GET /audits`
-- **books**: `GET /health`, `GET/POST /books`, `GET/PUT/DELETE /books/<book_id>`
-- **trade-action**: `GET /health`, `POST /trade-actions`, `POST /trade-actions/batch`, `POST /trade-actions/close-all`, `GET /queue/status`
-- **trade-generation**: `GET /health`, `POST /generate-once`, `POST /start`, `POST /stop`, `GET /status`
-- **blotter**: `GET /health`, `GET /books/summary`, `GET /trades`, `GET /trades/<id>`, `GET /trades/<id>/valuations`, `GET /trades/<id>/audit-logs`
-
----
-
-## Database schema
-
-Tables: `books`, `trades`, `valuations`, `market_data_spot_prices`,
-`market_data_curves`, `market_data_snapshots`, `audit_logs`.
-
-- **`trades.metadata` (JSONB, mapped as `trade_metadata`)** -- per-trade pricing
-  terms copied from the instrument catalog at creation (e.g. `multiplier` for
-  futures, bond coupon/maturity/curve). Trades are self-describing so Pricing
-  never reads the catalog at runtime. JSONB because the shape varies per asset
-  class.
-- **`trades.client_request_id` UNIQUE** -- idempotency key; a re-sent intent
-  can't create a second trade.
-- **money columns are `NUMERIC`** -- never float. `Decimal` is serialised to JSON
-  as a string (the custom encoder), since `json.dumps` can't emit `Decimal`.
-- **`valuations`** keeps `fair_value` + `unrealized/realized/total_pnl`; the final
-  (close) row is tagged `valuation_payload.final = true`.
-
-### Indexes
-
-Created by the `d19af2df2449_indexes` migration to support the blotter's typical
-queries:
-
-| Index | Column(s) | Serves |
-|---|---|---|
-| `ix_trades_book_id` | `trades.book_id` | `/trades?book_id=`, `/books/summary` |
-| `ix_trades_asset_class` | `trades.asset_class` | `/trades?asset_class=` |
-| `ix_trades_status` | `trades.status` | `/trades?status=` (DB path for CLOSED) |
-| `ix_trades_symbol` | `trades.symbol` | `/trades?symbol=` |
-| `ix_valuations_trade_id_time` | `valuations.(trade_id, valuation_time)` | `/trades/<id>/valuations` history (lookup by trade, ordered by time) |
-| `ix_audit_logs_entity_id` | `audit_logs.entity_id` | `/trades/<id>/audit-logs` |
-| `ix_audit_logs_severity_recent` | `audit_logs.created_at`, partial `WHERE severity IN ('WARNING','ERROR','CRITICAL')` | monitoring `/audits` "Errors & Warnings" feed |
-
-The composite `(trade_id, valuation_time)` index matches both the filter and the
-`ORDER BY valuation_time` of the valuation-history query, so it's served straight
-from the index. Filters on `/trades` compose (`book_id` + `asset_class` +
-`status`), each backed by its own single-column index.
-
-`ix_audit_logs_severity_recent` (migration `b7e2f1a9c3d4`) is **partial**: it indexes
-only the rare non-`INFO` rows, so it stays tiny while the high-volume
-`TRADE_CREATED`/`TRADE_CLOSED` traffic (~5/s under the generator) never enters it. It
-serves the `/audits` panel query — filter by severity, `ORDER BY created_at DESC`.
+Compose starts Postgres, runs Alembic migrations once (a `db-migrations` one-shot container
+gated on the Postgres healthcheck), then the services. Schema comes from Alembic, **not**
+`Base.metadata.create_all`. Migrations alone: `docker compose run --rm db-migrations`.
 
 ---
 
 ## The end-to-end flow
 
 ```
-generated/manual intent -> trade-action (queue+worker) -> Trades (ACTIVE)
-   -> pricing values it on the next market tick -> Valuations (+ valuation_update on SSE)
-   -> blotter caches live PnL; on close, pricing finalizes realized PnL
+intent → trade-action (queue + worker) → trades (ACTIVE)
+       → pricing values it on the next market tick → valuations + valuation_update (SSE)
+       → blotter caches live PnL; on close, pricing finalizes realized PnL
 ```
 
-1. An `OPEN_TRADE` intent hits trade-action, is queued, gets **202 Accepted**, and
-   a worker validates (book exists, asset class matches, idempotency) and inserts
-   an `ACTIVE` trade in one DB transaction.
-2. Pricing's refresh loop (~2s) discovers the new ACTIVE trade and values it on
-   each market tick, writing `Valuations` and publishing `valuation_update`.
-3. A `CLOSE_TRADE` intent flips the trade to `CLOSED` (guarded UPDATE). Pricing
-   then finalizes: writes one valuation with `unrealized=0`, `realized` set,
-   `total=realized`.
+1. An `OPEN_TRADE` intent hits trade-action, is queued, returns **202 Accepted**, and a
+   worker validates it (book exists, asset class matches, idempotent) and inserts an
+   `ACTIVE` trade in one transaction.
+2. Pricing's refresh loop (~2 s) picks up the new trade and values it on each market tick,
+   writing a valuation and publishing `valuation_update`.
+3. A `CLOSE_TRADE` intent flips it to `CLOSED`. Pricing then writes one final valuation with
+   `unrealized = 0`, `realized` set, `total = realized`.
 
 ---
 
-## Market benchmark
+## Decisions worth reading
 
-The market-data generator publishes `MARKET_INDEX`, a non-tradable benchmark
-for book alpha/beta. It is an equal-weighted basket of the risky spot
-instruments (ACME, XAUUSD, and ES_FUT), each rebased to a 1000 starting level.
-FX and rates are excluded because their return dynamics are not comparable.
-`INDEX` is deliberately not part of the tradeable `AssetClass` enum.
+### Only one writer, and the guard is in the database
 
----
+trade-action owns every write to `trades`. A `queue.Queue` separates fast HTTP intake from
+DB writes and a single worker serialises them. **Double-close is prevented in SQL, not in
+Python:**
 
-## SSE
+```sql
+UPDATE trades SET status='CLOSED' WHERE trade_id=:id AND status='ACTIVE'
+```
 
-Both `/stream` (market data) and `/valuation-stream` (valuations) are
-Server-Sent Events. Each event is `event: <type>\ndata: <json>\n\n` (blank line
-terminates). Servers run on a `ThreadingMixIn` WSGI server so a long-lived
-`/stream` connection never blocks `/health`. Consumers (Pricing, Blotter)
-reconnect forever -- a refused connection or dropped client never crashes the
-producer.
+the close only wins if `rowcount == 1`. `trades.client_request_id` is UNIQUE, so a re-sent
+intent cannot create a second trade — which is what makes the non-durable queue acceptable.
 
----
+### PnL signs live in exactly one place
 
-## Trade Action concurrency
-
-A `queue.Queue` decouples fast HTTP intake (202) from DB writes. A single worker
-serialises writes. **Double-close** is prevented in the DB, not just in Python:
-`UPDATE trades SET status='CLOSED' WHERE trade_id=:id AND status='ACTIVE'` and
-the close only "wins" if `rowcount == 1`. The in-process queue is **not durable**
--- in-flight intents are lost on restart; idempotency (`client_request_id`) makes
-a re-sent intent safe.
-
----
-
-## Trade generation
-
-A simulated order source. It seeds one default book per asset class via Books
-Service on startup, then a single background loop generates intents
-and posts them to trade-action (the only writer of `Trades`):
-
-- Each cycle picks a random book, prices its instrument off the market-data
-  `/snapshot` (bonds are PV'd off the `USD_GOV` curve), picks a random side, and
-  sizes `quantity` to a **target notional** (`TARGET_NOTIONAL`) so every asset
-  class carries comparable exposure -- otherwise the futures multiplier would
-  dwarf everyone else's PnL.
-- ~`CLOSE_PROBABILITY` of cycles close a tracked open trade instead.
-- The loop is **off by default**; `POST /start` / `POST /stop` toggle it (a
-  `threading.Event`), `POST /generate-once` fires a single cycle. Open trade ids
-  are tracked in memory (lost on restart -- a POC limitation).
-
----
-
-## Audit logs vs technical logging
-
-- **Technical logs** -- `structlog` (JSON) to stdout, configured once per service
-  in `shared/logging_config.py`. For observing the app in the container console.
-- **Audit logs** -- business/operational events written to the `audit_logs`
-  table via `shared/audit.py` `write_audit(...)`. For later reconstruction of
-  what happened. When a business write and its audit belong together they share
-  **one DB transaction** (the `session=` argument), so the trade and its
-  `TRADE_CREATED` row commit atomically.
-
-Every service writes audit events:
-
-| Service | Events |
+| Asset class | Fair value |
 |---|---|
-| books | `BOOK_CREATED` / `BOOK_UPDATED` / `BOOK_DELETED` |
-| trade-action | `TRADE_CREATED`, `TRADE_CLOSED`, `ACTION_REJECTED`, `WORKER_STARTED` |
-| trade-generation | `WORKER_STARTED` / `WORKER_STOPPED` |
-| market-data | `DB_WRITE_ERROR` |
-| pricing | `STREAM_CONNECTED` / `STREAM_DISCONNECTED` |
-| blotter | `STREAM_CONNECTED` / `STREAM_DISCONNECTED` |
-| monitoring | `WORKER_STARTED` |
+| EQUITY / COMMODITY | `price × qty` |
+| FUTURES | `price × multiplier × qty` |
+| FX (forward) | `forward × qty`, `forward = spot × (1 + r_d·T) / (1 + r_f·T)` |
+| BOND | `Σ CF_t / (1 + r(t))^t × qty`, rate interpolated off the `USD_GOV` curve |
 
-Audit today is written **inline**: the audit row goes to the DB as part of
-handling the event. When there is a business write it joins that write's
-transaction (the `session=` argument) so they commit atomically -- one commit /
-one `fsync` covers both rows.audit_logs` table
-directly and the write sits on the business path.
+The classic domain bug is the sign, so pricing owns all of it:
 
-### Reading audits: monitoring `GET /audits`
+- BUY: `unrealized = (current − trade) × qty × multiplier`
+- SELL: `unrealized = (trade − current) × qty × multiplier`
 
-The System Overview "Errors & Warnings" panel reads audit rows back through
-**monitoring-service** — it already has DB access and the frontend's
-`/api/monitoring` proxy
+Per-trade pricing terms (futures multiplier, bond coupon/maturity/curve) are copied into
+`trades.metadata` (JSONB) at creation, so trades are self-describing and pricing never reads
+the instrument catalog at runtime. Money is `NUMERIC` everywhere, never float.
 
-To demo `ERROR`/`CRITICAL` rows without a real fault, monitoring exposes a test
-hook `POST /debug/audit` that writes one real audit row (default a clearly
-labelled `TEST_EVENT`, caller-set `severity`/`message`). A synthetic
-`DB_WRITE_ERROR` is deliberately avoided: a real DB outage can't record its own
-audit (the write needs the DB that's down), so that failure surfaces on the
-Postgres health card.
+### Two sources of truth for one price, reconciled by identity
 
-### Possible extension: file-forwarded audit
+Every generated market event carries a process `stream_id`, a monotonic `event_id` and a
+canonical `event_time`, and `/snapshot` exposes the same fields. The browser starts the
+snapshot request and the stream **concurrently** — waiting for one would guarantee a gap —
+and resolves the resulting race per instrument: same process and a higher sequence number
+wins; a changed process is a restart and resets that instrument's window; a late frame from
+a dead process is dropped. A reconnect refetches the snapshot and merges it the same way
+rather than replacing state wholesale.
 
-A lighter-weight alternative (full write-up in `docs/audit-improvements.md`):
-services stop writing `audit_logs` directly and instead **emit each audit event
-as a structured log line**; a separate **audit-forwarder** tails those log files
-and batch-inserts them into `audit_logs`.
- The `audit_logs` table and the blotter's `/trades/<id>/audit-logs` read path stay
-unchanged.
+The documented exception: hard-coded rows that exist before any generator has ticked carry
+only the envelope's `stream_id`, so during the first seconds after a backend start a late
+snapshot can briefly overwrite a newer live value. Recurring ticks converge.
 
-| | Inline write (current) | File -> forwarder |
-|---|---|---|
-| Audit on business hot path | yes (1 extra row) | no -- services just log |
-| Writers of `audit_logs` | every service | one (the forwarder) |
-| Efficiency at volume | per-event insert | batched inserts (one commit per batch) |
-| Atomic with business change | **yes** | no |
-| Can lose events | no | **yes** (see below) |
+Full walkthrough in [`docs/phase-3-notes.md`](docs/phase-3-notes.md).
 
-**Trade-off -- with this infra some events can be lost.** The log file is a
-best-effort buffer: if a container dies or a log rotates before the forwarder
-reads the line, that audit event is gone and there is no business transaction to fall back on.
+### The blotter is a read model, not a second source of truth
 
----
+**Live lists and PnL come from the stream cache; single-trade history comes from the DB.**
 
-## Fair value & PnL per asset class
+- The live working set holds **only ACTIVE trades**, indexed on
+  `book_id / asset_class / status / symbol`; queries intersect the smallest id-set first
+  instead of scanning. Bootstrapped from the DB at startup, kept current off the stream,
+  **evicted on close** — so memory tracks open risk, not total history.
+- `GET /trades` resolves by status: ACTIVE from the cache, CLOSED from the DB, no status
+  returns both.
+- **Realized** PnL in `/books/summary` is aggregated from the DB (final valuation rows), so
+  it survives restarts; **unrealized** is summed live from the cache.
 
-| Asset class | Fair value | Notes |
-|---|---|---|
-| EQUITY / COMMODITY | `price * qty` | price = mid/last/spot |
-| FUTURES | `price * multiplier * qty` | `multiplier` from metadata |
-| FX (forward) | `forward * qty` | `forward = spot*(1+r_d*T)/(1+r_f*T)` |
-| BOND | `sum CF_t / (1+r(t))^t * qty` | rate interpolated off the `USD_GOV` curve |
+### Audit logs are business records, technical logs are not
 
-PnL sign depends on side -- the classic domain bug:
-- BUY: `unrealized = (current - trade) * qty * multiplier`
-- SELL: `unrealized = (trade - current) * qty * multiplier`
+- **Technical logs** — `structlog` JSON to stdout, for watching the app in a console.
+- **Audit logs** — business events in the `audit_logs` table via `write_audit(...)`, for
+  reconstructing what happened. When a business write and its audit belong together they
+  **share one transaction** (`session=`), so a trade and its `TRADE_CREATED` row commit
+  atomically — one commit, one `fsync`, no possibility of one without the other.
 
-Pricing owns **all** PnL math (one place for the signs). Realized PnL is
-finalized on close (`unrealized=0`, `total=realized`).
+The System Overview "Errors & Warnings" panel reads these back through monitoring's
+`GET /audits`, which is backed by a **partial index** on `audit_logs(created_at)`
+`WHERE severity IN ('WARNING','ERROR','CRITICAL')`. Partial because the high-volume
+`TRADE_CREATED`/`TRADE_CLOSED` rows (~5/s under the generator) never enter it, so the index
+stays tiny while serving the only query that matters.
 
----
+A lighter alternative — emit audits as log lines and have a forwarder batch-insert them —
+would take the audit write off the business path and batch its commits, but it can lose
+events (a container dying before the forwarder reads the line) and gives up atomicity with
+the business change. Not worth it here, where correctness matters more than volume.
 
-## Scenario analysis (shocks)
+### A benchmark that means something
 
-`POST /scenario` on pricing re-prices a single ad-hoc position under a market
-shock and returns base vs scenario valuation -- no trade is created and nothing is
-persisted. It reuses the same valuation engine as live pricing, so a shock
-P&L matches what the position would actually book.
+`MARKET_INDEX` is an equal-weighted basket of the risky spot instruments (ACME, XAUUSD,
+ES_FUT), rebased to a fixed reference level, so its moves are connected to instruments you
+can actually see on screen. FX and rates are excluded because their return dynamics are not
+comparable. It is deliberately not part of the tradeable `AssetClass` enum, and it does not
+appear in the instrument table.
 
-**`scenario_pnl = scenario value - base value`** (from the position's side: a long
-gains when value rises, a short when it falls).
+The simulator uses one readable per-tick volatility per asset, then applies real tick sizes
+and two-sided spreads, with gentle mean reversion so a long demo does not drift somewhere
+implausible. Curve level, slope and small per-tenor moves all derive from one
+curve-volatility value, so the curve moves coherently without a large tuning surface.
 
+### Scenario shocks reuse the pricing engine
 
-| Asset class | Shock unit | Applied to |
-|---|---|---|
-| EQUITY / COMMODITY / FUTURES / FX | decimal percentage (`0.10` = +10%) | spot / forward price |
-| BOND | basis points (`25` = +25 bps) | every tenor on the `USD_GOV` curve, then re-PV |
+`POST /scenario` re-prices one ad-hoc position under a market shock and returns base vs
+scenario. Nothing is created and nothing is persisted, but it runs through the *same*
+valuation code as live pricing, so a shock P&L matches what the position would really book.
 
-- `instrument.current_price` (the `base_price`) is the base when supplied (omit
-  it to pull the live price from the pricing cache). It's honoured for every asset
-  class, bonds included.
-- Bonds are shocked on the **curve** (parallel bump of all rates; the curve must
-  be in cache). The price impact is the exact **PV delta** -- `bond_pv` at the
-  bumped curve minus base PV -- applied to the base price. So the supplied price is
-  kept and the P&L isolates the rate move: a rise (`+25`) lowers value, a rally
-  (`-25`) raises it.
-- Response carries `base` (price / value), `scenario` (price / value),
-  `current_pnl` (position P&L now = base value − entry value) and `scenario_pnl`
-  (the shock's impact = scenario value − base value) -- both side-aware. P&L if
-  the shock happens = `current_pnl + scenario_pnl`.
-
-See `scenarios/scenario-analysis.http` for one shock per asset class (upside and
-downside).
+Percentage shocks apply to spot/forward; bond shocks are basis points bumped across every
+tenor of the `USD_GOV` curve and re-PV'd, so the P&L isolates the rate move.
+`scenario_pnl = scenario value − base value`, side-aware. See
+`scenarios/scenario-analysis.http`.
 
 ---
 
-## Blotter design (read side)
+## Cost and scale
 
-The blotter is the CQRS-lite read model. The important distinction (from the
-spec): **live lists/PnL come from the valuation-stream cache; single-trade
-history comes from the DB.**
+Everything is sized for a demo: ten instruments, ~3 market events/s, a handful of open
+trades. This section records what the costs actually are and which one breaks first, so the
+answer is measured rather than guessed later.
 
-- **Live working set (`cache.IndexedStore`)** -- holds **only ACTIVE trades**,
-  indexed on `book_id / asset_class / status / symbol`. `query()` intersects the
-  per-field id-sets smallest-first instead of scanning. Bootstrapped from the DB
-  (ACTIVE rows) at startup, kept current off the stream, and **evicted on close**
-  -- so memory is bounded by open positions, not by total trade history.
-- **Live PnL cache** -- latest `valuation_update` per ACTIVE trade, dropped on
-  close.
-- **Closed / historical** trades and their valuations are served from the **DB**
-  (paginated via `limit`/`offset`). `GET /trades` resolves by status:
-  `?status=ACTIVE` (or omitted for the active rows) uses the cache,
-  `?status=CLOSED` uses the DB, and **no status returns both** -- active from the
-  cache plus non-active from the DB.
-- **Realized PnL** in `/books/summary` is aggregated **from the DB** (the final
-  valuation rows tagged `valuation_payload.final=true`), so it's correct for
-  closed trades and survives restarts; **unrealized** PnL is summed live from the
-  cache.
+### The live market screen
 
-Stream projection (`service.handle_valuation`): a `final` valuation evicts the
-trade + drops its live PnL; an active valuation refreshes live PnL and
-lazy-loads the trade into the store the first time it's seen (only if the DB
-confirms it's still ACTIVE -- this also drops stale post-close ticks).
+N = instruments on screen, H = history points each (capped at 100). The UI re-renders at
+most **2.7×/s** — a 600 ms flush plus a 1 s freshness clock — and each render walks this
+chain. Measured in Chrome:
+
+| Work | Grows as | N = 10 (today) | N = 1,000 |
+|---|---|---|---|
+| Trend-line geometry | O(N·H) | 0.17 ms | 12.4 ms |
+| Trend-line DOM (only rows that ticked) | O(N·H) | 0.32 ms | 24.5 ms |
+| Row derivation (deltas, freshness) | O(N) | 0.02 ms | 1.1 ms |
+| Sort | O(N) in practice | 0.005 ms | 0.25 ms |
+| Persist to `sessionStorage` | O(N·H) | ~10 kB | ~1 MB |
+
+Today the whole chain runs in **under a millisecond against a 16.7 ms frame budget**. The
+render rate is bounded by the flush timer, not by the work — nothing here is optimised, and
+nothing needs to be.
+
+Two results worth keeping:
+
+- **Sorting is O(N log N) on paper and O(N) in practice.** Comparison values are captured
+  when you click a header rather than read live, so on every later render the array is
+  already in order and V8's TimSort exits after one linear scan — 999 comparisons for 1,000
+  rows, not 9,966. Sorting live values would lose that *and* make rows jump under the
+  cursor.
+- **Drawing costs ~150× more than sorting.** If this table ever feels slow it will be the
+  DOM, never the algorithms.
+
+### If it had to scale
+
+In order of payoff:
+
+1. **Virtualize the table.** Only ~30 rows fit on a screen; render only those and N stops
+   mattering — it fixes node count, string churn, DOM rebuilds and paint at once.
+2. **Drop the update counter from the React row key** so a ticking row is patched instead of
+   remounted, and flash one cell rather than the whole row.
+3. **Animate `opacity` instead of `background`** so the flash composites rather than
+   repaints.
+4. **Downsample history for display** if `HISTORY_LENGTH` grows — a 96 px sparkline cannot
+   show more than ~96 points, so beyond that the work is invisible.
+
+### Bounds on the backend
+
+| Bound | Value | At the limit |
+|---|---|---|
+| SSE queue per client | 500 events | event dropped and logged; memory stays bounded |
+| Browser feed buffer | latest value per instrument | intermediate ticks coalesced, never queued |
+| Blotter live cache | ACTIVE trades only | closed trades evicted on close |
+| trade-action worker | one thread | writes serialise; intake stays fast because the queue absorbs bursts |
+
+None of these is a throughput optimisation — each exists to stop something growing without
+limit. A real feed would need measured queue sizing, server-side subscriptions and durable
+replay before any of them counted as production numbers.
 
 ---
 
 ## Known limitations
 
-- `queue.Queue` in trade-action is in-process and non-durable -- in-flight
-  intents are lost on restart (idempotency makes a re-send safe).
-- trade-generation tracks open trade ids **in memory**, so after a restart it can
-  only close trades it opened in the new run.
-- Blotter live caches are empty for a moment after restart until the first
-  valuations stream in; `bootstrap_trades()` warms the active set from the DB to
-  shrink that window.
-- Per-asset PnL is brought *closer* (notional-sized quantities + uniform relative
-  market-data volatility), not made exactly equal -- lot indivisibility (1 futures
-  contract is the smallest step) keeps some spread.
-
----
-
-## Test scenarios
-
-`.http` files under `scenarios/` (REST Client format), e.g.:
-
-- `health.http` -- every service answers `/health`
-- `open-and-price-all-assets.http` -- one trade per asset class, each priced
-- `close-and-realized-pnl.http` -- close -> realized PnL finalized
-- `idempotency.http` -- idempotent open + double-close guard
-- `blotter.http` -- the full read side: `/books/summary`, `/trades` + filters,
-  `/trades/<id>`, valuation history, audit logs; open -> price -> close
-- `full-flow.http` -- the whole stack driven by trade-generation: start the
-  loop, read the blotter, then flatten everything with `/trade-actions/close-all`
-- `scenario-analysis.http` -- `POST /scenario` shocks, one per asset class
-  (equity/commodity/futures/FX percentage shocks, bond bps curve shock)
-- `errors.http` -- produce a WARNING (`ACTION_REJECTED` via a rejected open) and,
-  with Docker, ERROR rows (`STREAM_DISCONNECTED`, `DB_WRITE_ERROR`), then read them
-  back through monitoring `/audits` — the feed behind the "Errors & Warnings" panel
-
----
+- The trade-action queue is in-process and **non-durable** — in-flight intents are lost on
+  restart. Idempotency makes a re-send safe.
+- trade-generation tracks open trade ids **in memory**, so after a restart it can only close
+  trades it opened in the new run.
+- Blotter live caches are empty for a moment after restart until valuations stream in;
+  `bootstrap_trades()` warms the active set from the DB to shrink that window.
+- Per-asset PnL is brought *closer* by notional-sized quantities, not made equal — one
+  futures contract is the smallest step, so some spread remains.
+- The market screen reconciles current state; it is **not** an audit trail. Samples are lost
+  on disconnect and coalesced during bursts. A tick tape would need durable replay.
+- Producer/consumer stream audits are not yet failure-isolated, so those loops are not a
+  production-resilience template.
