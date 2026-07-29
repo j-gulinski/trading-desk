@@ -1,0 +1,35 @@
+// Signed value tones (deltas, PnL) and the asset-class tag. Shared by the market
+// and valuation screens; the direction suffix comes from domain `directionOf`.
+.delta {
+  white-space: nowrap;
+}
+.delta--pos {
+  color: var(--pos);
+}
+.delta--neg {
+  color: var(--neg);
+}
+.delta--flat {
+  color: var(--text-muted);
+}
+.delta__percent {
+  margin-left: 6px;
+  color: currentColor;
+  font-size: 11px;
+  opacity: 0.72;
+}
+
+.class-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+.class-tag__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}

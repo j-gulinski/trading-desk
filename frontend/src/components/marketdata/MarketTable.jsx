@@ -8,24 +8,19 @@ function rowKey(row) {
 }
 
 function rowClassName(row) {
-  const flashing =
-    row.live &&
-    (row.instrument.lastDirection === 'pos' || row.instrument.lastDirection === 'neg')
+  const { lastDirection } = row.instrument
+  const flashing = row.live && lastDirection !== 'flat'
   return [
-    !row.live && 'market-row--stale',
-    flashing && `market-row--tick-${row.instrument.lastDirection}`,
+    !row.live && 'data-table__row--muted',
+    flashing && `data-table__row--tick-${lastDirection}`,
   ]
     .filter(Boolean)
     .join(' ')
 }
 
 function cellClassName(column, row) {
-  if (column.id === 'observedChange') {
-    return `market-delta market-delta--${row.observedDirection}`
-  }
-  if (column.id === 'lastTickChange') {
-    return `market-delta market-delta--${row.lastTickDirection}`
-  }
+  if (column.id === 'observedChange') return `delta delta--${row.observedDirection}`
+  if (column.id === 'lastTickChange') return `delta delta--${row.lastTickDirection}`
   return null
 }
 

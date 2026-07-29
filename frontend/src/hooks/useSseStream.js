@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-
-const STREAM_STATUS = {
-  connecting: 'CONNECTING',
-  connected: 'CONNECTED',
-  reconnecting: 'RECONNECTING',
-}
+import { STREAM_STATUS } from '../config/stream.js'
 
 const RECONNECT_DELAY_MS = 2000
 

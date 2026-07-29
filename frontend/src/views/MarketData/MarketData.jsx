@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useMarketFeedContext } from '../../providers/marketFeedContext.js'
+import { useState } from 'react'
+import { useMarketFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { useTableState } from '../../hooks/useTableState.js'
 import {
@@ -8,7 +8,6 @@ import {
   DEFAULT_MARKET_SORT,
   MARKET_COLUMNS,
   MARKET_FALLBACK_SORT,
-  MARKET_STATUS_LEVEL,
   SORT_REQUIRES_CLASS_HINT,
 } from '../../config/marketData.js'
 import {
@@ -17,13 +16,15 @@ import {
   sortMarketRows,
   summarizeFeed,
 } from '../../domain/marketData.js'
-import { formatMarketSymbol, formatStreamTime } from '../../domain/marketFormat.js'
-import { formatNumber } from '../../domain/formatting.js'
+import { formatMarketSymbol } from '../../domain/marketFormat.js'
+import { countOptions } from '../../domain/filters.js'
+import { formatClockTime, formatNumber } from '../../domain/formatting.js'
 import StatCard from '../../components/cards/StatCard.jsx'
-import StatusPill from '../../components/status/StatusPill.jsx'
-import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
+import StreamHeader from '../../components/status/StreamHeader.jsx'
+import FilterBar from '../../components/filters/FilterBar.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
 import ColumnPicker from '../../components/tables/ColumnPicker.jsx'
+import SortCaptureStatus from '../../components/tables/SortCaptureStatus.jsx'
 import MarketTable from '../../components/marketdata/MarketTable.jsx'
 import MarketIndexCard from '../../components/marketdata/MarketIndexCard.jsx'
 
@@ -41,50 +42,18 @@ function matchesSearch(row, search) {
   )
 }
 
-function assetClassOptions(rows) {
-  const counts = new Map()
-  for (const row of rows) {
-    const assetClass = row.instrument.assetClass
-    counts.set(assetClass, (counts.get(assetClass) ?? 0) + 1)
-  }
-  return Array.from(counts, ([assetClass, count]) => ({
-    value: assetClass,
-    label: assetClass,
-    count,
-  })).sort((a, b) => a.value.localeCompare(b.value))
-}
-
-function SortCaptureStatus({ sort }) {
-  if (sort.capturedAt == null) return null
-  return (
-    <div className="table-sort-status" role="status">
-      Order captured {formatStreamTime(sort.capturedAt).slice(0, 5)} · values live
-    </div>
-  )
-}
-
 export default function MarketData() {
-  const { instruments, tickCount, status, snapshotSettled } = useMarketFeedContext()
+  const { instruments, tickCount, status, seedStatus } = useMarketFeedContext()
   const { now } = useElapsedTime()
 
   const [activeClass, setActiveClass] = useState(null)
   const [query, setQuery] = useState('')
 
-  const rows = useMemo(
-    () => marketRowsOf(Object.values(instruments), now),
-    [instruments, now],
+  const rows = marketRowsOf(Object.values(instruments), now)
+  const marketRows = rows.filter(
+    (row) => row.instrument.assetClass !== 'RATE' && row.instrument.id !== BENCHMARK_ID,
   )
-  const marketRows = useMemo(
-    () =>
-      rows.filter(
-        (row) => row.instrument.assetClass !== 'RATE' && row.instrument.id !== BENCHMARK_ID,
-      ),
-    [rows],
-  )
-  const curveRows = useMemo(
-    () => rows.filter((row) => row.instrument.assetClass === 'RATE'),
-    [rows],
-  )
+  const curveRows = rows.filter((row) => row.instrument.assetClass === 'RATE')
 
   function sortDisabledReason(column) {
     return column?.requiresClass && !activeClass ? SORT_REQUIRES_CLASS_HINT : null
@@ -137,7 +106,9 @@ export default function MarketData() {
 
   let content
   if (rows.length === 0) {
-    if (!snapshotSettled || status === 'CONNECTING') {
+    if (seedStatus === 'error') {
+      content = <EmptyState message="Could not load the market snapshot — retrying on reconnect." />
+    } else if (seedStatus === 'loading' || status === 'CONNECTING') {
       content = <EmptyState message="Connecting to market data…" />
     } else if (status === 'RECONNECTING') {
       content = <EmptyState message="Market data stream unavailable — retrying." />
@@ -209,15 +180,11 @@ export default function MarketData() {
 
   return (
     <section className="page">
-      <div className="market-head">
-        <span className="market-head__title">LIVE MARKET FEED</span>
-        <div className="market-head__meta">
-          <span className="market-head__ticks">
-            {formatNumber(tickCount)} ticks received · this tab session
-          </span>
-          <StatusPill level={MARKET_STATUS_LEVEL[status] ?? 'unknown'} label={status} />
-        </div>
-      </div>
+      <StreamHeader
+        title="LIVE MARKET FEED"
+        note={`${formatNumber(tickCount)} ticks received · this tab session`}
+        status={status}
+      />
 
       <div className="market-summary">
         <MarketIndexCard instrument={benchmark} now={now} />
@@ -230,41 +197,33 @@ export default function MarketData() {
         />
         <StatCard
           label="LAST UPDATE"
-          value={formatStreamTime(summary.lastUpdateMs)}
-          sub="market data"
+          value={formatClockTime(summary.lastUpdateMs)}
+          sub="newest tick received"
         />
       </div>
 
-      <div className="market-controls">
-        <span className="market-controls__label">CLASS</span>
-        <FilterChipGroup
-          className="market-classes"
-          ariaLabel="Filter market instruments by asset class"
-          options={assetClassOptions(marketRows)}
-          value={activeClass}
-          onChange={handleClassChange}
+      <FilterBar
+        label="CLASS"
+        ariaLabel="Filter market instruments by asset class"
+        options={countOptions(marketRows, (row) => row.instrument.assetClass)}
+        value={activeClass}
+        onChange={handleClassChange}
+        search={{
+          label: 'SYMBOL',
+          value: query,
+          onChange: setQuery,
+          placeholder: 'Search symbol…',
+        }}
+      >
+        <ColumnPicker
+          ariaLabel="Market instrument columns"
+          columns={MARKET_COLUMNS}
+          visibleColumns={marketTable.visibleColumns}
+          onToggle={marketTable.toggleColumn}
+          onReorder={marketTable.reorderColumn}
+          onReset={marketTable.resetColumns}
         />
-        <div className="market-controls__tools">
-          <label className="market-search-field">
-            <span className="market-controls__label">SYMBOL</span>
-            <input
-              className="market-search"
-              type="search"
-              placeholder="Search symbol…"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
-          <ColumnPicker
-            ariaLabel="Market instrument columns"
-            columns={MARKET_COLUMNS}
-            visibleColumns={marketTable.visibleColumns}
-            onToggle={marketTable.toggleColumn}
-            onReorder={marketTable.reorderColumn}
-            onReset={marketTable.resetColumns}
-          />
-        </div>
-      </div>
+      </FilterBar>
 
       {content}
     </section>

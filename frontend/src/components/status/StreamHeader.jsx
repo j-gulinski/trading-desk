@@ -1,0 +1,14 @@
+import StatusPill from './StatusPill.jsx'
+import { streamStatusLevel } from '../../config/stream.js'
+
+export default function StreamHeader({ title, note, status }) {
+  return (
+    <div className="stream-head">
+      <span className="stream-head__title">{title}</span>
+      <div className="stream-head__meta">
+        {note != null && <span className="stream-head__note">{note}</span>}
+        <StatusPill level={streamStatusLevel(status)} label={status} />
+      </div>
+    </div>
+  )
+}

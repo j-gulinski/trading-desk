@@ -5,11 +5,11 @@ import {
   formatDelta,
   formatMarketSymbol,
   formatPercentDelta,
-  formatStreamTime,
   formatTenor,
   formatValue,
   formatValueUnit,
 } from '../../domain/marketFormat.js'
+import { formatClockTime } from '../../domain/formatting.js'
 
 function ChangeValue({ instrument, change }) {
   const percent = instrument.unit === 'rate' ? null : formatPercentDelta(change.percent)
@@ -19,7 +19,7 @@ function ChangeValue({ instrument, change }) {
       {percent && (
         <>
           {' '}
-          <span className="market-delta__percent">({percent})</span>
+          <span className="delta__percent">({percent})</span>
         </>
       )}
     </>
@@ -36,8 +36,8 @@ export default function MarketCell({ column, row }) {
       return formatTenor(instrument.tenor)
     case 'assetClass':
       return (
-        <span className="market-class">
-          <span className="market-class__dot" />
+        <span className="class-tag">
+          <span className="class-tag__dot" />
           {instrument.assetClass}
         </span>
       )
@@ -63,7 +63,7 @@ export default function MarketCell({ column, row }) {
         <StatusPill level={live ? 'info' : 'stale'} label={live ? 'LIVE' : 'STALE'} compact />
       )
     case 'updated':
-      return formatStreamTime(instrument.eventTimeMs ?? instrument.receivedAtMs)
+      return formatClockTime(instrument.eventTimeMs, { millis: true })
     default:
       return null
   }

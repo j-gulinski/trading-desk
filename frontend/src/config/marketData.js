@@ -4,14 +4,6 @@ export const MARKET_STALE_AFTER_MS = 5000
 
 export const HISTORY_LENGTH = 100
 
-export const FLUSH_INTERVAL_MS = 600
-
-export const MARKET_STATUS_LEVEL = {
-  CONNECTED: 'healthy',
-  RECONNECTING: 'degraded',
-  CONNECTING: 'unknown',
-}
-
 export const BOND_CURVE_TENORS = [1, 2, 3, 5, 10]
 
 const CHANGE_COLUMNS = [
@@ -58,8 +50,8 @@ const TRAILING_COLUMNS = [
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerClass: 'market-cell--time',
-    cellClass: 'market-cell--time',
+    headerClass: 'data-table__cell--time',
+    cellClass: 'data-table__cell--time',
   },
 ]
 
@@ -70,7 +62,7 @@ export const MARKET_COLUMNS = [
     required: true,
     sortable: true,
     defaultDirection: 'asc',
-    cellClass: 'market-cell--symbol',
+    cellClass: 'data-table__cell--key',
   },
   { id: 'assetClass', label: 'Class', sortable: true, defaultDirection: 'asc' },
   {
@@ -104,7 +96,7 @@ export const CURVE_COLUMNS = [
     required: true,
     sortable: true,
     defaultDirection: 'asc',
-    cellClass: 'market-cell--symbol',
+    cellClass: 'data-table__cell--key',
   },
   {
     id: 'marketLevel',

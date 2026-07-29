@@ -2,11 +2,16 @@
 // pulls them all in. One file per component lives in ./components/.
 @forward "components/pill";
 @forward "components/filter-chip";
+@forward "components/filter-bar";
 @forward "components/service-card";
 @forward "components/panel";
 @forward "components/overview";
 @forward "components/empty-state";
 @forward "components/audit";
 @forward "components/stat-card";
+@forward "components/stream-head";
+@forward "components/value";
+@forward "components/sparkline";
 @forward "components/table";
 @forward "components/market-data";
+@forward "components/valuations";

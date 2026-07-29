@@ -1,0 +1,39 @@
+// Page header for a live view (StreamHeader): title, a free-text note and the
+// connection pill.
+.stream-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.stream-head__title {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.stream-head__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.stream-head__note {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+@container page (max-width: 620px) {
+  .stream-head {
+    align-items: flex-start;
+  }
+
+  .stream-head__meta {
+    align-items: flex-end;
+    flex-direction: column-reverse;
+    gap: var(--sp-1);
+  }
+}

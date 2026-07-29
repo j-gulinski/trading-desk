@@ -32,18 +32,20 @@ def get_valuation(trade_id):
 @app.route("/valuation-stream")
 def valuation_stream():
     response.content_type = "text/event-stream"
+    response.set_header("Cache-Control", "no-cache")
     with cache.clients_lock:
         client_q = queue.Queue(maxsize=500)
         cache.client_event_queues.add(client_q)
     log.info("stream_client_connected")
 
     def generate_events():
+        yield ": connected\n\n"
         try:
             while True:
                 event = client_q.get()
                 yield f"event: valuation_update\ndata: {to_json(event)}\n\n"
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("stream_client_error", error=type(exc).__name__)
         finally:
             with cache.clients_lock:
                 cache.client_event_queues.discard(client_q)

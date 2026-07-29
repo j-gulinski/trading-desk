@@ -3,10 +3,11 @@ import threading
 from decimal import Decimal
 
 from shared.db import session_scope
-from shared.models import Trade, Valuation
+from shared.models import Book, Trade, Valuation
 from shared.functions import utcnow, get_iso_timestamp
 from shared.logging_config import get_logger
 from app.config import SERVICE_NAME
+from app.pnl import signed_quantity
 
 log = get_logger(SERVICE_NAME)
 
@@ -15,6 +16,7 @@ clients_lock = threading.Lock()
 
 ticks_received = 0
 last_event_timestamp = None
+market_data_connection = "DISCONNECTED"
 client_event_queues = set()
 
 # Market state cache
@@ -55,9 +57,19 @@ def bond_trades():
         return [t for t in active_trades.values() if t["asset_class"] == "BOND"]
 
 
+def _is_final(valuation):
+    return bool((valuation.get("valuation_payload") or {}).get("final"))
+
+
 def record_valuation(valuation):
+    """Returns False when the valuation is rejected: a trade keeps its final valuation, so
+    anything non-final that lands afterwards is a stale batch and must not be published."""
     with data_lock:
+        existing = latest_valuations.get(valuation["trade_id"])
+        if existing is not None and _is_final(existing) and not _is_final(valuation):
+            return False
         latest_valuations[valuation["trade_id"]] = valuation
+        return True
 
 
 def all_valuations():
@@ -70,13 +82,19 @@ def get_valuation(trade_id):
         return latest_valuations.get(trade_id)
 
 
+def _trades_with_book(session):
+    return session.query(Trade, Book.name).join(Book, Book.book_id == Trade.book_id)
+
+
 def refresh_active_trades():
     fresh = {}
     with session_scope() as session:
-        for t in session.query(Trade).filter(Trade.status == "ACTIVE").all():
+        rows = _trades_with_book(session).filter(Trade.status == "ACTIVE").all()
+        for t, book_name in rows:
             fresh[str(t.trade_id)] = {
                 "trade_id": str(t.trade_id),
                 "book_id": str(t.book_id),
+                "book_name": book_name,
                 "asset_class": t.asset_class,
                 "symbol": t.symbol,
                 "side": t.side,
@@ -120,11 +138,11 @@ def finalize_closed_trades():
     finals = []
     with session_scope() as session:
         rows = (
-            session.query(Trade)
+            _trades_with_book(session)
             .filter(Trade.status == "CLOSED", Trade.valuation_finalized.is_(False))
             .all()
         )
-        for t in rows:
+        for t, book_name in rows:
             qty = t.quantity
             trade_price = t.trade_price
             multiplier = int((t.trade_metadata or {}).get("multiplier", 1))
@@ -156,9 +174,12 @@ def finalize_closed_trades():
             valuation = {
                 "trade_id": str(t.trade_id),
                 "book_id": str(t.book_id),
+                "book_name": book_name,
                 "asset_class": t.asset_class,
                 "symbol": t.symbol,
                 "currency": t.trade_currency,
+                "quantity": signed_quantity(t.side, qty),
+                "trade_price": trade_price,
                 "fair_value": fair_value,
                 "market_value": fair_value,
                 "unrealized_pnl": Decimal("0"),
@@ -184,4 +205,9 @@ def finalize_closed_trades():
             ))
             t.valuation_finalized = True
             finals.append(valuation)
+
+    with data_lock:
+        for valuation in finals:
+            active_trades.pop(valuation["trade_id"], None)
+
     return finals

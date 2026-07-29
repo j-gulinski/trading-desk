@@ -4,7 +4,8 @@ import {
   MARKET_STALE_AFTER_MS,
   BOND_CURVE_TENORS,
 } from '../config/marketData.js'
-import { directionOf, formatTenor } from './marketFormat.js'
+import { formatTenor } from './marketFormat.js'
+import { directionOf } from './formatting.js'
 import { sortRows } from './tableSort.js'
 
 const MARKET_STATE_STORAGE_VERSION = 1
@@ -356,7 +357,7 @@ function snapshotValueOf(instrument, column, now) {
     return ((instrument.ask - instrument.bid) / Math.abs(instrument.value)) * 10000
   }
   if (column === 'feed') return isStale(instrument, now) ? 0 : 1
-  if (column === 'updated') return instrument.eventTimeMs ?? instrument.receivedAtMs ?? null
+  if (column === 'updated') return instrument.eventTimeMs ?? null
   return null
 }
 

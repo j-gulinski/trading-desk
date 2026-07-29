@@ -17,4 +17,8 @@ export const endpoints = {
     stream: '/api/market-data/stream',
     snapshot: '/api/market-data/snapshot',
   },
+  pricing: {
+    stream: '/api/pricing/valuation-stream',
+    valuations: '/api/pricing/valuations',
+  },
 }

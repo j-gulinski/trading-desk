@@ -1,18 +1,8 @@
+import { formatUnitPrice, unitPriceDecimals } from './formatting.js'
+
 function currencyPair(symbol) {
   if (!/^[A-Z]{6}$/.test(symbol ?? '')) return null
   return { base: symbol.slice(0, 3), quote: symbol.slice(3) }
-}
-
-function priceDecimals(assetClass) {
-  return assetClass === 'FX' ? 5 : 2
-}
-
-function formatPriceNum(value, assetClass) {
-  const dp = priceDecimals(assetClass)
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: dp,
-    maximumFractionDigits: dp,
-  }).format(value)
 }
 
 export function formatTenor(years) {
@@ -22,7 +12,7 @@ export function formatTenor(years) {
 export function formatValue(instrument) {
   if (!Number.isFinite(instrument.value)) return '—'
   if (instrument.unit === 'rate') return `${(instrument.value * 100).toFixed(4)}%`
-  return formatPriceNum(instrument.value, instrument.assetClass)
+  return formatUnitPrice(instrument.value, instrument.assetClass)
 }
 
 export function formatMarketSymbol(instrument) {
@@ -47,7 +37,7 @@ export function formatValueUnit(instrument) {
 
 export function formatBidAsk(instrument) {
   if (!Number.isFinite(instrument.bid) || !Number.isFinite(instrument.ask)) return '—'
-  return `${formatPriceNum(instrument.bid, instrument.assetClass)} / ${formatPriceNum(
+  return `${formatUnitPrice(instrument.bid, instrument.assetClass)} / ${formatUnitPrice(
     instrument.ask,
     instrument.assetClass,
   )}`
@@ -65,7 +55,7 @@ export function formatDelta(instrument, delta) {
     const magnitude = Math.abs(rounded).toFixed(decimals).replace(/\.0+$/, '')
     return `${sign}${magnitude} bp`
   }
-  let dp = priceDecimals(instrument.assetClass)
+  let dp = unitPriceDecimals(instrument.assetClass)
   let rounded = Number(delta.toFixed(dp))
   if (rounded === 0 && delta !== 0) {
     dp += 1
@@ -85,14 +75,3 @@ export function formatPercentDelta(percent) {
   return `${sign}${Math.abs(rounded).toFixed(decimals)}%`
 }
 
-export function directionOf(delta) {
-  if (!Number.isFinite(delta) || delta === 0) return 'flat'
-  return delta > 0 ? 'pos' : 'neg'
-}
-
-export function formatStreamTime(ms) {
-  if (!Number.isFinite(ms)) return '—'
-  const d = new Date(ms)
-  const p = (n, w = 2) => String(n).padStart(w, '0')
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`
-}

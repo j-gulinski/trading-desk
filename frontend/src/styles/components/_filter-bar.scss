@@ -1,0 +1,120 @@
+// Filter row (FilterBar): chip group on the left, search plus table tools on the right.
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.filter-bar__label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.filter-bar__chips {
+  gap: var(--sp-1);
+
+  .filter-chip {
+    gap: var(--sp-1);
+    padding: 3px 7px;
+    font-size: 12px;
+  }
+}
+.filter-bar__tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.filter-bar__search-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.filter-bar__search {
+  width: 220px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+  &:focus {
+    outline: none;
+    border-color: var(--border-strong);
+  }
+}
+.filter-bar__select-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.filter-bar__select {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+
+  &:focus {
+    outline: none;
+    border-color: var(--border-strong);
+  }
+}
+.filter-bar__checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+
+  input[type='checkbox'] {
+    accent-color: var(--border-strong);
+  }
+}
+
+@container page (max-width: 960px) {
+  .filter-bar__tools {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .filter-bar__search-field {
+    flex: 1;
+  }
+
+  .filter-bar__search {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+@container page (max-width: 620px) {
+  .filter-bar__tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .filter-bar__search-field {
+    width: 100%;
+  }
+
+  .table-columns__summary {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .table-columns__menu {
+    right: auto;
+    left: 0;
+  }
+}

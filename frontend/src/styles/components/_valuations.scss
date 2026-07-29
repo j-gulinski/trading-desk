@@ -1,0 +1,224 @@
+.valuation-summary,
+.business-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+.business-summary {
+  grid-template-columns: repeat(2, minmax(0, 1.4fr)) repeat(2, minmax(0, 0.8fr));
+}
+
+.valuation-section {
+  min-width: 0;
+  margin-bottom: var(--sp-6);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+.valuation-section__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+
+  h2 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  p {
+    margin: 3px 0 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+  > span {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+}
+
+.book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--sp-4);
+}
+
+.book-card {
+  gap: var(--sp-3);
+}
+.book-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.book-card__name {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+.book-card__class {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.book-card__metrics {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-5);
+}
+.book-card__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  &:last-child {
+    margin-left: auto;
+    align-items: flex-end;
+  }
+}
+.book-card__label {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.book-card__value {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+.book-card__value--missing {
+  color: var(--text-muted);
+  font-size: 18px;
+  font-weight: 400;
+}
+.book-card__value--total {
+  font-size: 16px;
+}
+.book-card__note {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.book-pnl {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.book-pnl__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-2);
+  border-radius: var(--radius-sm);
+
+  &:hover {
+    background: var(--bg-panel-hover);
+  }
+}
+.book-pnl__name {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.book-pnl__value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.business-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.panel__link {
+  color: var(--accent);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.freshness {
+  display: grid;
+  gap: var(--sp-3);
+}
+.freshness__counts {
+  display: grid;
+  gap: var(--sp-2);
+}
+.freshness__count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+
+  strong {
+    font-family: var(--font-mono);
+    font-size: 20px;
+  }
+}
+.freshness__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-panel-hover);
+  overflow: hidden;
+}
+.freshness__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--info);
+  transition: width 220ms ease;
+}
+.freshness__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .freshness__fill {
+    transition: none;
+  }
+}
+
+@container page (max-width: 960px) {
+  .valuation-summary,
+  .business-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .business-panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container page (max-width: 620px) {
+  .valuation-summary,
+  .business-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .book-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

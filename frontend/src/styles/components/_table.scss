@@ -9,6 +9,8 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  // Cells inherit this so a single-class tone (.delta--pos) still wins on a td.
+  color: var(--text-primary);
 
   th {
     text-align: left;
@@ -26,7 +28,6 @@
   td {
     padding: var(--sp-3);
     border-bottom: 1px solid var(--border);
-    color: var(--text-primary);
     vertical-align: middle;
   }
   tbody tr:last-child td {
@@ -58,6 +59,53 @@
 .data-table__cell--num {
   text-align: right;
   font-family: var(--font-mono);
+}
+.data-table__cell--time {
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+.data-table__cell--key {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+// Row tones: muted for stale/final rows, a short flash on an accepted update.
+.data-table__row--muted td {
+  color: var(--text-muted);
+}
+.data-table__row--muted .data-table__cell--key {
+  color: var(--text-secondary);
+}
+
+@keyframes data-table-tick-pos {
+  from {
+    background: rgba(61, 220, 132, 0.18);
+  }
+  to {
+    background: transparent;
+  }
+}
+@keyframes data-table-tick-neg {
+  from {
+    background: rgba(248, 113, 113, 0.18);
+  }
+  to {
+    background: transparent;
+  }
+}
+.data-table__row--tick-pos td {
+  animation: data-table-tick-pos 0.45s ease-out;
+}
+.data-table__row--tick-neg td {
+  animation: data-table-tick-neg 0.45s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .data-table__row--tick-pos td,
+  .data-table__row--tick-neg td {
+    animation: none;
+  }
 }
 
 .data-table__sort {

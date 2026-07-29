@@ -15,6 +15,11 @@ export default defineConfig({
         target: 'http://market-data-service:8001',
         changeOrigin: true,
         rewrite: p => p.replace('/api/market-data', '')
+      },
+      '/api/pricing': {
+        target: 'http://pricing-service:8002',
+        changeOrigin: true,
+        rewrite: p => p.replace('/api/pricing', '')
       }
     }
   }

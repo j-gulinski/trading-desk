@@ -1,42 +1,51 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-function sanitizeVisibleColumns(stored, columns) {
-  const columnById = new Map(columns.map((column) => [column.id, column]))
+function readStoredPreference(storageKey) {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(storageKey))
+    if (Array.isArray(stored)) return { visible: stored, known: stored }
+    if (Array.isArray(stored?.visible) && Array.isArray(stored?.known)) return stored
+    return null
+  } catch {
+    return null
+  }
+}
+
+function readVisibleColumns(storageKey, columns, defaultColumns) {
+  const stored = readStoredPreference(storageKey)
+  if (!stored) return defaultColumns
+
   const positionById = new Map(columns.map((column, index) => [column.id, index]))
+  const known = new Set(stored.known)
   const ordered = []
   const seen = new Set()
 
-  for (const columnId of stored) {
-    if (!columnById.has(columnId) || seen.has(columnId)) continue
+  for (const columnId of stored.visible) {
+    if (!positionById.has(columnId) || seen.has(columnId)) continue
     ordered.push(columnId)
     seen.add(columnId)
   }
 
   for (const column of columns) {
-    if (!column.required || seen.has(column.id)) continue
+    if (seen.has(column.id)) continue
+    if (known.has(column.id) && !column.required) continue
     const configuredPosition = positionById.get(column.id)
     const insertionIndex = ordered.findIndex(
       (candidate) => positionById.get(candidate) > configuredPosition,
     )
     ordered.splice(insertionIndex < 0 ? ordered.length : insertionIndex, 0, column.id)
+    seen.add(column.id)
   }
 
   return ordered
 }
 
-function readVisibleColumns(storageKey, columns, defaultColumns) {
+function storeVisibleColumns(storageKey, visibleColumns, knownColumns) {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(storageKey))
-    if (!Array.isArray(stored)) return defaultColumns
-    return sanitizeVisibleColumns(stored, columns)
-  } catch {
-    return defaultColumns
-  }
-}
-
-function storeVisibleColumns(storageKey, visibleColumns) {
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(visibleColumns))
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({ visible: visibleColumns, known: knownColumns }),
+    )
   } catch {
     return
   }
@@ -61,6 +70,7 @@ export function useTableState({
   defaultSort,
   fallbackSort = defaultSort,
   captureSnapshot,
+  hasRows = true,
   isSortable = (column) => Boolean(column?.sortable),
 }) {
   const allColumnIds = useMemo(() => columns.map((column) => column.id), [columns])
@@ -79,20 +89,34 @@ export function useTableState({
   }))
 
   useEffect(() => {
-    storeVisibleColumns(storageKey, visibleColumns)
-  }, [storageKey, visibleColumns])
+    storeVisibleColumns(storageKey, visibleColumns, allColumnIds)
+  }, [storageKey, visibleColumns, allColumnIds])
 
-  function applySort(column, direction) {
-    const capturedAt = Date.now()
-    setSort({
-      column,
-      direction,
-      snapshot: columnById.get(column)?.snapshot
-        ? captureSnapshot(column, capturedAt)
-        : null,
-      capturedAt,
-    })
-  }
+  const captureSnapshotRef = useRef(captureSnapshot)
+  useEffect(() => {
+    captureSnapshotRef.current = captureSnapshot
+  })
+
+  const applySort = useCallback(
+    (column, direction) => {
+      const capturedAt = Date.now()
+      setSort({
+        column,
+        direction,
+        snapshot: columnById.get(column)?.snapshot
+          ? captureSnapshotRef.current(column, capturedAt)
+          : null,
+        capturedAt,
+      })
+    },
+    [columnById],
+  )
+
+  const needsCapture = sort.capturedAt == null && Boolean(columnById.get(sort.column)?.snapshot)
+
+  useEffect(() => {
+    if (hasRows && needsCapture) applySort(sort.column, sort.direction)
+  }, [hasRows, needsCapture, sort.column, sort.direction, applySort])
 
   function applyDefaultSort(availableColumns = visibleColumns) {
     const next = availableColumns.includes(defaultSort.column) ? defaultSort : fallbackSort

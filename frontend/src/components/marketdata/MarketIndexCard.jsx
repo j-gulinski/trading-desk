@@ -1,11 +1,7 @@
 import Sparkline from '../charts/Sparkline.jsx'
 import { isStale, lastTickChangeOf, observedChangeOf } from '../../domain/marketData.js'
-import {
-  directionOf,
-  formatDelta,
-  formatPercentDelta,
-  formatValue,
-} from '../../domain/marketFormat.js'
+import { formatDelta, formatPercentDelta, formatValue } from '../../domain/marketFormat.js'
+import { directionOf } from '../../domain/formatting.js'
 
 export default function MarketIndexCard({ instrument, now }) {
   const history = instrument?.history ?? []

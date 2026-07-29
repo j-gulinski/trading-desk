@@ -2,7 +2,7 @@ import time
 from decimal import Decimal
 
 from app import cache
-from app.pnl import compute_pnl
+from app.pnl import compute_pnl, signed_quantity
 from app.valuation_publisher import publish_valuation
 from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
 from shared.functions import get_iso_timestamp
@@ -57,9 +57,12 @@ def value_trade(trade):
     return {
         "trade_id": trade["trade_id"],
         "book_id": trade["book_id"],
+        "book_name": trade["book_name"],
         "asset_class": trade["asset_class"],
         "symbol": trade["symbol"],
         "currency": trade["currency"],
+        "quantity": signed_quantity(trade["side"], quantity),
+        "trade_price": trade["trade_price"],
         "fair_value": fair_value,
         "market_value": fair_value,
         "unrealized_pnl": unrealized,
@@ -76,7 +79,9 @@ def _value_and_store(trades):
         valuation = value_trade(trade)
         if valuation is None:
             continue
-        cache.record_valuation(valuation)
+        if not cache.record_valuation(valuation):
+            log.info("valuation_after_final_dropped", trade_id=valuation["trade_id"])
+            continue
         cache.save_valuation(valuation)
         events.append(valuation)
     return events

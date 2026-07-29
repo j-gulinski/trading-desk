@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { usePolling } from '../../hooks/usePolling.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
-import { useMarketFeedContext } from '../../providers/marketFeedContext.js'
+import {
+  useMarketFeedContext,
+  useValuationFeedContext,
+} from '../../providers/feedContext.js'
 import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { normalizeServiceStatus, summarize } from '../../domain/serviceStatus.js'
 import { normalizeAuditEvents } from '../../domain/auditEvents.js'
-import { formatElapsedTime, formatNumber } from '../../domain/formatting.js'
+import { formatClockTime, formatElapsedTime, formatNumber } from '../../domain/formatting.js'
 import { summarizeFeed } from '../../domain/marketData.js'
-import { formatStreamTime } from '../../domain/marketFormat.js'
+import { summarizeValuations, valuationRowsOf } from '../../domain/valuations.js'
 import ServiceCard from '../../components/cards/ServiceCard.jsx'
 import StatCard from '../../components/cards/StatCard.jsx'
 import Panel from '../../components/Panel.jsx'
@@ -17,14 +20,16 @@ import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
 import AuditEventList from '../../components/audit/AuditEventList.jsx'
 import StatusPill from '../../components/status/StatusPill.jsx'
 import { ERROR_WINDOW_MS } from '../../config/monitoring.js'
-import { MARKET_STATUS_LEVEL } from '../../config/marketData.js'
+import { streamStatusLevel } from '../../config/stream.js'
 
 const FILTER_LEVELS = ['healthy', 'degraded', 'stale', 'down', 'unknown']
 const ERROR_SEVERITIES = ['WARNING', 'ERROR', 'CRITICAL']
 
+
 export default function SystemOverview() {
   const [activeLevel, setActiveLevel] = useState(null)
   const marketFeed = useMarketFeedContext()
+  const valuationFeed = useValuationFeedContext()
   const { data, error, loading, lastPolled, lastUpdated } = usePolling(
     ({ signal }) => apiGet(endpoints.monitoring.status, { signal }),
   )
@@ -50,6 +55,13 @@ export default function SystemOverview() {
   })
   const summary = summarize(services)
   const marketSummary = summarizeFeed(Object.values(marketFeed.instruments), now)
+  const valuationSummary = summarizeValuations(
+    valuationRowsOf(Object.values(valuationFeed.valuations), now),
+  )
+  const streamsLastUpdateMs = Math.max(
+    marketSummary.lastUpdateMs ?? 0,
+    valuationSummary.lastUpdateMs ?? 0,
+  ) || null
   const visibleServices = activeLevel
     ? services.filter((service) => service.level === activeLevel)
     : services
@@ -92,12 +104,18 @@ export default function SystemOverview() {
 
       <div className="overview__panels">
         <Panel
-          title="MARKET DATA STREAM"
+          title="LIVE STREAMS"
           meta={
-            <StatusPill
-              level={MARKET_STATUS_LEVEL[marketFeed.status] ?? 'unknown'}
-              label={marketFeed.status}
-            />
+            <>
+              <StatusPill
+                level={streamStatusLevel(marketFeed.status)}
+                label={`MARKET ${marketFeed.status}`}
+              />
+              <StatusPill
+                level={streamStatusLevel(valuationFeed.status)}
+                label={`PRICING ${valuationFeed.status}`}
+              />
+            </>
           }
         >
           <div className="overview__stream-summary">
@@ -112,9 +130,20 @@ export default function SystemOverview() {
               sub={`${marketSummary.live} live · ${marketSummary.stale} stale`}
             />
             <StatCard
+              label="VALUATIONS"
+              value={valuationSummary.total}
+              sub={`${valuationSummary.open} open · ${valuationSummary.closed} closed`}
+            />
+            <StatCard
+              label="FRESHNESS"
+              value={`${valuationSummary.live} / ${valuationSummary.live + valuationSummary.stale}`}
+              sub="live of open valuations"
+              tone={valuationSummary.stale > 0 ? 'warn' : 'default'}
+            />
+            <StatCard
               label="LAST UPDATE"
-              value={formatStreamTime(marketSummary.lastUpdateMs)}
-              sub="market data"
+              value={formatClockTime(streamsLastUpdateMs)}
+              sub="newest event, either stream"
             />
           </div>
         </Panel>

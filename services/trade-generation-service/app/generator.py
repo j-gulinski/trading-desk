@@ -8,7 +8,12 @@ from shared.catalog import INSTRUMENT_CATALOG
 from shared.logging_config import get_logger
 from shared.audit import write_audit
 from app import action_client, market_data_client
-from app.config import SERVICE_NAME, CLOSE_PROBABILITY, TRADE_GENERATION_INTERVAL_MS, TARGET_NOTIONAL
+from app.config import (
+    SERVICE_NAME,
+    TARGET_OPEN_TRADES,
+    TRADE_GENERATION_INTERVAL_MS,
+    TARGET_NOTIONAL,
+)
 
 log = get_logger(SERVICE_NAME)
 
@@ -78,13 +83,20 @@ def _build_close(snapshot: dict) -> dict | None:
     }
 
 
+def _close_probability() -> float:
+    target = max(TARGET_OPEN_TRADES, 1)
+    with _lock:
+        open_count = len(_open_trades)
+    return min(0.9, 0.5 * open_count / target)
+
+
 def generate_once() -> dict | None:
     snapshot = market_data_client.fetch_snapshot()
     if snapshot is None:
         return None
 
     intent = None
-    if random.random() < CLOSE_PROBABILITY:
+    if random.random() < _close_probability():
         intent = _build_close(snapshot)
     if intent is None:
         intent = _build_open(snapshot)

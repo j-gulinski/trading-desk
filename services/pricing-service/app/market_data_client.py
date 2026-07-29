@@ -11,7 +11,21 @@ from app.valuation_engine import value_symbol, value_curve
 from app.valuation_publisher import publish_valuation
 
 log = get_logger(SERVICE_NAME)
-market_data_connection = "DISCONNECTED"
+
+
+def _audit(event_type, message, severity="INFO"):
+    try:
+        write_audit(SERVICE_NAME, event_type, message, severity=severity)
+    except Exception:
+        log.exception("audit_write_failed", event_type=event_type)
+
+
+def _set_connection(state):
+    with cache.data_lock:
+        changed = cache.market_data_connection != state
+        cache.market_data_connection = state
+    return changed
+
 
 def _handle(event_type, tick):
     with cache.data_lock:
@@ -35,9 +49,8 @@ def market_data_stream_consumer():
         try:
             request = urllib.request.Request(MARKET_DATA_STREAM_URL)
             with urllib.request.urlopen(request) as stream:
-                with cache.data_lock:
-                    cache.market_data_connection = "CONNECTED"
-                write_audit(SERVICE_NAME, "STREAM_CONNECTED", "Connected to market data stream")
+                if _set_connection("CONNECTED"):
+                    _audit("STREAM_CONNECTED", "Connected to market data stream")
                 event_type = None
                 for raw in stream:
                     line = raw.decode("utf-8").strip()
@@ -53,7 +66,6 @@ def market_data_stream_consumer():
         except Exception:
             log.exception("stream_error")
         finally:
-            with cache.data_lock:
-                cache.market_data_connection = "RECONNECTING"
-            write_audit(SERVICE_NAME, "STREAM_DISCONNECTED", "Market data stream disconnected", severity="WARNING")
+            if _set_connection("RECONNECTING"):
+                _audit("STREAM_DISCONNECTED", "Market data stream disconnected", severity="WARNING")
         time.sleep(5)

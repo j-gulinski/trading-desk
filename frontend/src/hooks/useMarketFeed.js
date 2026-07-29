@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiGet } from '../services/apiClient.js'
 import { endpoints } from '../services/endpoints.js'
+import { useBufferedUpdates } from './useBufferedUpdates.js'
 import { useSseStream } from './useSseStream.js'
-import { STREAM_EVENTS, FLUSH_INTERVAL_MS } from '../config/marketData.js'
+import { useStreamSeed } from './useStreamSeed.js'
+import { STREAM_EVENTS } from '../config/marketData.js'
 import {
   instrumentsForStorage,
   instrumentsFromEvent,
@@ -62,35 +64,18 @@ function snapshotUpdates(snapshot) {
 export function useMarketFeed() {
   const [instruments, setInstruments] = useState(readStoredInstruments)
   const [tickCount, setTickCount] = useState(readStoredTickCount)
-  const [snapshotSettled, setSnapshotSettled] = useState(false)
 
-  const pendingUpdatesRef = useRef(new Map())
   const receivedTicksRef = useRef(tickCount)
-  const previousStatusRef = useRef('CONNECTING')
 
   useEffect(() => {
     storeInstruments(instruments)
   }, [instruments])
 
-  useEffect(() => {
-    let cancelled = false
-    const controller = new AbortController()
-
-    apiGet(endpoints.marketData.snapshot, { signal: controller.signal })
-      .then((snapshot) => {
-        if (cancelled) return
-        setInstruments((previous) => mergeInstruments(previous, snapshotUpdates(snapshot)))
-        setSnapshotSettled(true)
-      })
-      .catch(() => {
-        if (!cancelled) setSnapshotSettled(true)
-      })
-
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [])
+  const buffer = useBufferedUpdates((pending) => {
+    setInstruments((previous) => mergeInstruments(previous, pending))
+    setTickCount(receivedTicksRef.current)
+    storeTickCount(receivedTicksRef.current)
+  })
 
   const { status } = useSseStream(endpoints.marketData.stream, {
     events: STREAM_EVENTS,
@@ -100,38 +85,19 @@ export function useMarketFeed() {
       if (updates.length === 0) return
       receivedTicksRef.current += 1
       for (const update of updates) {
-        pendingUpdatesRef.current.set(update.id, { ...update, receivedAtMs })
+        buffer(update.id, { ...update, receivedAtMs })
       }
     },
   })
 
-  useEffect(() => {
-    const reconnected = previousStatusRef.current === 'RECONNECTING' && status === 'CONNECTED'
-    previousStatusRef.current = status
-    if (!reconnected) return undefined
+  const seedStatus = useStreamSeed(status, (signal) =>
+    apiGet(endpoints.marketData.snapshot, { signal }).then((snapshot) => {
+      setInstruments((previous) => mergeInstruments(previous, snapshotUpdates(snapshot)))
+    }),
+  )
 
-    const controller = new AbortController()
-    apiGet(endpoints.marketData.snapshot, { signal: controller.signal })
-      .then((snapshot) => {
-        setInstruments((previous) => mergeInstruments(previous, snapshotUpdates(snapshot)))
-      })
-      .catch(() => undefined)
-
-    return () => controller.abort()
-  }, [status])
-
-  useEffect(() => {
-    const flushId = setInterval(() => {
-      if (pendingUpdatesRef.current.size === 0) return
-      const pending = Array.from(pendingUpdatesRef.current.values())
-      pendingUpdatesRef.current = new Map()
-      setInstruments((previous) => mergeInstruments(previous, pending))
-      setTickCount(receivedTicksRef.current)
-      storeTickCount(receivedTicksRef.current)
-    }, FLUSH_INTERVAL_MS)
-
-    return () => clearInterval(flushId)
-  }, [])
-
-  return { instruments, tickCount, status, snapshotSettled }
+  return useMemo(
+    () => ({ instruments, tickCount, status, seedStatus }),
+    [instruments, tickCount, status, seedStatus],
+  )
 }
