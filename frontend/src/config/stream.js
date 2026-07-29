@@ -1,4 +1,5 @@
-export const FLUSH_INTERVAL_MS = 600
+export const FLUSH_INTERVAL_MS = 500
+export const FRESHNESS_INTERVAL_MS = 1000
 
 export const STREAM_STATUS = {
   connecting: 'CONNECTING',

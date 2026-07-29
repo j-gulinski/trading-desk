@@ -3,7 +3,7 @@ import bottle
 from bottle import request, response
 
 from app import cache
-from app.config import SERVICE_NAME
+from app.config import SERVICE_NAME, VALUATION_STREAM_QUEUE_SIZE
 from app.schemas import ScenarioRequest
 from app.scenario import run_scenario
 from shared.serialization import to_json
@@ -34,7 +34,7 @@ def valuation_stream():
     response.content_type = "text/event-stream"
     response.set_header("Cache-Control", "no-cache")
     with cache.clients_lock:
-        client_q = queue.Queue(maxsize=500)
+        client_q = queue.Queue(maxsize=VALUATION_STREAM_QUEUE_SIZE)
         cache.client_event_queues.add(client_q)
     log.info("stream_client_connected")
 

@@ -42,10 +42,11 @@ export default function Valuations() {
 
   const [activeClass, setActiveClass] = useState(null)
   const [activeBook, setActiveBook] = useState(null)
-  const [showOnlyActive, setShowOnlyActive] = useState(false)
+  const [activeState, setActiveState] = useState(null)
   const [query, setQuery] = useState('')
 
   const rows = valuationRowsOf(Object.values(valuations), now)
+  const summary = summarizeValuations(rows)
 
   const table = useTableState({
     columns: VALUATION_COLUMNS,
@@ -72,7 +73,7 @@ export default function Valuations() {
       (row) =>
         (!activeClass || row.valuation.assetClass === activeClass) &&
         (!activeBook || row.valuation.bookId === activeBook) &&
-        (!showOnlyActive || row.status !== 'CLOSED') &&
+        (!activeState || row.status === activeState) &&
         matchesSearch(row, search),
     ),
     table.sort,
@@ -80,7 +81,6 @@ export default function Valuations() {
   const visibleRows = matchingRows.slice(0, MAX_RENDERED_ROWS)
   const hiddenRowCount = matchingRows.length - visibleRows.length
 
-  const summary = summarizeValuations(rows)
   const books = bookRisksOf(rows)
   const bookOptions = bookOptionsOf(rows)
   const currency = summary.currency ?? 'MIXED'
@@ -196,13 +196,19 @@ export default function Valuations() {
             </select>
           </label>
 
-          <label className="filter-bar__checkbox">
-            <input
-              type="checkbox"
-              checked={showOnlyActive}
-              onChange={(event) => setShowOnlyActive(event.target.checked)}
-            />
-            <span>Active only</span>
+          <label className="filter-bar__select-field">
+            <span className="filter-bar__label">STATE</span>
+            <select
+              className="filter-bar__select"
+              aria-label="Filter valuations by state"
+              value={activeState ?? ''}
+              onChange={(event) => setActiveState(event.target.value || null)}
+            >
+              <option value="">All states ({summary.total})</option>
+              <option value="LIVE">LIVE ({summary.live})</option>
+              <option value="STALE">STALE ({summary.stale})</option>
+              <option value="CLOSED">CLOSED ({summary.closed})</option>
+            </select>
           </label>
 
           <ColumnPicker

@@ -20,6 +20,21 @@
 .stat-card--warn {
   border-color: rgba(251, 191, 36, 0.4);
 }
+.stat-card--link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-color: var(--border-strong);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
 .stat-card__label {
   color: var(--text-muted);
   font-size: 11px;

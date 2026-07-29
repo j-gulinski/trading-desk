@@ -1,240 +1,210 @@
 # Trading Microservices
 
-A miniature trading / risk stack: market data is generated and streamed, trades are opened
-and closed, active positions are continuously revalued and their PnL published, and a React
-frontend shows the live market and the blotter. Postgres is the single source of truth, SSE
-carries the live streams, everything runs on Docker Compose.
+A local trading and risk system that exercises the complete path from market movement to a
+browser-visible PnL change. Market Data publishes prices and curves, Trade Action owns trade
+creation and closing, Pricing continuously values active trades, PostgreSQL stores business
+history, Blotter provides read models, and a React frontend consumes snapshots plus SSE streams.
 
-This README covers the decisions worth knowing. Implementation detail lives in `docs/`.
+The project is intentionally small enough to inspect end to end, but it preserves the boundaries
+that matter in a real system: one writer per business entity, explicit event ordering, terminal
+close state, bounded queues, latest-value coalescing, and a distinction between live state and
+historical records.
 
----
+## System at a glance
 
-## Services
+| Component | Responsibility |
+| --- | --- |
+| Market Data | Generate and persist spot, futures, FX, index, and curve events; publish snapshot and SSE |
+| Trade Action | Validate intents and act as the only writer of trade lifecycle state |
+| Trade Generator | Produce simulated opens and closes around a bounded open-book target |
+| Pricing | Consume market events, value matching active trades, persist valuations, and publish PnL |
+| Blotter | Combine live caches with database history for trade- and book-oriented reads |
+| Books | Own trading-book configuration |
+| Monitoring | Aggregate service health and important audit events |
+| React frontend | Maintain live feed context and present market, valuation, and system views |
+| PostgreSQL | Source of truth for trades, valuations, books, and business audit history |
 
-| Service | Port | Responsibility | Key endpoints |
-|---|---|---|---|
-| market-data | 8001 | generate + persist market data, publish the live feed | `/snapshot`, `/stream` (SSE) |
-| pricing | 8002 | value ACTIVE trades, write valuations, publish PnL | `/valuations`, `/valuation-stream` (SSE), `POST /scenario` |
-| monitoring | 8003 | poll every `/health` + `SELECT 1` on Postgres | `/status`, `/audits` |
-| books | 8004 | CRUD trading books, validate asset class | `/books`, `/books/<id>` |
-| blotter | 8006 | read side: live cache + DB history | `/books/summary`, `/trades`, `/trades/<id>/…` |
-| trade-generation | 8007 | simulated order source | `/start`, `/stop`, `/generate-once` |
-| trade-action | 8008 | queue + worker, the only writer of `trades` | `POST /trade-actions`, `/batch`, `/close-all` |
-| frontend | 3000 | React + Vite UI | — |
+```text
+market event ───────────────┐
+                            v
+trade intent -> Trade Action -> ACTIVE trade -> Pricing -> valuation history
+                                              └─────────> valuation SSE
+                                                           -> React context
+                                                           -> screen
 
-Every service also answers `GET /health`.
-
-## Running
-
-```bash
-cp .env.example .env        # then set POSTGRES_PASSWORD etc.
-docker compose up --build
+CLOSE intent -> CLOSED trade -> one final valuation -> realized PnL
 ```
 
-Compose starts Postgres, runs Alembic migrations once (a `db-migrations` one-shot container
-gated on the Postgres healthcheck), then the services. Schema comes from Alembic, **not**
-`Base.metadata.create_all`. Migrations alone: `docker compose run --rm db-migrations`.
+## Decisions that define the system
 
----
+### Ownership is explicit
 
-## The end-to-end flow
+- Trade Action is the only service that changes trade lifecycle state.
+- Pricing owns valuation and PnL calculation.
+- PostgreSQL owns durable history; streams and caches are delivery/read models.
+- Blotter may combine live and historical data, but it does not become a second writer.
 
-```
-intent → trade-action (queue + worker) → trades (ACTIVE)
-       → pricing values it on the next market tick → valuations + valuation_update (SSE)
-       → blotter caches live PnL; on close, pricing finalizes realized PnL
-```
-
-1. An `OPEN_TRADE` intent hits trade-action, is queued, returns **202 Accepted**, and a
-   worker validates it (book exists, asset class matches, idempotent) and inserts an
-   `ACTIVE` trade in one transaction.
-2. Pricing's refresh loop (~2 s) picks up the new trade and values it on each market tick,
-   writing a valuation and publishing `valuation_update`.
-3. A `CLOSE_TRADE` intent flips it to `CLOSED`. Pricing then writes one final valuation with
-   `unrealized = 0`, `realized` set, `total = realized`.
-
----
-
-## Decisions worth reading
-
-### Only one writer, and the guard is in the database
-
-trade-action owns every write to `trades`. A `queue.Queue` separates fast HTTP intake from
-DB writes and a single worker serialises them. **Double-close is prevented in SQL, not in
-Python:**
+Trade closing is guarded in SQL:
 
 ```sql
-UPDATE trades SET status='CLOSED' WHERE trade_id=:id AND status='ACTIVE'
+UPDATE trades
+SET status = 'CLOSED'
+WHERE trade_id = :id AND status = 'ACTIVE'
 ```
 
-the close only wins if `rowcount == 1`. `trades.client_request_id` is UNIQUE, so a re-sent
-intent cannot create a second trade — which is what makes the non-durable queue acceptable.
+Only `rowcount == 1` means the close won. A unique `client_request_id` makes resubmitting an intent
+idempotent.
 
-### PnL signs live in exactly one place
+### Tick-to-screen order
 
-| Asset class | Fair value |
-|---|---|
-| EQUITY / COMMODITY | `price × qty` |
-| FUTURES | `price × multiplier × qty` |
-| FX (forward) | `forward × qty`, `forward = spot × (1 + r_d·T) / (1 + r_f·T)` |
-| BOND | `Σ CF_t / (1 + r(t))^t × qty`, rate interpolated off the `USD_GOV` curve |
+| Order | Stage | Ordering and cost |
+| ---: | --- | --- |
+| 1 | Market Data creates a tick | The event carries `stream_id`, monotonic `event_id`, and canonical `event_time` |
+| 2 | Pricing consumes the tick | Spot/curve cache is updated before dependent trades are selected |
+| 3 | Pricing selects affected trades | Spot ticks value matching symbols; curve ticks value dependent bonds |
+| 4 | Pricing calculates valuations | BUY/SELL sign, multiplier, FX forward, or bond PV is applied centrally |
+| 5 | Pricing persists | Each accepted valuation is currently written separately |
+| 6 | Pricing checks current identity | An event superseded by a newer/final valuation is not published |
+| 7 | Per-client queue receives the event | `put_nowait` prevents one slow browser from blocking Pricing |
+| 8 | Browser consumes SSE | Every delivered message is parsed and normalized immediately |
+| 9 | Browser applies ordering | Final valuations apply immediately; live updates coalesce latest-per-trade |
+| 10 | Shared 500 ms scheduler flushes | Live state can publish twice per second; freshness advances on every second scheduler tick |
+| 11 | Valuation screen derives its view | Full context → status → filter → sort → first 250 matching rows |
 
-The classic domain bug is the sign, so pricing owns all of it:
+The expensive backend path finishes before queue publication. Increasing queue capacity can absorb
+a burst, but it cannot make calculation or database persistence faster.
 
-- BUY: `unrealized = (current − trade) × qty × multiplier`
-- SELL: `unrealized = (trade − current) × qty × multiplier`
+### Snapshot and stream are concurrent
 
-Per-trade pricing terms (futures multiplier, bond coupon/maturity/curve) are copied into
-`trades.metadata` (JSONB) at creation, so trades are self-describing and pricing never reads
-the instrument catalog at runtime. Money is `NUMERIC` everywhere, never float.
+Waiting for a snapshot before opening the stream creates a guaranteed gap, so each feed starts both
+operations independently:
 
-### Two sources of truth for one price, reconciled by identity
+```text
+SSE stream     -> continuous changes
+HTTP snapshot  -> current-state seed and reconnect repair
+```
 
-Every generated market event carries a process `stream_id`, a monotonic `event_id` and a
-canonical `event_time`, and `/snapshot` exposes the same fields. The browser starts the
-snapshot request and the stream **concurrently** — waiting for one would guarantee a gap —
-and resolves the resulting race per instrument: same process and a higher sequence number
-wins; a changed process is a restart and resets that instrument's window; a late frame from
-a dead process is dropped. A reconnect refetches the snapshot and merges it the same way
-rather than replacing state wholesale.
+They can arrive in either order. Domain merge rules reconcile them:
 
-The documented exception: hard-coded rows that exist before any generator has ticked carry
-only the envelope's `stream_id`, so during the first seconds after a backend start a late
-snapshot can briefly overwrite a newer live value. Recurring ticks converge.
+- Market Data prefers the correct stream identity and newer event sequence/time.
+- A final valuation is terminal.
+- Otherwise, a strictly newer valuation time wins.
+- Snapshot completion merges directly; it does not replace the entire context blindly.
+- A reconnect loads another snapshot to repair events missed while disconnected.
 
-Full walkthrough in [`docs/phase-3-notes.md`](docs/phase-3-notes.md).
+Closed trades are never classified by age. A final event immediately changes a row to `CLOSED`;
+only non-final open valuations can be `LIVE` or `STALE`.
 
-### The blotter is a read model, not a second source of truth
+### Frontend ingestion is continuous; React publication is throttled
 
-**Live lists and PnL come from the stream cache; single-trade history comes from the DB.**
+| Work | Current behavior |
+| --- | --- |
+| EventSource delivery and JSON parsing | Not throttled |
+| Domain normalization | Runs for every delivered event |
+| Repeated live updates for one identity | Latest value replaces the earlier value in a `Map` |
+| Live React state publication | At most once per 500 ms scheduler tick |
+| Final valuation publication | Immediate; terminal state bypasses the live buffer |
+| Snapshot and connection status | Immediate |
+| Freshness clock | Once per second, on every second 500 ms scheduler tick |
+| Search, filter, and sort interaction | Immediate |
 
-- The live working set holds **only ACTIVE trades**, indexed on
-  `book_id / asset_class / status / symbol`; queries intersect the smallest id-set first
-  instead of scanning. Bootstrapped from the DB at startup, kept current off the stream,
-  **evicted on close** — so memory tracks open risk, not total history.
-- `GET /trades` resolves by status: ACTIVE from the cache, CLOSED from the DB, no status
-  returns both.
-- **Realized** PnL in `/books/summary` is aggregated from the DB (final valuation rows), so
-  it survives restarts; **unrealized** is summed live from the cache.
+One 500 ms interval drives both cadences. Feed drains subscribe to every scheduler tick;
+`useElapsedTime` subscribes to every second tick. With continuous updates, the first half-second
+tick can publish feed state alone and the second publishes feed state plus freshness in one batched
+React task. With empty buffers, only the one-second freshness update renders.
 
-### Audit logs are business records, technical logs are not
+The feed hooks stay mounted above routing, so changing screens does not create new SSE connections.
+Only the active route performs its screen-specific derivations. Market and Valuation contexts are
+separate, so an unrelated feed update does not propagate through the other context.
 
-- **Technical logs** — `structlog` JSON to stdout, for watching the app in a console.
-- **Audit logs** — business events in the `audit_logs` table via `write_audit(...)`, for
-  reconstructing what happened. When a business write and its audit belong together they
-  **share one transaction** (`session=`), so a trade and its `TRADE_CREATED` row commit
-  atomically — one commit, one `fsync`, no possibility of one without the other.
+The Valuations screen retains the complete client collection:
 
-The System Overview "Errors & Warnings" panel reads these back through monitoring's
-`GET /audits`, which is backed by a **partial index** on `audit_logs(created_at)`
-`WHERE severity IN ('WARNING','ERROR','CRITICAL')`. Partial because the high-volume
-`TRADE_CREATED`/`TRADE_CLOSED` rows (~5/s under the generator) never enter it, so the index
-stays tiny while serving the only query that matters.
+```text
+all valuations in context
+-> add LIVE / STALE / CLOSED status
+-> class, book, state, and text filters
+-> captured-value sort
+-> render matchingRows.slice(0, 250)
+```
 
-A lighter alternative — emit audits as log lines and have a forwarder batch-insert them —
-would take the audit write off the business path and batch its commits, but it can lose
-events (a container dying before the forwarder reads the line) and gives up atomicity with
-the business change. Not worth it here, where correctness matters more than volume.
+The 250 limit is a DOM boundary, not data eviction. PnL summaries and filters still use the complete
+collection, and searching can bring an older closed trade into the visible window. Market
+sparklines are memoized so unchanged instruments do not rebuild their SVG geometry.
 
-### A benchmark that means something
+## Current optimizations and their tradeoffs
 
-`MARKET_INDEX` is an equal-weighted basket of the risky spot instruments (ACME, XAUUSD,
-ES_FUT), rebased to a fixed reference level, so its moves are connected to instruments you
-can actually see on screen. FX and rates are excluded because their return dynamics are not
-comparable. It is deliberately not part of the tradeable `AssetClass` enum, and it does not
-appear in the instrument table.
+| Choice | Benefit | Deliberate tradeoff |
+| --- | --- | --- |
+| Generated open-book equilibrium around 300 tracked trades | Prevents pricing demand from growing forever | Shapes demonstration load; it does not increase Pricing throughput |
+| Pricing queue of 5,000 events per client | Absorbs a large valuation burst with bounded memory | Cannot fix sustained calculation or database-write overload |
+| Market Data queue of 500 events per client | Bounds the smaller market stream | A persistently slow client can still lose intermediate events and rely on snapshot repair |
+| Latest-per-identity browser `Map` with a 500 ms flush | Collapses repeated live updates and limits React publication to twice per second | Every delivered event is still parsed and normalized; intermediate display states are intentionally skipped |
+| One shared scheduler for feed flushes and the one-second freshness clock | Avoids independent timers and lets React batch coincident work | A live update can wait up to one half-second before publication |
+| Filter all rows, then sort all matches on each render | Keeps one simple, deterministic pipeline for flushes and user interactions | Costs O(n) filtering plus O(m log m) sorting instead of maintaining incremental indexes |
+| Sort before taking the first 250 matches | Guarantees that the visible window is the correct top 250 for the selected order | Sorting still sees every matching row even though only 250 reach the table |
+| Render only the first 250 matching valuations | Bounds React element, DOM-cell, and paint work without discarding data | Full context, summaries, filters, and sorting still scale with all retained valuations |
+| Memoized sparklines and bounded instrument history | Avoids rebuilding unchanged SVG geometry and bounds history memory | Market events still have to update the affected instrument and its bounded history |
 
-The simulator uses one readable per-tick volatility per asset, then applies real tick sizes
-and two-sided spreads, with gentle mean reversion so a long demo does not drift somewhere
-implausible. Curve level, slope and small per-tenor moves all derive from one
-curve-volatility value, so the curve moves coherently without a large tuning surface.
+Captured sorting retains each trade's comparison value, not the previous sorted array. A feed flush
+creates a fresh filtered array, so sorting must run again to reconstruct the selected order before
+the 250-row cap. A sorted-ID cache would need reconciliation for new trades, closures, snapshots,
+reconnects, filter changes, and sort recaptures. Five complete 1,197-row sorts took about 0.8 ms in
+the domain measurement, so that extra ordering state is not currently justified.
 
-### Scenario shocks reuse the pricing engine
+These bounds are protection, not throughput optimization.
 
-`POST /scenario` re-prices one ad-hoc position under a market shock and returns base vs
-scenario. Nothing is created and nothing is persisted, but it runs through the *same*
-valuation code as live pricing, so a shock P&L matches what the position would really book.
+The observed failure at roughly 2,100 open trades occurred before browser rendering became the
+primary problem. Pricing had to calculate and persist roughly 1,000 valuations per second, with one
+database write per valuation. The client then correctly showed most rows as stale. A larger queue
+provides more time, but sustained production above consumption eventually fills any finite queue.
 
-Percentage shocks apply to spot/forward; bond shocks are basis points bumped across every
-tenor of the `USD_GOV` curve and re-PV'd, so the P&L isolates the rate move.
-`scenario_pnl = scenario value − base value`, side-aware. See
-`scenarios/scenario-analysis.http`.
+On the frontend, removing row flash eliminated measured long tasks at 447 rows. With 1,197 total
+valuations, limiting the table to 250 materially reduced long tasks, but full-context derivation and
+per-event ingestion still scale with the complete collection.
 
----
+## Options when valuation volume grows
 
-## Cost and scale
+Choose the optimization from the observed bottleneck rather than adding all of them:
 
-Everything is sized for a demo: ten instruments, ~3 market events/s, a handful of open
-trades. This section records what the costs actually are and which one breaks first, so the
-answer is measured rather than guessed later.
+| Symptom | Next option | Why |
+| --- | --- | --- |
+| Pricing falls behind while open trades grow | Batch valuation inserts once per market tick | Removes transaction/round-trip overhead from the hottest server path |
+| Closed history makes snapshots and context grow | Keep live/open valuations in context; load closed history on demand | Stops inactive history from participating in every clock render |
+| Users need large closed-history searches | Server-side filtering and cursor pagination | Bounds response size, browser memory, filtering, and sorting |
+| Client summaries must cover data no longer loaded | Publish/query server-side aggregates | Avoids downloading history only to calculate totals |
+| DOM commit dominates with hundreds of visible rows | Virtualize the table | Renders only viewport rows while preserving navigation through all matches |
+| EventSource dispatch/JSON parsing dominates | Publish valuation batches per tick | Reduces message and parse overhead without discarding latest values |
+| Same trade is updated repeatedly inside one window | Coalesce raw updates before normalization | Avoids normalizing values that will be overwritten |
+| Final events must be lossless across disconnects | Add event identity, durable replay, and resume cursors | Snapshot repair gives eventual state, not an auditable event stream |
 
-### The live market screen
+A practical production shape would separate two workloads:
 
-N = instruments on screen, H = history points each (capped at 100). The UI re-renders at
-most **2.7×/s** — a 600 ms flush plus a 1 s freshness clock — and each render walks this
-chain. Measured in Chrome:
+```text
+live risk:
+GET /valuations?state=open
++ valuation SSE
++ compact server aggregates
 
-| Work | Grows as | N = 10 (today) | N = 1,000 |
-|---|---|---|---|
-| Trend-line geometry | O(N·H) | 0.17 ms | 12.4 ms |
-| Trend-line DOM (only rows that ticked) | O(N·H) | 0.32 ms | 24.5 ms |
-| Row derivation (deltas, freshness) | O(N) | 0.02 ms | 1.1 ms |
-| Sort | O(N) in practice | 0.005 ms | 0.25 ms |
-| Persist to `sessionStorage` | O(N·H) | ~10 kB | ~1 MB |
+historical investigation:
+GET /valuations?state=closed&cursor=...&limit=...
++ server-side search/filter/sort
++ per-trade valuation history on demand
+```
 
-Today the whole chain runs in **under a millisecond against a 16.7 ms frame budget**. The
-render rate is bounded by the flush timer, not by the work — nothing here is optimised, and
-nothing needs to be.
+At the current 300-open-trade demonstration target, the existing half-second coalescing and 250-row
+window remain intentionally simpler. Server pagination or on-demand closed valuations become the
+right next step when lifetime history, rather than live risk, is what grows.
 
-Two results worth keeping:
+## Important limitations
 
-- **Sorting is O(N log N) on paper and O(N) in practice.** Comparison values are captured
-  when you click a header rather than read live, so on every later render the array is
-  already in order and V8's TimSort exits after one linear scan — 999 comparisons for 1,000
-  rows, not 9,966. Sorting live values would lose that *and* make rows jump under the
-  cursor.
-- **Drawing costs ~150× more than sorting.** If this table ever feels slow it will be the
-  DOM, never the algorithms.
+- Trade Action uses an in-process, non-durable queue. Idempotency makes retry safe, but in-flight
+  work can be lost on restart.
+- Trade Generator tracks managed open IDs in memory. After restart, earlier database-open trades
+  are not part of its equilibrium calculation.
+- SSE is current-state delivery, not durable replay. Snapshot/reconnect repairs state but does not
+  reconstruct every missed event.
+- Pricing currently persists valuations one at a time and retains latest closed valuations in its
+  in-memory snapshot collection for the process lifetime.
 
-### If it had to scale
-
-In order of payoff:
-
-1. **Virtualize the table.** Only ~30 rows fit on a screen; render only those and N stops
-   mattering — it fixes node count, string churn, DOM rebuilds and paint at once.
-2. **Drop the update counter from the React row key** so a ticking row is patched instead of
-   remounted, and flash one cell rather than the whole row.
-3. **Animate `opacity` instead of `background`** so the flash composites rather than
-   repaints.
-4. **Downsample history for display** if `HISTORY_LENGTH` grows — a 96 px sparkline cannot
-   show more than ~96 points, so beyond that the work is invisible.
-
-### Bounds on the backend
-
-| Bound | Value | At the limit |
-|---|---|---|
-| SSE queue per client | 500 events | event dropped and logged; memory stays bounded |
-| Browser feed buffer | latest value per instrument | intermediate ticks coalesced, never queued |
-| Blotter live cache | ACTIVE trades only | closed trades evicted on close |
-| trade-action worker | one thread | writes serialise; intake stays fast because the queue absorbs bursts |
-
-None of these is a throughput optimisation — each exists to stop something growing without
-limit. A real feed would need measured queue sizing, server-side subscriptions and durable
-replay before any of them counted as production numbers.
-
----
-
-## Known limitations
-
-- The trade-action queue is in-process and **non-durable** — in-flight intents are lost on
-  restart. Idempotency makes a re-send safe.
-- trade-generation tracks open trade ids **in memory**, so after a restart it can only close
-  trades it opened in the new run.
-- Blotter live caches are empty for a moment after restart until valuations stream in;
-  `bootstrap_trades()` warms the active set from the DB to shrink that window.
-- Per-asset PnL is brought *closer* by notional-sized quantities, not made equal — one
-  futures contract is the smallest step, so some spread remains.
-- The market screen reconciles current state; it is **not** an audit trail. Samples are lost
-  on disconnect and coalesced during bursts. A tick tape would need durable replay.
-- Producer/consumer stream audits are not yet failure-isolated, so those loops are not a
-  production-resilience template.
+The detailed hook, buffering, ordering, filter, and performance walkthrough is in
+[`docs/phase-4-notes.md`](docs/phase-4-notes.md).

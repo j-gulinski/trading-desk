@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
+import { FRESHNESS_INTERVAL_MS } from '../config/stream.js'
+import { subscribeToStreamClock } from './streamClock.js'
 
-export function useElapsedTime(sinceMs, intervalMs = 1000) {
+export function useElapsedTime(sinceMs) {
   const [now, setNow] = useState(() => Date.now())
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs)
-    return () => clearInterval(id)
-  }, [intervalMs, sinceMs])
+  useEffect(() => subscribeToStreamClock(setNow, FRESHNESS_INTERVAL_MS), [])
 
   return {
     now,

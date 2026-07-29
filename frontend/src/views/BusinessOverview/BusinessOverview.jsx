@@ -65,7 +65,12 @@ export default function BusinessOverview() {
           sub={`${summary.closed} closed positions`}
           tone={summary.realized >= 0 ? 'pos' : 'neg'}
         />
-        <StatCard label="OPEN TRADES" value={summary.open} sub="→ Valuations & Risk" />
+        <StatCard
+          label="OPEN TRADES"
+          value={summary.open}
+          sub="Valuations & Risk →"
+          href="#/valuations"
+        />
         <StatCard label="BOOKS" value={summary.books} sub="with a valuation" />
       </div>
 

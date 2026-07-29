@@ -10,8 +10,8 @@ learning-oriented, review-gated workflow: I teach and implement, you stay in con
 2. **You accept** — you approve, tweak the scope, or redirect. Nothing gets built until
    you say go.
 3. **I implement** — I write the files into `frontend/`, keeping each phase small.
-4. **I verify** — I compile the SCSS and syntax-check every JS/JSX file before handing
-   back (full `npm run dev`/build runs on your machine, not my sandbox).
+4. **I verify** — I run the relevant automated tests, lint checks, and production build,
+   then exercise real-time behavior in the browser when the phase needs it.
 5. **I write the phase notes** — every phase produces `docs/phase-N-notes.md` in the
    standard format below.
 6. **You review** — you read the notes + code and run it. I explain any concept in chat
@@ -46,9 +46,9 @@ stays comment-free); ordered so reading top-to-bottom follows the data/execution
 
 ## Backend-gap strategy
 
-- **Big domain features** from `praca_domowa_04` (European options, IRS + rate curves,
-  alpha/beta, Alembic migrations) are built **last**, after the UI is wired. Placeholders
-  hold their spot until then.
+- **Big domain features** from `praca_domowa_04` (European options, IRS instruments and
+  pricing, alpha/beta, Alembic migrations) are built **last**, after the UI is wired.
+  The shared rate curve was completed with Phase 3; placeholders hold the remaining spots.
 - **Small additions** (one endpoint, one field, a proxy entry) are done **inline** in the
   phase that needs them.
 
@@ -60,8 +60,10 @@ stays comment-free); ordered so reading top-to-bottom follows the data/execution
 - `docs/phase-N-notes.md` — the review walkthrough for each completed phase (inspection
   order + per-file concept notes).
 - `docs/designs/` — the reference mockups.
-- `frontend/src/` — the app. Structure: `routes/`, `hooks/`, `layout/`, `views/`,
-  `components/`, `services/`, `styles/`.
+- `frontend/src/` — the app. Imports run one way, and this is the order to read them in:
+  `config/` → `domain/` → `hooks/` → `providers/` → `views/` → `components/`, with
+  `services/` (HTTP), `routes/`, `layout/` and `styles/` alongside. Nothing imports upward:
+  a provider never reaches into a view, and a component never reaches into feature config.
 
 ## Progress
 

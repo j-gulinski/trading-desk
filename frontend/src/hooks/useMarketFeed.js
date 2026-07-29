@@ -71,7 +71,7 @@ export function useMarketFeed() {
     storeInstruments(instruments)
   }, [instruments])
 
-  const buffer = useBufferedUpdates((pending) => {
+  const pushUpdate = useBufferedUpdates((pending) => {
     setInstruments((previous) => mergeInstruments(previous, pending))
     setTickCount(receivedTicksRef.current)
     storeTickCount(receivedTicksRef.current)
@@ -85,7 +85,7 @@ export function useMarketFeed() {
       if (updates.length === 0) return
       receivedTicksRef.current += 1
       for (const update of updates) {
-        buffer(update.id, { ...update, receivedAtMs })
+        pushUpdate(update.id, { ...update, receivedAtMs })
       }
     },
   })

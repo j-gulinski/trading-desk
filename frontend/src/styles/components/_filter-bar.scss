@@ -69,19 +69,6 @@
     border-color: var(--border-strong);
   }
 }
-.filter-bar__checkbox {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: nowrap;
-
-  input[type='checkbox'] {
-    accent-color: var(--border-strong);
-  }
-}
-
 @container page (max-width: 960px) {
   .filter-bar__tools {
     width: 100%;

@@ -10,7 +10,7 @@ import { mergeValuations, valuationOf, valuationsFromSeed } from '../domain/valu
 export function useValuationFeed() {
   const [valuations, setValuations] = useState({})
 
-  const buffer = useBufferedUpdates((pending) => {
+  const pushUpdate = useBufferedUpdates((pending) => {
     setValuations((previous) => mergeValuations(previous, pending))
   })
 
@@ -18,7 +18,14 @@ export function useValuationFeed() {
     events: [VALUATION_EVENT],
     onEvent: (_name, data) => {
       const update = valuationOf(data)
-      if (update) buffer(update.id, { ...update, receivedAtMs: Date.now() })
+      if (!update) return
+
+      const received = { ...update, receivedAtMs: Date.now() }
+      if (received.closed) {
+        setValuations((previous) => mergeValuations(previous, [received]))
+        return
+      }
+      pushUpdate(received.id, received)
     },
   })
 
