@@ -153,14 +153,42 @@ the domain measurement, so that extra ordering state is not currently justified.
 
 These bounds are protection, not throughput optimization.
 
-The observed failure at roughly 2,100 open trades occurred before browser rendering became the
-primary problem. Pricing had to calculate and persist roughly 1,000 valuations per second, with one
-database write per valuation. The client then correctly showed most rows as stale. A larger queue
-provides more time, but sustained production above consumption eventually fills any finite queue.
+### Current bottleneck order
 
-On the frontend, removing row flash eliminated measured long tasks at 447 rows. With 1,197 total
-valuations, limiting the table to 250 materially reduced long tasks, but full-context derivation and
-per-event ingestion still scale with the complete collection.
+The first end-to-end scaling limit is Pricing persistence:
+
+```text
+receive one market tick
+-> find affected open trades
+-> for each trade:
+     calculate one valuation
+     open a database session
+     INSERT and commit one valuation
+-> publish the completed valuation events
+-> process the next market tick
+```
+
+This work is sequential in the market-stream consumer. At roughly 2,100 open trades, Pricing had
+to calculate and persist about 1,000 valuations per second, and rows became stale before browser
+rendering was the primary constraint. The 5,000-entry client queue is downstream of calculation and
+persistence: it absorbs a publication burst but cannot accelerate the producer. The highest-value
+server optimization at that scale is inserting all valuations affected by one tick in one database
+transaction.
+
+The observed limits, in order, are:
+
+1. **System throughput:** per-valuation database transactions in Pricing.
+2. **Frontend work:** React reconciliation, DOM updates, and paint for many simultaneously changing
+   visible rows.
+3. **Lifetime-history growth:** snapshots, context, summaries, statuses, and filtering still process
+   every retained valuation.
+4. **Sorting:** currently negligible compared with the preceding work.
+
+The frontend evidence supports that ordering. Removing row flash eliminated measured long tasks at
+447 rows. Rendering 1,197 rows produced 361–472 ms tasks; limiting the table to 250 reduced them to
+102–192 ms. In contrast, five complete 1,197-row domain sorts took about 0.8 ms in total. The
+remaining capped tasks include per-event ingestion, full-context derivation, React reconciliation,
+and DOM work; the long-task observer does not isolate those costs further.
 
 ## Options when valuation volume grows
 
