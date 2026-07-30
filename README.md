@@ -25,14 +25,16 @@ historical records.
 | PostgreSQL | Source of truth for trades, valuations, books, and business audit history |
 
 ```text
-market event ───────────────┐
-                            v
-trade intent -> Trade Action -> ACTIVE trade -> Pricing -> valuation history
-                                              └─────────> valuation SSE
-                                                           -> React context
-                                                           -> screen
+market event -> Market Data publisher -> Pricing consumer
+  Pricing: update spot/curve -> compute valuation -> persist valuation -> publish SSE
+                                                      └──> React valuation context -> screens
+trade intent -> Trade Action -> OPEN trade in DB (+audit)
+  -> Pricing loop refreshes active-set from DB cache
 
-CLOSE intent -> CLOSED trade -> one final valuation -> realized PnL
+CLOSE intent -> Trade Action -> DB close (status=CLOSED, close_price)
+             -> Pricing periodic finalization loop (TRADE_REFRESH_SECONDS)
+             -> final valuation (final=true, unrealized=0, realized=closed PnL) persisted and published
+             -> React valuation context -> screens (terminal row state)
 ```
 
 ## Decisions that define the system
