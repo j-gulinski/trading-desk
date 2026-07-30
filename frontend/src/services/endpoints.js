@@ -21,4 +21,12 @@ export const endpoints = {
     stream: '/api/pricing/valuation-stream',
     valuations: '/api/pricing/valuations',
   },
+  blotter: {
+    trades: (params) => withQuery('/api/blotter/trades', params),
+    trade: (tradeId) => `/api/blotter/trades/${encodeURIComponent(tradeId)}`,
+    tradesOverview: (params) => withQuery('/api/blotter/trades/overview', params),
+  },
+  tradeAction: {
+    submit: '/api/trade-action/trade-actions',
+  },
 }

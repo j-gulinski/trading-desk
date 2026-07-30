@@ -29,6 +29,21 @@ def books_summary():
     return _json(service.books_summary())
 
 
+@app.route("/trades/overview")
+def trades_overview():
+    return _json({
+        "trades": service.list_trades(
+            book_id=request.query.get("book_id") or None,
+            asset_class=request.query.get("asset_class") or None,
+            status=request.query.get("status") or None,
+            symbol=request.query.get("symbol") or None,
+            limit=int(request.query.get("limit") or 100),
+            offset=int(request.query.get("offset") or 0),
+        ),
+        "books": service.books_summary(),
+    })
+
+
 @app.route("/trades")
 def list_trades():
     return _json(service.list_trades(

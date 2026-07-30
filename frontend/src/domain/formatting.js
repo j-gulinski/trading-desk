@@ -8,12 +8,20 @@ export function formatElapsedTime(ms) {
   return `${h}h ago`
 }
 
+const pad = (n, width = 2) => String(n).padStart(width, '0')
+
 export function formatClockTime(ms, { millis = false } = {}) {
   if (!Number.isFinite(ms)) return '—'
   const d = new Date(ms)
-  const p = (n, w = 2) => String(n).padStart(w, '0')
-  const clock = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-  return millis ? `${clock}.${p(d.getMilliseconds(), 3)}` : clock
+  const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  return millis ? `${clock}.${pad(d.getMilliseconds(), 3)}` : clock
+}
+
+export function formatDateTime(ms, { millis = false } = {}) {
+  if (!Number.isFinite(ms)) return '—'
+  const d = new Date(ms)
+  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return `${date} ${formatClockTime(ms, { millis })}`
 }
 
 export function formatNumber(n) {
@@ -48,7 +56,6 @@ export function formatSignedAmount(value, decimals = amountDecimals(value)) {
   if (rounded === 0) return formatAmount(0, decimals)
   return `${rounded > 0 ? '+' : '−'}${formatAmount(Math.abs(rounded), decimals)}`
 }
-
 const UNIT_PRICE_DECIMALS = { FX: 5 }
 
 export function unitPriceDecimals(assetClass) {

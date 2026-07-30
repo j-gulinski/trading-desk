@@ -184,6 +184,7 @@ export default function MarketData() {
         title="LIVE MARKET FEED"
         note={`${formatNumber(tickCount)} ticks received · this tab session`}
         status={status}
+        stream="MARKET"
       />
 
       <div className="market-summary">

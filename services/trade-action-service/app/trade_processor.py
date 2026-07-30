@@ -39,7 +39,7 @@ def _close(intent):
         closed = repository.close_trade(session, uuid.UUID(intent["trade_id"]),
                                         intent.get("close_price"), intent.get("close_reason"))
         if closed:
-            _audit(session, "TRADE_CLOSED", "Position closed", intent)
+            _audit(session, "TRADE_CLOSED", "Trade closed", intent)
         else:
             _audit(session, "ACTION_REJECTED", "Close rejected: not ACTIVE", intent, "WARNING")
     action_queue.incr("closed" if closed else "rejected")
@@ -50,7 +50,7 @@ def _close_all(intent):
     with session_scope() as session:
         trade_ids = repository.close_all_trades(session, reason)
         for trade_id in trade_ids:
-            write_audit(SERVICE_NAME, "TRADE_CLOSED", "Position closed",
+            write_audit(SERVICE_NAME, "TRADE_CLOSED", "Trade closed",
                         entity_type="TRADE", entity_id=trade_id,
                         payload={"close_reason": reason}, session=session)
     action_queue.incr("closed", len(trade_ids))

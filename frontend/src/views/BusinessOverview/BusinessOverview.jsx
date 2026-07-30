@@ -50,6 +50,7 @@ export default function BusinessOverview() {
         title="PORTFOLIO POSITION"
         note={`as of ${formatClockTime(summary.lastUpdateMs)}`}
         status={status}
+        stream="PRICING"
       />
 
       <div className="business-summary">

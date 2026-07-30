@@ -42,19 +42,20 @@ export default function Valuations() {
 
   const [activeClass, setActiveClass] = useState(null)
   const [activeBook, setActiveBook] = useState(null)
-  const [activeState, setActiveState] = useState(null)
   const [query, setQuery] = useState('')
 
-  const rows = valuationRowsOf(Object.values(valuations), now)
-  const summary = summarizeValuations(rows)
+  const openRows = valuationRowsOf(Object.values(valuations), now).filter(
+    (row) => !row.valuation.closed,
+  )
+  const summary = summarizeValuations(openRows)
 
   const table = useTableState({
     columns: VALUATION_COLUMNS,
     storageKey: VALUATION_COLUMNS_STORAGE_KEY,
     defaultSort: DEFAULT_VALUATION_SORT,
     fallbackSort: VALUATION_FALLBACK_SORT,
-    captureSnapshot: (column) => captureValuationSnapshot(rows, column),
-    hasRows: rows.length > 0,
+    captureSnapshot: (column) => captureValuationSnapshot(openRows, column),
+    hasRows: openRows.length > 0,
   })
 
   function selectClass(value) {
@@ -69,11 +70,10 @@ export default function Valuations() {
 
   const search = query.trim().toLowerCase()
   const matchingRows = sortValuationRows(
-    rows.filter(
+    openRows.filter(
       (row) =>
         (!activeClass || row.valuation.assetClass === activeClass) &&
         (!activeBook || row.valuation.bookId === activeBook) &&
-        (!activeState || row.status === activeState) &&
         matchesSearch(row, search),
     ),
     table.sort,
@@ -81,8 +81,8 @@ export default function Valuations() {
   const visibleRows = matchingRows.slice(0, MAX_RENDERED_ROWS)
   const hiddenRowCount = matchingRows.length - visibleRows.length
 
-  const books = bookRisksOf(rows)
-  const bookOptions = bookOptionsOf(rows)
+  const books = bookRisksOf(openRows)
+  const bookOptions = bookOptionsOf(openRows)
   const currency = summary.currency ?? 'MIXED'
 
   let tableContent
@@ -91,10 +91,10 @@ export default function Valuations() {
       <ValuationTable
         table={table}
         rows={visibleRows}
-        caption="Live trade valuations with fair value, unrealized and realized PnL, and valuation freshness"
+        caption="Open positions ranked by return and unrealized PnL, capped at the top 100"
       />
     )
-  } else if (rows.length > 0) {
+  } else if (openRows.length > 0) {
     tableContent = <EmptyState message="No valuations match these filters." />
   } else if (seedStatus === 'error') {
     tableContent = <EmptyState message="Could not load current valuations — retrying on reconnect." />
@@ -103,15 +103,16 @@ export default function Valuations() {
   } else if (status === 'RECONNECTING') {
     tableContent = <EmptyState message="Valuation stream unavailable — retrying." />
   } else {
-    tableContent = <EmptyState message="No trades are being valued yet." />
+    tableContent = <EmptyState message="No open positions are being valued right now." />
   }
 
   return (
     <section className="page">
       <StreamHeader
         title="LIVE VALUATIONS"
-        note={`${formatNumber(summary.open)} open · ${formatNumber(summary.closed)} closed · as of ${formatClockTime(summary.lastUpdateMs)}`}
+        note={`${formatNumber(summary.open)} open positions · as of ${formatClockTime(summary.lastUpdateMs)}`}
         status={status}
+        stream="PRICING"
       />
 
       <div className="valuation-summary">
@@ -127,12 +128,6 @@ export default function Valuations() {
           value={summary.stale}
           sub="> 10s threshold"
           tone={summary.stale > 0 ? 'warn' : 'default'}
-        />
-        <StatCard
-          label={`REALIZED PNL · ${currency}`}
-          value={formatSignedAmount(summary.realized)}
-          sub={`${summary.closed} closed positions`}
-          tone={summary.realized >= 0 ? 'pos' : 'neg'}
         />
       </div>
 
@@ -158,8 +153,8 @@ export default function Valuations() {
       <section className="valuation-section" aria-labelledby="valuation-table-title">
         <div className="valuation-section__head">
           <div>
-            <h2 id="valuation-table-title">Live valuations</h2>
-            <p>Latest fair value and PnL per trade</p>
+            <h2 id="valuation-table-title">Top 100 open positions</h2>
+            <p>Ranked by return or unrealized PnL — current signal for spotting alpha</p>
           </div>
           <span>
             {hiddenRowCount > 0 ? `${visibleRows.length} of ${matchingRows.length}` : visibleRows.length} rows
@@ -169,7 +164,7 @@ export default function Valuations() {
         <FilterBar
           label="CLASS"
           ariaLabel="Filter valuations by asset class"
-          options={countOptions(rows, (row) => row.valuation.assetClass)}
+          options={countOptions(openRows, (row) => row.valuation.assetClass)}
           value={activeClass}
           onChange={selectClass}
           search={{
@@ -193,21 +188,6 @@ export default function Valuations() {
                   {option.label} ({option.count})
                 </option>
               ))}
-            </select>
-          </label>
-
-          <label className="filter-bar__select-field">
-            <span className="filter-bar__label">STATE</span>
-            <select
-              className="filter-bar__select"
-              aria-label="Filter valuations by state"
-              value={activeState ?? ''}
-              onChange={(event) => setActiveState(event.target.value || null)}
-            >
-              <option value="">All states ({summary.total})</option>
-              <option value="LIVE">LIVE ({summary.live})</option>
-              <option value="STALE">STALE ({summary.stale})</option>
-              <option value="CLOSED">CLOSED ({summary.closed})</option>
             </select>
           </label>
 

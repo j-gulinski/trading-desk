@@ -131,6 +131,21 @@ The 250 limit is a DOM boundary, not data eviction. PnL summaries and filters st
 collection, and searching can bring an older closed trade into the visible window. Market
 sparklines are memoized so unchanged instruments do not rebuild their SVG geometry.
 
+The Trades & PnL screen uses a different ownership split:
+
+```text
+five-second Blotter snapshot
+-> durable trade membership, terms, lifecycle and recent closed history
+-> overlay newest Pricing-context valuation by trade ID
+-> Open/Closed, book, class and text filters
+-> captured sort
+-> render at most 250 matching rows
+-> load valuation history and audits only for the selected trade
+```
+
+This keeps historical investigation out of app-lifetime feed state. Closed realized PnL falls back
+to the persisted Blotter valuation, so it does not depend on Pricing's process-local cache.
+
 ## Current optimizations and their tradeoffs
 
 | Choice | Benefit | Deliberate tradeoff |
@@ -143,6 +158,8 @@ sparklines are memoized so unchanged instruments do not rebuild their SVG geomet
 | Filter all rows, then sort all matches on each render | Keeps one simple, deterministic pipeline for flushes and user interactions | Costs O(n) filtering plus O(m log m) sorting instead of maintaining incremental indexes |
 | Sort before taking the first 250 matches | Guarantees that the visible window is the correct top 250 for the selected order | Sorting still sees every matching row even though only 250 reach the table |
 | Render only the first 250 matching valuations | Bounds React element, DOM-cell, and paint work without discarding data | Full context, summaries, filters, and sorting still scale with all retained valuations |
+| Poll Blotter membership and overlay the shared valuation feed | Keeps durable trade facts separate from changing values without another live cache | A new trade can wait up to five seconds to enter the table |
+| Load trade valuation/audit history only in the selected-trade dialog | Keeps history out of every live table render | Investigation data refreshes on a slower poll and currently returns bounded recent history |
 | Memoized sparklines and bounded instrument history | Avoids rebuilding unchanged SVG geometry and bounds history memory | Market events still have to update the affected instrument and its bounded history |
 
 Captured sorting retains each trade's comparison value, not the previous sorted array. A feed flush
@@ -233,6 +250,9 @@ right next step when lifetime history, rather than live risk, is what grows.
   reconstruct every missed event.
 - Pricing currently persists valuations one at a time and retains latest closed valuations in its
   in-memory snapshot collection for the process lifetime.
+- The Blotter list is a recent working window, not a complete historical archive: active rows are
+  not paginated, non-active history is bounded, and exact totals/cursors are not published.
 
-The detailed hook, buffering, ordering, filter, and performance walkthrough is in
-[`docs/phase-4-notes.md`](docs/phase-4-notes.md).
+Detailed walkthroughs are in [`docs/phase-4-notes.md`](docs/phase-4-notes.md) for the valuation
+feed and performance model, and [`docs/phase-5-notes.md`](docs/phase-5-notes.md) for the operational
+Blotter and trade investigation flow.

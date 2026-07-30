@@ -1,6 +1,8 @@
 import uuid
 from decimal import Decimal
 
+from sqlalchemy import func
+
 from shared.db import session_scope
 from shared.models import Trade, Valuation, AuditLog, Book
 from app.cache import Trade as CachedTrade
@@ -57,6 +59,17 @@ def list_trades(*, book_id=None, asset_class=None, status=None, symbol=None,
             .all()
         )
         return [_to_cached_trade(r) for r in rows]
+
+
+def closed_trade_counts_by_book() -> dict[str, int]:
+    with session_scope() as session:
+        rows = (
+            session.query(Trade.book_id, func.count(Trade.trade_id))
+            .filter(Trade.status != "ACTIVE")
+            .group_by(Trade.book_id)
+            .all()
+        )
+        return {str(book_id): count for book_id, count in rows}
 
 
 def realized_pnl_by_book() -> dict[str, object]:

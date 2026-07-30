@@ -13,7 +13,6 @@ function rowClassName(row) {
 const TONE_SOURCE = {
   unrealized: (valuation) => (valuation.closed ? null : valuation.unrealizedPnl),
   return: (valuation) => (valuation.closed ? null : valuation.returnPercent),
-  realized: (valuation) => valuation.realizedPnl,
 }
 
 function cellClassName(column, row) {

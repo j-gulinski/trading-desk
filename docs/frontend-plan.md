@@ -58,7 +58,7 @@ Some views need backend that doesn't exist yet. Rule:
 | market-data | `GET /stream`, `GET /snapshot`, `GET /health` | ✅ `/stream` |
 | pricing | `GET /valuations`, `GET /valuations/{id}`, `GET /valuation-stream`, `POST /scenario`, `GET /health` | ✅ `/valuation-stream` |
 | books | `GET/POST /books`, `GET/PUT/DELETE /books/{id}`, `GET /health` | — (poll) |
-| blotter | `GET /books/summary`, `GET /trades`, `GET /trades/{id}`, `/trades/{id}/valuations`, `/trades/{id}/audit-logs`, `GET /health` | — (poll) |
+| blotter | `GET /trades/overview`, `GET /trades/{id}`, `/trades/{id}/valuations`, `/trades/{id}/audit-logs`, `GET /health` | — (poll) |
 | monitoring | `GET /status`, `GET /health` | — (poll; allowed by homework) |
 | trade-generation | `POST /generate-once`, `POST /start`, `POST /stop`, `GET /status`, `GET /health` | — (poll) |
 | trade-action | `POST /trade-actions`, `/batch`, `/close-all`, `GET /queue/status`, `GET /health` | — (poll) |
@@ -295,21 +295,90 @@ stack traces remain structured stdout logs.
   valuations, so the seed payload grows for the life of the process — a retention window is
   outstanding; the "New trade" button and the global streams badge remain later work.
 
-### Phase 5 — Trades & PnL (Blotter) + configurability
-- **Goal:** the main operational table + trade drill-down.
-- **Concepts:** configurable table (column pick, sort, filter), controlled inputs,
-  live valuations from the stream (not just DB), trade details + valuation history +
-  audit logs. Column pick/sort/persistence comes from the Phase 3 `useTableState` +
-  `DataTable` + `ColumnPicker` set; only blotter-specific columns and cells are new.
-- **Backend deps:** `blotter GET /books/summary`, `/trades`, `/trades/{id}`,
-  `/trades/{id}/valuations`, `/trades/{id}/audit-logs` (exist); live prices reuse the
-  pricing stream from Phase 4.
-- **Inherited from the Phase 4 revision:** the **Qty** and **Entry** columns belong here — the
-  `Trades & PnL` mockup shows Side and Qty, `Valuation & Risk` does not. The valuation payload
-  already carries `quantity` (signed) and `trade_price`, so no backend work is needed. Expect a
-  snapshot-column default sort, which means passing `hasRows` to `useTableState` as Phase 4 did.
+### Phase 5 — Trades & PnL (Blotter) + configurability ✅ (built and verified)
 
-- **Proxy to add:** `/api/blotter`.
+- **Goal:** the main operational table + trade drill-down.
+- **Outcome:** one five-second Blotter snapshot poll supplies durable trade membership, terms,
+  lifecycle, recent closed history and book names; the Phase 4 valuation context overlays the
+  newest live/final value by trade ID. No new feed, provider or backend route was added.
+  A same-phase follow-up later added real trade closing (the one exception — it integrates
+  trade-action-service, an existing route this screen hadn't used before), a right-side detail
+  panel, and a firmer Trades/Valuations split. A final review pass replaced the `250+` closed
+  label with an exact backend-supplied total and made every number on Valuations open-scoped.
+- **Full detail:** `docs/phase-5-notes.md` follows the implementation in inspection order and
+  records the merge, freshness, history-window and verification decisions. It also carries the
+  end-to-end close-trade flow across four services, the valuation-selection truth table, and the
+  measured request costs.
+
+**Built**
+
+- **Integration:** `/api/blotter` proxy and endpoint registry entries for book summary, filtered
+  trades and encoded trade detail.
+- **Domain/config:** `config/trades.js` and `domain/trades.js` normalize decimal/timestamp wire
+  values, join book names, de-duplicate stale cache/database overlap, select the newest terminal-aware
+  valuation, derive `LIVE / STALE / PENDING / CLOSED / CANCELLED`, capture live sort values and
+  normalize detail history.
+- **Screen/table:** real `Trades.jsx`; controlled book, Open/Closed, asset-class and text filters;
+  14 configurable columns with a design-aligned nine-column default; captured PnL sorting;
+  Prev/Next paging at 50 rows; `TradeStatusTabs`, `TradeTable` and `TradeCell`.
+- **Drill-down:** a native-`<dialog>` right-side drawer, current feed value, full trade/close terms,
+  newest-first valuation history and the existing normalized audit list. One aggregate
+  `/trades/{id}` request replaces three competing detail requests and polls only while the drawer
+  is mounted.
+- **Small shared adjustments:** `useTableState(defaultVisibleColumns)` and optional
+  `DataTable(onRowClick)`. Existing screens retain their previous behavior.
+- **Follow-up (closing, panel, consolidation):** a real close action (`domain/tradeActions.js`,
+  wired through `TradeDetail.jsx`/`TradeDetailDialog.jsx` with an honest pending state, no
+  optimistic faking); the detail panel restyled from a centered modal into a right-side drawer
+  (`showModal()` kept for its native focus/Escape/backdrop-click behavior — only the backdrop's
+  CSS and the panel's position changed); Valuations trimmed to an open-only top-100 leaderboard
+  (`MAX_RENDERED_ROWS` 250→100, `realized` column and the STATE filter dropped; the review pass
+  then made the stat and book-risk cards open-scoped too, and deleted the `REALIZED PNL` card that
+  Business Overview already owns); Trades gained real Prev/Next paging
+  (`TRADE_PAGE_SIZE = 50`, replacing the old truncate-and-announce pattern) plus two columns
+  ported from Valuations (`price`/`return`, reusing fields already present on feed-sourced rows).
+- **Review pass (counts and duplication):** `blotter GET /books/summary` gained `closed_trades`
+  (per-book exact count of non-active trades) so the Closed tab shows a real total instead of
+  `250+`; `MAX_RENDERED_TRADE_ROWS` deleted and `TRADE_HISTORY_FETCH_LIMIT` 251→250; Valuations
+  fully open-scoped; six behaviour defects fixed (close-pending guard, duplicate-close window,
+  hidden-by-default column migration in `useTableState`, lifecycle-scoped book counts, dated
+  `Opened` column, page reset on filter change); duplication removed via shared
+  `VALUATION_STATUS_LEVEL`, `groupOptions`, `formatQuantity` and `DataTable` sort defaults.
+
+**Contracts and rules later phases inherit**
+
+- **Blotter owns row membership and durable facts; Pricing context owns changing values.** A feed
+  valuation does not create a partial trade row. New trades can wait up to the next five-second
+  membership poll; once present, fair value and PnL publish on the shared half-second feed cadence.
+- **Fallback remains honest.** Context values use browser-receipt freshness. A Blotter fallback has
+  no stream receipt, so it uses server valuation time and can be `STALE`; absence is `PENDING`.
+  Closed/final remains terminal.
+- **PnL column is lifecycle-aware:** unrealized while Open, realized while Closed. The latter comes
+  from persisted Blotter history and survives a Pricing-process restart.
+- **The trade table is a working window, not an archive — and it says so.** Active rows remain
+  cache-backed and complete, so the open count is exact. The `limit` on `/trades` bounds only the
+  database leg, so the closed count comes from `closed_trades` on `/books/summary` (one `GROUP BY`,
+  no extra round trip) rather than from the loaded rows. The tab count is therefore every closed
+  trade, while the meta line discloses the loaded window (`newest N of M loaded`) whenever it is
+  smaller. 50 rows render per page. Archive *search* still needs backend filtering and pagination.
+- **A screen must not report on rows it does not show.** Both `250+` and Valuations' old
+  `N open · M closed` header failed this in opposite directions. Counts belong to the same
+  population as the table, or they are labelled as something else.
+- **Details are on demand.** Valuation history and audits do not enter route-level live state or
+  participate in every feed render.
+
+- **Backend deps used:** `blotter GET /trades/overview`, `/trades/{id}`; the aggregate
+  detail response already contains the same valuation history and audits exposed by the two
+  narrower routes. Live values reuse Pricing SSE from Phase 4. The follow-up also uses
+  `trade-action-service POST /trade-actions` (`CLOSE_TRADE`) — already built for Phase 6, just not
+  previously called from the frontend.
+- **Proxy added:** `/api/blotter` → `blotter-service:8006`; the follow-up added
+  `/api/trade-action` → `trade-action-service:8008`.
+- **Deferred:** New trade, Books CRUD, Generator and the full Trade Actions screen (batch actions,
+  close-all, queue status) stay Phase 6 — only single-trade close moved up here. Exact closed totals
+  now exist, but server-side closed-history *filtering and pagination* and valuation-history
+  pagination remain follow-ups; the client-side Trades pager windows the same already-loaded
+  ~250-row set rather than replacing that need.
 
 ### Phase 6 — Books CRUD + Generator + Trade Actions + states polish
 - **Inherited from the Phase 4 revision:** `positionsOf` in `domain/valuations.js` is written,

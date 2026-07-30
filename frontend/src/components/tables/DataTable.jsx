@@ -61,12 +61,13 @@ export default function DataTable({
   rows,
   rowKey,
   renderCell,
-  sort,
-  onSort,
+  sort = { column: null, direction: 'desc' },
+  onSort = () => {},
   sortDisabledReason = () => null,
   rowClassName = () => null,
   cellClassName = () => null,
   cellTitle = () => undefined,
+  onRowClick = null,
   caption,
 }) {
   const minWidth = Math.max(520, 500 + (columns.length - 2) * 80)
@@ -89,25 +90,35 @@ export default function DataTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={rowKey(row)} className={rowClassName(row) || undefined}>
-              {columns.map((column) => (
-                <td
-                  key={column.id}
-                  className={
-                    classes(
-                      column.numeric && 'data-table__cell--num',
-                      column.cellClass,
-                      cellClassName(column, row),
-                    ) || undefined
-                  }
-                  title={cellTitle(column, row)}
-                >
-                  {renderCell(column, row)}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const rowClass = classes(
+              rowClassName(row),
+              onRowClick && 'data-table__row--interactive',
+            )
+            return (
+              <tr
+                key={rowKey(row)}
+                className={rowClass || undefined}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+              >
+                {columns.map((column) => (
+                  <td
+                    key={column.id}
+                    className={
+                      classes(
+                        column.numeric && 'data-table__cell--num',
+                        column.cellClass,
+                        cellClassName(column, row),
+                      ) || undefined
+                    }
+                    title={cellTitle(column, row)}
+                  >
+                    {renderCell(column, row)}
+                  </td>
+                ))}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>

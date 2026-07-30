@@ -1,4 +1,5 @@
 import StatusPill from '../status/StatusPill.jsx'
+import { VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
 import {
   formatAmount,
   formatClockTime,
@@ -7,8 +8,6 @@ import {
   formatSignedAmount,
   formatUnitPrice,
 } from '../../domain/formatting.js'
-
-const STATUS_LEVEL = { LIVE: 'info', STALE: 'stale', CLOSED: 'unknown' }
 
 export default function ValuationCell({ column, row }) {
   const { valuation, status } = row
@@ -35,12 +34,10 @@ export default function ValuationCell({ column, row }) {
       return valuation.closed ? '—' : formatSignedAmount(valuation.unrealizedPnl)
     case 'return':
       return valuation.closed ? '—' : formatPercent(valuation.returnPercent)
-    case 'realized':
-      return formatSignedAmount(valuation.realizedPnl)
     case 'updated':
       return formatClockTime(valuation.valuationTimeMs, { millis: true })
     case 'valuation':
-      return <StatusPill level={STATUS_LEVEL[status]} label={status} compact />
+      return <StatusPill level={VALUATION_STATUS_LEVEL[status]} label={status} compact />
     default:
       return null
   }

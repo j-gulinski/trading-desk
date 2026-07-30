@@ -77,6 +77,13 @@
 .data-table__row--muted .data-table__cell--key {
   color: var(--text-secondary);
 }
+.data-table__row--interactive {
+  cursor: pointer;
+}
+.data-table__row--selected {
+  background: var(--accent-bg);
+  box-shadow: inset 2px 0 var(--accent);
+}
 
 @keyframes data-table-tick-pos {
   from {

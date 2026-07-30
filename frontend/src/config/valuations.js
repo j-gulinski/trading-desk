@@ -2,7 +2,15 @@ export const VALUATION_EVENT = 'valuation_update'
 
 export const VALUATION_STALE_AFTER_MS = 10000
 
-export const MAX_RENDERED_ROWS = 250
+export const MAX_RENDERED_ROWS = 100
+
+export const VALUATION_STATUS_LEVEL = {
+  LIVE: 'info',
+  STALE: 'stale',
+  CLOSED: 'unknown',
+  PENDING: 'unknown',
+  CANCELLED: 'warning',
+}
 
 export const VALUATION_COLUMNS = [
   {
@@ -52,15 +60,6 @@ export const VALUATION_COLUMNS = [
     defaultDirection: 'desc',
     numeric: true,
     headerNote: 'on notional',
-  },
-  {
-    id: 'realized',
-    label: 'Realized',
-    sortable: true,
-    snapshot: true,
-    defaultDirection: 'desc',
-    numeric: true,
-    headerNote: 'closed PnL',
   },
   {
     id: 'updated',

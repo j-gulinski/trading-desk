@@ -28,7 +28,7 @@ function readVisibleColumns(storageKey, columns, defaultColumns) {
 
   for (const column of columns) {
     if (seen.has(column.id)) continue
-    if (known.has(column.id) && !column.required) continue
+    if (!column.required && (known.has(column.id) || !defaultColumns.includes(column.id))) continue
     const configuredPosition = positionById.get(column.id)
     const insertionIndex = ordered.findIndex(
       (candidate) => positionById.get(candidate) > configuredPosition,
@@ -67,6 +67,7 @@ function moveColumn(visibleColumns, column, targetColumn, position) {
 export function useTableState({
   columns,
   storageKey,
+  defaultVisibleColumns,
   defaultSort,
   fallbackSort = defaultSort,
   captureSnapshot,
@@ -78,9 +79,17 @@ export function useTableState({
     () => new Map(columns.map((column) => [column.id, column])),
     [columns],
   )
+  const initialVisibleColumns = useMemo(() => {
+    if (defaultVisibleColumns == null) return allColumnIds
+
+    const requested = new Set(defaultVisibleColumns)
+    return columns
+      .filter((column) => column.required || requested.has(column.id))
+      .map((column) => column.id)
+  }, [allColumnIds, columns, defaultVisibleColumns])
 
   const [visibleColumns, setVisibleColumns] = useState(() =>
-    readVisibleColumns(storageKey, columns, allColumnIds),
+    readVisibleColumns(storageKey, columns, initialVisibleColumns),
   )
   const [sort, setSort] = useState(() => ({
     ...(visibleColumns.includes(defaultSort.column) ? defaultSort : fallbackSort),
@@ -151,7 +160,7 @@ export function useTableState({
   }
 
   function resetColumns() {
-    setVisibleColumns(allColumnIds)
+    setVisibleColumns(initialVisibleColumns)
   }
 
   const resolvedColumns = useMemo(

@@ -120,6 +120,7 @@ def trade_detail(trade_id: str) -> dict | None:
 def books_summary() -> list[dict]:
     books = repository.list_books()
     realized_by_book = repository.realized_pnl_by_book()
+    closed_by_book = repository.closed_trade_counts_by_book()
     summaries = []
     for book in books:
         book_id = book["book_id"]
@@ -135,6 +136,7 @@ def books_summary() -> list[dict]:
             "name": book["name"],
             "expected_asset_class": book["expected_asset_class"],
             "active_trades": len(active),
+            "closed_trades": closed_by_book.get(book_id, 0),
             "realized_pnl": realized,
             "unrealized_pnl": unrealized,
             "total_pnl": realized + unrealized,

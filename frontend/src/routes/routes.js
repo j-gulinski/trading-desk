@@ -16,7 +16,7 @@ export const ROUTES = [
   { path: 'market-data', label: 'Market Data', subtitle: 'live market data ticks', group: 'TRADING', component: MarketData },
   { path: 'valuations', label: 'Valuations & Risk', subtitle: 'fair value, PnL, alpha & beta', group: 'TRADING', component: Valuations },
   { path: 'books', label: 'Books', subtitle: 'manage trading books', group: 'TRADING', component: Books },
-  { path: 'trades', label: 'Trades & PnL', subtitle: 'blotter — books, trades & valuations', group: 'TRADING', component: Trades },
+  { path: 'trades', label: 'Trades & PnL', subtitle: 'operational blotter — trades, valuations & audit', group: 'TRADING', component: Trades },
 ]
 
 export const GROUP_ORDER = ['SYSTEM', 'TRADING']

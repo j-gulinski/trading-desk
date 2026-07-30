@@ -1,4 +1,5 @@
 import { VALUATION_STALE_AFTER_MS } from '../config/valuations.js'
+import { groupOptions } from './filters.js'
 import { formatShortId } from './formatting.js'
 import { sortRows } from './tableSort.js'
 
@@ -246,16 +247,11 @@ export function bookRisksOf(rows) {
 }
 
 export function bookOptionsOf(rows) {
-  const books = new Map()
-  for (const row of rows) {
-    const { valuation } = row
-    if (valuation.bookId == null) continue
-    const label = valuation.bookName ?? formatShortId(valuation.bookId)
-    const entry = books.get(valuation.bookId)
-    if (entry) entry.count += 1
-    else books.set(valuation.bookId, { value: valuation.bookId, label, count: 1 })
-  }
-  return Array.from(books.values()).sort((a, b) => a.label.localeCompare(b.label))
+  return groupOptions(
+    rows,
+    (row) => row.valuation.bookId,
+    (row) => row.valuation.bookName ?? formatShortId(row.valuation.bookId),
+  )
 }
 
 function structuralValueOf(valuation, column) {

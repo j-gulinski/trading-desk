@@ -20,6 +20,16 @@ export default defineConfig({
         target: 'http://pricing-service:8002',
         changeOrigin: true,
         rewrite: p => p.replace('/api/pricing', '')
+      },
+      '/api/blotter': {
+        target: 'http://blotter-service:8006',
+        changeOrigin: true,
+        rewrite: p => p.replace('/api/blotter', '')
+      },
+      '/api/trade-action': {
+        target: 'http://trade-action-service:8008',
+        changeOrigin: true,
+        rewrite: p => p.replace('/api/trade-action', '')
       }
     }
   }
