@@ -21,6 +21,10 @@ export const endpoints = {
     stream: '/api/pricing/valuation-stream',
     valuations: '/api/pricing/valuations',
   },
+  books: {
+    list: '/api/books/books',
+    book: (bookId) => `/api/books/books/${encodeURIComponent(bookId)}`,
+  },
   blotter: {
     // Books without the trade payload. Trades uses the heavier `tradesOverview`
     // aggregate because it needs both; Generator only needs the book list.

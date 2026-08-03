@@ -109,6 +109,27 @@
   color: var(--text-muted);
   margin-top: 2px;
 }
+.topbar__action {
+  min-height: 34px;
+  flex-shrink: 0;
+  padding: 0 var(--sp-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--accent-strong);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
 .page {
   padding: 0 var(--sp-6) var(--sp-6);
 }

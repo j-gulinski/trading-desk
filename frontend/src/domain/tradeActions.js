@@ -1,3 +1,62 @@
+import { TRADE_QUANTITY_BOUNDS } from '../config/tradeActions.js'
+import { formatNumber } from './formatting.js'
+
+export function newOpenTradeRequestId() {
+  return `manual-open-${crypto.randomUUID()}`
+}
+
+export function tradeableInstrumentsOf(instruments, assetClass) {
+  if (!assetClass) return []
+  return Object.values(instruments ?? {})
+    .filter(
+      (instrument) => instrument.unit === 'price' && instrument.assetClass === assetClass,
+    )
+    .sort((a, b) => a.symbol.localeCompare(b.symbol))
+}
+
+export function tradeFormErrorsOf({ bookId, symbol, quantity, price }) {
+  const errors = {}
+  if (!bookId) errors.book = 'Pick a book.'
+  if (!symbol) errors.instrument = 'Pick an instrument.'
+  if (
+    !Number.isSafeInteger(quantity) ||
+    quantity < TRADE_QUANTITY_BOUNDS.min ||
+    quantity > TRADE_QUANTITY_BOUNDS.max
+  ) {
+    errors.quantity = `Quantity must be a whole number between ${formatNumber(
+      TRADE_QUANTITY_BOUNDS.min,
+    )} and ${formatNumber(TRADE_QUANTITY_BOUNDS.max)}.`
+  }
+  if (symbol && !Number.isFinite(price)) {
+    errors.price = 'No market price received for this instrument yet.'
+  }
+  return errors
+}
+
+export function buildOpenTradeIntent({
+  clientRequestId,
+  bookId,
+  assetClass,
+  symbol,
+  side,
+  quantity,
+  price,
+  currency,
+}) {
+  return {
+    action_type: 'OPEN_TRADE',
+    client_request_id: clientRequestId,
+    book_id: bookId,
+    asset_class: assetClass,
+    symbol,
+    side,
+    quantity,
+    trade_price: price.toFixed(4),
+    currency: currency ?? 'USD',
+    source: 'MANUAL',
+  }
+}
+
 export function buildCloseTradeIntent(tradeId, closePrice) {
   return {
     action_type: 'CLOSE_TRADE',

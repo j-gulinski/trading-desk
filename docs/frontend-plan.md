@@ -471,7 +471,54 @@ atomic 400 on mixed valid/invalid config, restart adoption of 33 blotter trades 
   flags awaiting 6b/6c: `positionsOf` (Books), `apiPut`/`apiDelete` (CRUD), `ApiError`, and a few
   internal-only exports from Phases 3–5 listed in the notes.
 
-### Phase 6b-1 — Books screen + New Trade (the first write forms)
+### Phase 6b-1 — Books screen + New Trade (the first write forms) ✅ (built and verified)
+
+- **Outcome:** Books is now the authoritative roster (card grid from `/blotter/books/summary`, net
+  exposure per symbol on drill-down from the Phase 4 `positionsOf`), and New Trade submits real
+  `OPEN_TRADE` intents. No backend changes, as planned — one proxy entry and the books endpoints
+  were the whole integration.
+- **Full detail:** `docs/phase-6b1-notes.md`.
+
+**Contracts and rules later phases inherit**
+
+- **Writes carry a timeout, by default.** `apiClient.request` takes `timeoutMs` (`AbortSignal.any`
+  combines it with any caller signal) and reports a timeout distinctly from a network error.
+  `apiPost`/`apiPut`/`apiDelete` apply `WRITE_TIMEOUT_MS` (6 s, `config/api.js`) unless overridden,
+  so no future write can forget it; reads keep `usePolling`'s 4 s abort. Before this, a write that
+  never answered wedged its form permanently.
+- **`NewTradeDialog` is a trade-domain component** (`components/trades/`), owned by `AppShell` —
+  not a Books component, because it is reachable from every route.
+- **Refetch after a write, but never block the dialog on it.** The 6a no-optimistic-state rule
+  stands; what changed is that the form closes on the write's own result and fires the refetch,
+  rather than awaiting the roster read before dismissing.
+- **Validation runs before transport.** `field → message` maps rendered per field with
+  `aria-invalid`/`role="alert"`; nothing is sent while the map is non-empty. Native constraint
+  validation is bypassed (`noValidate`) so the presentation is ours.
+- **A failed write names the service and says what did not happen.** `domain/apiErrors.js`
+  (`describeApiError`) replaces raw `Request failed (502)` with copy like *"Books service
+  unavailable — the book was not saved."*; the dialog stays open with the user's input intact.
+  Status codes stay diagnostic, not user-facing.
+- **Manual intents are labelled.** `client_request_id` is `manual-open-<uuid>`, minted fresh only
+  after a successful accept — so a retry of a hung submit dedupes while a deliberate second trade
+  is genuinely new. Extends 6a's `gen-` convention.
+- **Two sources on one screen, labelled by source.** The card PnL is blotter-sourced (≤5 s) and the
+  drill-down PnL is stream-sourced (≤0.5 s); they are sampled at different instants and are not
+  reconciled into a single false number.
+- **New Trade is a global action, not a screen feature.** It lives in the top bar on every route
+  (matching the designs) and is owned by `AppShell`, fetching its own book list when opened rather
+  than being handed one by the host screen. `+ Create book` stays on Books, where it belongs.
+- **Connection budget is now a known constraint.** Each open tab permanently holds 2 of the
+  browser's 6 per-origin HTTP/1.1 connections (one SSE stream per feed). Measured: 1 tab ~10 ms,
+  2 tabs ~8 ms, **3 tabs deadlocks every request including page loads**. Applies to production
+  builds too. 6c fix: release the streams while a tab is hidden, reconnect on `visibilitychange`.
+
+**Deferred (honest):** no Delete or Flatten on the cards until 6b-2's backend guard exists;
+`apiDelete` stays on the accepted-knip list one more phase. `positionsOf` and `apiPut` came off it
+here. Book cards show a short UUID rather than the mockup's `BOOK-EQ-01` codes — no such column
+exists. `EST. NOTIONAL` is labelled `QTY × LAST PRICE` and ignores contract multipliers.
+
+#### Original plan (as approved)
+
 - **Inherited from the Phase 4 revision:** `positionsOf` in `domain/valuations.js` is written,
   tested against live data and **unwired** — net exposure per book × symbol is the natural content
   of the **Books** screen. It nets signed market value (so offsetting trades net rather than sum
@@ -565,10 +612,21 @@ atomic 400 on mixed valid/invalid config, restart adoption of 33 blotter trades 
   lands and verifies before the next starts — the drawer rework is the structurally hardest UI
   change in the plan and must not share a debugging surface with the rest.
   1. **Detail panel rework** — push-aside layout + tabs together (they are the same component;
-     doing them separately means restyling the panel twice).
+     doing them separately means restyling the panel twice). **Extended after 6b-1 review:** the
+     same push-aside treatment covers the two Books write drawers (New Trade, Create/Edit book).
+     All three become the one shared right-hand panel that slides the page content left instead of
+     covering it, so this is one layout mechanism built once and used by three callers — not a
+     drawer pattern per screen. Both 6b-1 dialogs ship today as `<dialog showModal()>` overlays
+     that close on backdrop click (matching the Phase 5 trade-detail behaviour); that is the
+     stop-gap this item replaces, and the `showModal()` question below applies to them equally.
   2. **Sidebar collapse + streams badge** — one layout unit (the badge lives in the sidebar and
      must render in icon-only mode).
-  3. **States sweep + config persistence** — the sweep's required deliverable is a
+  3. **Release SSE connections while a tab is hidden** (added after 6b-1). Each tab permanently
+     spends 2 of the browser's 6 per-origin connections on the two feeds, so a third open tab
+     deadlocks every request in every tab — polls, form submits, even page loads. Closing the
+     streams on `visibilitychange` and reseeding when visible fits `useSseStream`'s existing
+     cleanup and is the right behaviour anyway: a hidden dashboard has no reason to hold a feed.
+  4. **States sweep + config persistence** — the sweep's required deliverable is a
      **nine-states × views matrix in the phase notes**, every cell either "handled (how)" or
      "N/A (why)". Without the matrix, "checked every view" is unverifiable at review.
 - **Review checklist:** drawer open/close keeps the table visible and its live PnL updating;
@@ -582,7 +640,9 @@ atomic 400 on mixed valid/invalid config, restart adoption of 33 blotter trades 
      the book must not miss a P&L change on another position while inspecting one. This replaces
      the Phase 5 overlay-drawer decision: the panel becomes a layout sibling of the table (grid
      column, not `<dialog>` backdrop), which also means rethinking what `showModal()` provided —
-     Escape handling and focus management have to survive the change.
+     Escape handling and focus management have to survive the change. **Applies to the Books
+     drawers too** (added after the 6b-1 review): New Trade in particular quotes a live price, so
+     covering the market it is priced against is the same mistake in a worse place.
   2. **The detail panel gets tabs instead of one long scroll** — Details / Valuation history /
      Audit. Audit events currently sit too low to be found (another student hit the same issue).
   3. **The sidebar collapses to icons** to maximize workspace, with the expanded state

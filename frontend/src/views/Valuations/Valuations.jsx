@@ -137,7 +137,7 @@ export default function Valuations() {
             <h2 id="book-risk-title">Alpha / beta by book</h2>
             <p>Book risk against the MARKET_INDEX benchmark</p>
           </div>
-          <span>{books.length} books</span>
+          <span>{books.length} books with open valuations</span>
         </div>
         {books.length > 0 ? (
           <div className="book-grid">

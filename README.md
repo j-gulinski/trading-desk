@@ -55,7 +55,8 @@ the owning poll refetches server truth out of cycle (`usePolling().refetch()`).
 | Trade Actions | — | `/queue/status` every 2 s; monitoring audits every 3 s | trade intents → Trade Action |
 | Generator | — | generator `/status` every 2 s; monitoring audits (generated intents) every 3 s; books summary every 30 s | start / stop / generate-once / config → Trade Generator |
 | System Overview | none of its own — stream health is read from both shared feed contexts | monitoring `/status` every 5 s; monitoring audits (errors) every 5 s | — |
-| Books | — | placeholder today; Phase 6b will poll `/blotter/books/summary` | books CRUD (planned 6b) |
+| Books | valuation feed (shared context) for per-symbol net exposure on drill-down | `/blotter/books/summary` every 5 s | create / edit book → Books |
+| New Trade (top bar, every route) | market feed (shared context) for instrument list & quoted price | `/blotter/books/summary` once per open | `OPEN_TRADE` intents → Trade Action |
 
 ## Decisions that define the system
 

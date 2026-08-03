@@ -26,6 +26,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: p => p.replace('/api/blotter', '')
       },
+      '/api/books': {
+        target: 'http://books-service:8004',
+        changeOrigin: true,
+        rewrite: p => p.replace('/api/books', '')
+      },
       '/api/trade-action': {
         target: 'http://trade-action-service:8008',
         changeOrigin: true,
