@@ -1,4 +1,61 @@
+---
+phase: 2
+status: complete
+revised: 2026-08-03
+tags:
+  - frontend
+  - data-layer
+  - polling
+  - monitoring
+  - system-overview
+---
+
 # Phase 2 notes — Data layer + System Overview
+
+## Phase outcome in one line
+
+The app's entire HTTP data layer — client, endpoint registry, polling hook, domain
+normalization — built once and proven on the System Overview page, so every later screen only
+adds a fetch function and a normalizer.
+
+## What was decided and why
+
+### 1) One fetch boundary instead of per-view fetch calls
+
+Every request goes through `apiClient.request()`: one place for JSON headers, one typed
+`ApiError`, one cancellation contract. The alternative — each view calling `fetch` — is how an
+app ends up with five subtly different error behaviors. The old one-endpoint `services/api.js`
+was deleted rather than kept alongside, so there is never a second convention to drift toward.
+
+### 2) Relative paths through a dev proxy instead of CORS
+
+The browser cannot resolve Docker hostnames like `monitoring-service:8003`, and configuring CORS
+on seven services would put deployment topology into backend code. Instead the browser calls
+same-origin `/api/monitoring/...` and Vite rewrites it. One proxy entry is added per phase as
+each service comes into play — the registry of entries in `vite.config.js` doubles as a map of
+which services the frontend actually uses.
+
+### 3) The roster renders even when nothing has arrived
+
+`normalizeServiceStatus` always emits the seven known services. If the very first poll fails,
+the page shows monitoring `down` and six `unknown` cards — a truthful grid, not a spinner or an
+error page. The losing alternative (render whatever the response contains) cannot distinguish
+"service missing from response" from "response never arrived".
+
+### 4) Failure semantics were designed, not defaulted
+
+Three separate rules, each with a reason: a failed `/status` poll marks *monitoring itself* down
+immediately (the failed request is direct evidence); previously observed services keep their last
+level until their own timestamps age past 15 s (a dead messenger does not kill the targets); and
+`degraded` at >6 ms latency is an openly artificial POC threshold chosen so the state is actually
+reachable in a local demo.
+
+### 5) `ServiceCard` stays specific; the generic pieces are chosen deliberately
+
+`StatusPill`, `FilterChipGroup`, `Panel`, `EmptyState` are generic because their reuse was already
+visible (connection status, valuation freshness, filters). `ServiceCard` is not — one usage is no
+basis for an abstraction. The rule this sets: extract on the second proven use, not the first
+imagined one.
 
 ## Suggested inspection order
 
@@ -183,3 +240,35 @@ The Phase 2 verification commands are:
 npm run lint
 npm run build
 ```
+
+## Concepts seen for the first time in this phase
+
+**A typed error at the boundary.** `ApiError` carries status and body, so callers write
+`catch (err)` once and can branch on what actually happened. Raw `fetch` does the opposite —
+a 500 is a *successful* promise — which is why the wrapper, not the caller, converts non-2xx
+into throws.
+
+**Cancellation with `AbortController`.** Every request gets a `signal`; the poll aborts it on
+timeout and on unmount. Without this, a slow response from a dying service lands *after* the next
+poll's response and overwrites newer data with older — the classic race that polling code has to
+design away rather than hope away.
+
+**A polling loop is a scheduling problem.** `usePolling` encodes four rules that a naive
+`setInterval(fetch, 5000)` gets wrong: only one request in flight at a time; the next delay
+accounts for how long the request took; a minimum retry delay so a fast-failing backend cannot
+create a tight loop; and `lastPolled` (every attempt) tracked separately from `lastUpdated`
+(successes only) so the UI can say both "checked 2 s ago" and "data from 40 s ago".
+
+**Normalization to a view model.** The backend's shape is converted once, in a pure function,
+into the stable row the UI consumes (`{ id, label, level, ... }`). Screens never touch raw
+payloads, so a backend rename breaks one normalizer instead of every component — and pure
+functions with no React inside are the easily testable core of the frontend.
+
+**Policy lives in config, mechanism lives in code.** `DEGRADED_LATENCY_MS = 6` and
+`STALE_AFTER_MS = 15000` sit in `config/monitoring.js`, not inside the normalizer that applies
+them. Changing a threshold is a config edit reviewable on its own; the layering
+(`config → domain → hooks → views`) starts here and holds for the rest of the project.
+
+**Honest UI states as a contract.** Loading, empty, unavailable, no-match — each renders as
+itself, never as a blank panel or an invented value. Phase 2 establishes the full list on one
+page so later phases inherit a checklist rather than a habit.

@@ -22,6 +22,22 @@ class ThreadedServer(ServerAdapter):
         server.serve_forever()
 
 
+SEED_ATTEMPTS = 5
+SEED_RETRY_SECONDS = 2
+
+
+def _seed_open_trades():
+    for attempt in range(1, SEED_ATTEMPTS + 1):
+        try:
+            tracked = generator.sync_open_trades()
+            log.info("open_trades_seeded", tracked=tracked)
+            return
+        except Exception:
+            log.warning("blotter_not_ready", attempt=attempt)
+            time.sleep(SEED_RETRY_SECONDS)
+    log.warning("open_trades_seed_skipped")
+
+
 def _worker():
     while True:
         try:
@@ -30,6 +46,7 @@ def _worker():
         except urllib.error.URLError:
             log.warning("books_not_ready")
             time.sleep(2)
+    _seed_open_trades()
     generator.run_loop()
 
 

@@ -24,11 +24,17 @@ def _parse_since(value):
         return None
 
 
-def _parse_severities(value):
+def _parse_list(value):
     if not value:
         return None
-    wanted = [v.strip().upper() for v in value.split(",") if v.strip()]
-    return [v for v in wanted if v in VALID_SEVERITIES] or None
+    return [v.strip() for v in value.split(",") if v.strip()] or None
+
+
+def _parse_severities(value):
+    wanted = _parse_list(value)
+    if wanted is None:
+        return None
+    return [v.upper() for v in wanted if v.upper() in VALID_SEVERITIES] or None
 
 
 @app.route("/health")
@@ -50,6 +56,8 @@ def audits():
         limit=int(limit) if limit else repository.DEFAULT_LIMIT,
         since=_parse_since(request.query.get("since")),
         severities=_parse_severities(request.query.get("severity")),
+        services=_parse_list(request.query.get("service")),
+        event_types=_parse_list(request.query.get("event_type")),
     )
     return to_json(rows)
 

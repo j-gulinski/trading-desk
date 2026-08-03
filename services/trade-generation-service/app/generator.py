@@ -7,7 +7,7 @@ from decimal import Decimal
 from shared.catalog import INSTRUMENT_CATALOG
 from shared.logging_config import get_logger
 from shared.audit import write_audit
-from app import action_client, market_data_client
+from app import action_client, blotter_client, market_data_client
 from app.config import (
     SERVICE_NAME,
     TARGET_OPEN_TRADES,
@@ -19,16 +19,91 @@ log = get_logger(SERVICE_NAME)
 
 SYMBOL_BY_CLASS = {terms["asset_class"]: symbol for symbol, terms in INSTRUMENT_CATALOG.items()}
 
+MIN_INTERVAL_MS = 100
+MAX_INTERVAL_MS = 60_000
+MIN_TARGET_OPEN_TRADES = 1
+MAX_TARGET_OPEN_TRADES = 10_000
+
+
+def _clamp_interval_ms(value) -> int:
+    return max(MIN_INTERVAL_MS, min(int(value), MAX_INTERVAL_MS))
+
+
+def _clamp_target(value) -> int:
+    return max(MIN_TARGET_OPEN_TRADES, min(int(value), MAX_TARGET_OPEN_TRADES))
+
+
+def _close_probability_of(open_count: int, target: int) -> float:
+    return min(0.9, 0.5 * open_count / max(target, 1))
+
+
 _running = threading.Event()
 _lock = threading.Lock()
 _books = {}
 _open_trades = {}
 _stats = {"opened": 0, "closed": 0, "failed": 0}
+_config = {
+    "interval_ms": _clamp_interval_ms(TRADE_GENERATION_INTERVAL_MS),
+    "target_open_trades": _clamp_target(TARGET_OPEN_TRADES),
+}
+_config_wait = threading.Event()
+_last_open_sync_ms = 0
+_ACTIVE_OPEN_TRADES_SYNC_MS = 10_000
 
 
 def set_books(books: dict) -> None:
     with _lock:
         _books.update(books)
+
+
+def sync_open_trades() -> int:
+    global _open_trades, _last_open_sync_ms
+    active_trades = blotter_client.active_trades()
+    with _lock:
+        _open_trades = {
+            trade_id: symbol
+            for trade_id, symbol in active_trades.items()
+            if symbol in INSTRUMENT_CATALOG
+        }
+        tracked = len(_open_trades)
+    _last_open_sync_ms = int(time.time() * 1000)
+    return tracked
+
+
+def _sync_open_trades_if_due() -> None:
+    if int(time.time() * 1000) - _last_open_sync_ms < _ACTIVE_OPEN_TRADES_SYNC_MS:
+        return
+    try:
+        sync_open_trades()
+    except Exception:
+        log.exception("open_trades_sync_failed")
+
+
+def get_config() -> dict:
+    with _lock:
+        return dict(_config)
+
+
+def set_config(*, interval_ms=None, target_open_trades=None) -> dict:
+    if interval_ms is not None:
+        interval_ms = _clamp_interval_ms(interval_ms)
+    if target_open_trades is not None:
+        target_open_trades = _clamp_target(target_open_trades)
+    with _lock:
+        if interval_ms is not None:
+            _config["interval_ms"] = interval_ms
+        if target_open_trades is not None:
+            _config["target_open_trades"] = target_open_trades
+        applied = dict(_config)
+    _config_wait.set()
+    write_audit(SERVICE_NAME, "CONFIG_CHANGED",
+                f"Generation config set to {applied}", payload=applied)
+    return applied
+
+
+def _interval_seconds() -> float:
+    with _lock:
+        return _config["interval_ms"] / 1000.0
 
 
 def _incr(key: str) -> None:
@@ -84,10 +159,8 @@ def _build_close(snapshot: dict) -> dict | None:
 
 
 def _close_probability() -> float:
-    target = max(TARGET_OPEN_TRADES, 1)
     with _lock:
-        open_count = len(_open_trades)
-    return min(0.9, 0.5 * open_count / target)
+        return _close_probability_of(len(_open_trades), _config["target_open_trades"])
 
 
 def generate_once() -> dict | None:
@@ -123,30 +196,38 @@ def generate_once() -> dict | None:
 
 
 def run_loop() -> None:
-    interval = max(TRADE_GENERATION_INTERVAL_MS, 1) / 1000.0
     while True:
         _running.wait()
-        try:
-            generate_once()
-        except Exception:
-            log.exception("generation_failed")
-            _incr("failed")
-        time.sleep(interval)
+        while _running.is_set():
+            try:
+                _sync_open_trades_if_due()
+                generate_once()
+            except Exception:
+                log.exception("generation_failed")
+                _incr("failed")
+            _config_wait.wait(_interval_seconds())
+            _config_wait.clear()
 
 
 def start() -> None:
     _running.set()
+    _config_wait.set()
     write_audit(SERVICE_NAME, "WORKER_STARTED", "Generation loop started")
 
 
 def stop() -> None:
     _running.clear()
+    _config_wait.set()
     write_audit(SERVICE_NAME, "WORKER_STOPPED", "Generation loop stopped")
 
 
 def status() -> dict:
     with _lock:
         snapshot = dict(_stats)
-        snapshot["open_trades"] = len(_open_trades)
+        open_count = len(_open_trades)
+        config = dict(_config)
+    snapshot["open_trades"] = open_count
+    snapshot["config"] = config
+    snapshot["close_probability"] = _close_probability_of(open_count, config["target_open_trades"])
     snapshot["running"] = _running.is_set()
     return snapshot

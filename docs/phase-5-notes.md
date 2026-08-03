@@ -279,6 +279,48 @@ Why `close_price` came up in review:
 - Detail fetch happens only on selection.
 - Poll and stream intervals are reused; no extra high-frequency loop added for this screen.
 
+## Concepts seen for the first time in this phase
+
+**The first write path — and confirmation by observation.** Closing a trade returns `202
+Accepted`: the queue took the intent, nothing has happened yet. The UI never fakes the outcome;
+the spinner clears only when the *detail poll* shows `status` leaving `ACTIVE` — the state change
+is observed, not assumed. Four services run between the click and that observation, and the
+screen's honesty does not depend on any of them being fast.
+
+**Idempotency metadata on writes.** Every intent carries a `client_request_id` generated at the
+call site. If a retry or a double-click ever submits twice, the backend can recognize the
+duplicate. Phase 6a later leaned on the same field for something unplanned: telling generated
+intents (`gen-` prefix) from manual ones in the audit trail — a reminder that correlation ids
+outlive their first purpose.
+
+**Remount-by-key as state hygiene.** `<TradeDetail key={trade.id}>` forces a full remount when
+the selection changes, so poll timing, close-pending state and stall timers can never bleed from
+one trade to another. Resetting state by *changing identity* is often simpler and safer than
+resetting every field by hand.
+
+**Native `<dialog>` doing the heavy lifting.** The drawer keeps `showModal()` for focus trapping,
+Escape handling and backdrop-click dismissal — behavior that is easy to get subtly wrong by hand —
+and restyles only its position and backdrop. Reach for platform semantics first; spend CSS, not
+JavaScript, on appearance.
+
+**Derive at render time; never mutate the cache.** A row's displayed value is *chosen* on every
+render — stream vs snapshot by terminal flags and timestamps — rather than written back into
+either source. Both sources stay authoritative for what they own, and a wrong choice is a pure
+function fix, not a data repair.
+
+**Counts must name their population.** The `250+` label reported on rows the screen had not
+loaded; the fix (`closed_trades` from one `GROUP BY` on `/books/summary`) made the tab count the
+real total while the meta line discloses the loaded window. This phase's rule — a screen must not
+report on rows it does not show — became the label discipline 6a applied prospectively.
+
+**A window is not an archive.** Paging (50 rows/page) slices an already-bounded ~250-row load;
+search and filters apply to that window only, and the screen says so. Making the boundary
+explicit is what keeps the page honest until real server-side pagination exists.
+
+**One aggregate request over three chatty ones.** The drawer's `/trades/{id}` returns trade,
+valuation history and audits together, polled only while the drawer is open. Detail data stays
+out of list state entirely — on-demand fetching *is* the performance strategy for drill-downs.
+
 ## Files for first-pass review (phase-5 relevant)
 
 1. `frontend/src/views/Trades/Trades.jsx`

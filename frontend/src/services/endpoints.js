@@ -22,11 +22,22 @@ export const endpoints = {
     valuations: '/api/pricing/valuations',
   },
   blotter: {
+    // Books without the trade payload. Trades uses the heavier `tradesOverview`
+    // aggregate because it needs both; Generator only needs the book list.
+    booksSummary: '/api/blotter/books/summary',
     trades: (params) => withQuery('/api/blotter/trades', params),
     trade: (tradeId) => `/api/blotter/trades/${encodeURIComponent(tradeId)}`,
     tradesOverview: (params) => withQuery('/api/blotter/trades/overview', params),
   },
   tradeAction: {
     submit: '/api/trade-action/trade-actions',
+    queueStatus: '/api/trade-action/queue/status',
+  },
+  tradeGeneration: {
+    status: '/api/trade-generation/status',
+    start: '/api/trade-generation/start',
+    stop: '/api/trade-generation/stop',
+    generateOnce: '/api/trade-generation/generate-once',
+    config: '/api/trade-generation/config',
   },
 }

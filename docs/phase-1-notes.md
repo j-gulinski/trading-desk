@@ -1,4 +1,51 @@
+---
+phase: 1
+status: complete
+revised: 2026-08-03
+tags:
+  - frontend
+  - shell
+  - routing
+  - styles
+---
+
 # Phase 1 notes — App shell
+
+## Phase outcome in one line
+
+A navigable dark-theme app shell — sidebar, top bar, eight placeholder pages — with routing,
+styling and composition patterns that every later phase builds on without revisiting.
+
+## What was decided and why
+
+### 1) Hand-rolled hash routing instead of react-router
+
+The real fork of this phase. react-router would work, but it hides exactly the mechanics this
+project is meant to teach: what a route *is*, how the browser's `hashchange` event drives
+re-render, why refresh and back/forward keep working. `useHashRoute` is ~20 lines and the whole
+"router engine" stays inspectable. The cost — no nested routes, no loaders — is nothing this app
+needs. Hash-based (`#/market-data`) over the History API because it needs zero server
+configuration: the server always serves one `index.html` and the fragment never reaches it.
+
+### 2) One route registry that feeds both the menu and the router
+
+`routes/routes.js` is the single source of truth; `Sidebar` and `App` both read it. The
+alternative — a menu array here, a route switch there — is how menus and routing drift apart.
+Unknown paths fall back to the first route rather than a 404 page, which is the right behavior
+for an internal dashboard.
+
+### 3) Design tokens as CSS custom properties, not SCSS variables
+
+`--bg-app`, `--accent`, `--sp-*` are runtime CSS values, so components written in any later phase
+reference them with `var(--…)` without importing anything, and a future theme switch would be one
+root-level override. SCSS still provides the file structure (partials, `@use`), but the *values*
+live in the browser.
+
+### 4) All eight views stubbed up front
+
+Every sidebar link works from day one, each page saying honestly that it is a placeholder. This
+sets the project's "honest UI" rule from the start — navigation is never a dead end, and each
+later phase replaces one stub with a real screen instead of also inventing shell wiring.
 
 ## Suggested inspection order
 
@@ -88,3 +135,33 @@ feeding multiple parts of the UI.
 `PagePlaceholder` takes a `note` prop and renders it — write markup once, reuse with
 different data (props). Each of the 8 view files is a stub rendering `<PagePlaceholder>`
 with its own text. These are the real files we fill in phase by phase.
+
+## Concepts seen for the first time in this phase
+
+**A single-page app is one div.** The browser loads `index.html` once; everything after that is
+JavaScript rendering into `<div id="root">`. "Navigation" is state change, not page load — which
+is why it is instant, and why something (the hash, here) must make refresh and back/forward still
+mean something.
+
+**Composition and one-way data flow.** `App → AppShell → Sidebar/TopBar/page` — each component
+receives what it needs as props (or `children`) and knows nothing about its parent. `AppShell`
+does not know which page it frames. When a bug appears later, this direction is what makes it
+findable: data has exactly one path down.
+
+**A custom hook is a function that owns a subscription.** `useHashRoute` packages three things
+that always travel together: read the current value, subscribe to changes (`hashchange` →
+`setState` → re-render), and unsubscribe on cleanup. Every later hook in this project —
+`usePolling`, `useSseStream`, `useElapsedTime` — is this same shape with a different source.
+
+**`useEffect` cleanup is not optional.** The listener added on mount must be removed in the
+returned cleanup function, or every remount (and StrictMode's deliberate double-mount) leaks one
+listener. Phase 3 raises the stakes: the thing being cleaned up becomes a live network connection.
+
+**SCSS partials and the token layer.** Underscore files compile only when `@use`d from
+`main.scss`, giving a controlled load order: tokens first, structure second, resets last.
+Components never hard-code a color; they say `var(--accent)` and the theme stays swappable.
+
+**The flexbox shell and `min-width: 0`.** `display: flex` on the shell, `position: sticky` on the
+sidebar, `flex: 1` on the content. The non-obvious part: a flex child's default `min-width: auto`
+refuses to shrink below its content, so one wide table would stretch the whole app sideways —
+`min-width: 0` on the content column is what lets Phase 3's tables scroll inside it instead.

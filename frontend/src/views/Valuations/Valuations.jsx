@@ -152,7 +152,7 @@ export default function Valuations() {
 
       <section className="valuation-section" aria-labelledby="valuation-table-title">
         <div className="valuation-section__head">
-          <div>
+          <div hidden={matchingRows.length === 0}>
             <h2 id="valuation-table-title">Top 100 open positions</h2>
             <p>Ranked by return or unrealized PnL — current signal for spotting alpha</p>
           </div>

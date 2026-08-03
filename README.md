@@ -37,6 +37,26 @@ CLOSE intent -> Trade Action -> DB close (status=CLOSED, close_price)
              -> React valuation context -> screens (terminal row state)
 ```
 
+## Screen data sources
+
+Two SSE feeds — market data and valuations — are opened once in `FeedProvider` above routing and
+shared through React context, so switching screens never reconnects a stream. Everything else is
+plain HTTP polling with a per-screen interval. The dividing rule: **streams carry high-frequency
+values** (prices, fair value, PnL), **polls carry slow-moving state** (trade membership, config,
+queue counters, health). Writes never update the client optimistically — after a successful POST
+the owning poll refetches server truth out of cycle (`usePolling().refetch()`).
+
+| Screen | Stream (shared context) | Polls | Writes |
+| --- | --- | --- | --- |
+| Market Data | market SSE + one-shot snapshot seed (repeated on reconnect) | — | — |
+| Valuations | valuation SSE + one-shot seed; stream-only by decision — the UNREALIZED PNL summary derives from stream rows, no summary poll | — | — |
+| Business Overview | valuation SSE (same shared context) | — | — |
+| Trades & PnL | valuation SSE overlays live fair value / PnL by trade ID | Blotter `/trades/overview` every 5 s (membership, terms, closed history); detail drawer polls `/trades/{id}` only while open | close intent → Trade Action |
+| Trade Actions | — | `/queue/status` every 2 s; monitoring audits every 3 s | trade intents → Trade Action |
+| Generator | — | generator `/status` every 2 s; monitoring audits (generated intents) every 3 s; books summary every 30 s | start / stop / generate-once / config → Trade Generator |
+| System Overview | none of its own — stream health is read from both shared feed contexts | monitoring `/status` every 5 s; monitoring audits (errors) every 5 s | — |
+| Books | — | placeholder today; Phase 6b will poll `/blotter/books/summary` | books CRUD (planned 6b) |
+
 ## Decisions that define the system
 
 ### Ownership is explicit
@@ -246,8 +266,9 @@ right next step when lifetime history, rather than live risk, is what grows.
 
 - Trade Action uses an in-process, non-durable queue. Idempotency makes retry safe, but in-flight
   work can be lost on restart.
-- Trade Generator tracks managed open IDs in memory. After restart, earlier database-open trades
-  are not part of its equilibrium calculation.
+- Trade Generator tracks open-trade IDs in memory, seeded from the Blotter at startup and
+  re-synced every 10 seconds. Trades opened or closed outside the generator can take up to one
+  sync interval to enter its equilibrium calculation.
 - SSE is current-state delivery, not durable replay. Snapshot/reconnect repairs state but does not
   reconstruct every missed event.
 - Pricing currently persists valuations one at a time and retains latest closed valuations in its

@@ -28,6 +28,11 @@ Some views need backend that doesn't exist yet. Rule:
   automatically right in the next. Phase 4's fan-out valuation feed reused Phase 3's table and
   transport but had to drop its row flash: what reads as a useful signal on ~10 sparse rows is
   noise — and a real render cost — when one input updates hundreds of rows at once.
+- **Real-data constraint (homework 5, standing).** The system will later be re-pointed at real
+  market data (Yahoo Finance / OpenFin) with signal strategies. Do not design around the
+  simulated generator: the snapshot + SSE stream contract is the boundary, and anything
+  simulator-specific stays behind it. Phase 7a decides the seams and 7b audits for violations;
+  the cheaper path is not to create them.
 
 ## Conventions (apply to every phase)
 
@@ -47,7 +52,10 @@ Some views need backend that doesn't exist yet. Rule:
   Bound and coalesce buffered events, publish state on a controlled cadence, and keep the
   provider value limited to consumers that actually need the stream.
 - **UI states:** every data view should handle loading / empty / connected /
-  reconnecting / stale / backend-error / no-matching-filters / service-down.
+  reconnecting / stale / backend-error / **validation-error** / no-matching-filters /
+  service-down. (Nine states — the homework lists all nine; validation-error was missing
+  from this list until the 2026-08-03 requirements audit and matters from 6b's first
+  write form onward.)
 
 ---
 
@@ -198,8 +206,7 @@ stack traces remain structured stdout logs.
 - **Reading order:** the screen reads one way — `instruments → rows → filter → sort → table`
   — and imports run one way: `config → domain → hooks → providers → views → components`.
 - **Notes:** `docs/phase-3-notes.md` documents the implemented data flow and review
-  findings. The Market Data implementation reference artifact traces one price change from
-  the wire to a rendered row.
+  findings, including the trace of one price change from the wire to a rendered row.
 - **Backend deps:** `market-data GET /stream` (named `market_tick`/`curve_tick` events) and
   `GET /snapshot` (both exist).
 - **Proxy added:** `/api/market-data` → `market-data-service:8001` (Vite streams
@@ -214,9 +221,9 @@ stack traces remain structured stdout logs.
 - **Outcome:** a second, independent feed beside the market feed with `useSseStream` unchanged.
   Seven Phase 3 units reused as-is; two shared hooks extracted while being used; one input added to
   the generic table hook. Six defects during the build, four more in review.
-- **Full detail:** `docs/phase-4-notes.md` (file-by-file, in inspection order, with the
-  measurements). The implementation artifact covers the same ground organised by topic. This
-  section keeps only what later phases need to know.
+- **Full detail:** `docs/phase-4-notes.md` — a focused note on the valuation performance review,
+  organised by topic with the measurements, not a full file-by-file phase audit. This section keeps
+  only what later phases need to know.
 
 **Built**
 
@@ -380,16 +387,151 @@ stack traces remain structured stdout logs.
   pagination remain follow-ups; the client-side Trades pager windows the same already-loaded
   ~250-row set rather than replacing that need.
 
-### Phase 6 — Books CRUD + Generator + Trade Actions + states polish
+### Phase 6 — split into 6a / 6b-1 / 6b-2 / 6c
+
+Phase 6 as originally written bundled Books CRUD, Generator, Trade Actions, New Trade, states polish
+and config persistence — roughly four screens. Phases 4 and 5 had each run three revision passes past
+their one-line goal, and in both cases the extra passes edited an earlier phase's screens, pulled a
+slice of a later phase forward, and changed a backend service. The split puts a review gate between
+those. 6b was split again in the 2026-08-03 plan review: the book-lifecycle work (delete guard,
+trade reassignment, per-book Flatten) is the heaviest backend feature since Phase 3 and deserves its
+own gate rather than riding along with the first write forms.
+
+### Phase 6a — Generator + Trade Actions ✅ (built and verified)
+
+- **Goal:** the two remaining SYSTEM screens, read-only, over data that already exists.
+- **Outcome:** both event feeds read the existing audit trail through `GET /audits` — no new
+  per-service events endpoint, no new proxy for monitoring. The generator gained runtime config so
+  the mockup's sliders are real, and startup seeding so it can close trades it did not open.
+- **Full detail:** `docs/phase-6a-notes.md` — decisions, the four build-time deviations, the config
+  and audit process flows, and the measured verification.
+
+**Built**
+
+- **Backend (small, inline):** `service` and `event_type` filters on monitoring `GET /audits` (the
+  audit experiment's Slice 2, above); `GET`/`POST /config` on trade-generation with `interval_ms` and
+  `target_open_trades` as mutable module state guarded by the existing `_lock`, and `status()`
+  echoing the effective config plus derived `close_probability`; `blotter_client.py` +
+  `BLOTTER_SERVICE_URL` so `_open_trades` seeds from the active book at startup;
+  `CONFIG_CHANGED` added to `AuditEventType`.
+- **Frontend:** `config/{generator,tradeActions}.js`, `domain/generator.js`, extended
+  `domain/tradeActions.js`, `components/generator/IntentFeed.jsx`, real
+  `Generator.jsx` and `TradeActions.jsx`, three style partials, `.page__note`.
+- **Proxy added:** `/api/trade-generation` → `trade-generation-service:8007`.
+  `endpoints.blotter.booksSummary` re-added (Phase 5 dropped it when Trades consolidated onto
+  `/trades/overview`; the backend route was never removed).
+
+**Contracts and rules later phases inherit**
+
+- **Env is a startup default where runtime config exists.** `TARGET_OPEN_TRADES` and
+  `TRADE_GENERATION_INTERVAL_MS` are now mutable at runtime, so any screen must show the *effective*
+  config read back from the service, never the env value. Values reset on restart.
+- **The generator writes no per-intent audit.** Its intents are visible only through
+  trade-action-service's `TRADE_CREATED` / `TRADE_CLOSED` / `ACTION_REJECTED` rows; generated ones are
+  identified by the `gen-` prefix on `correlation_id`.
+- **`/audits` filters are not enum-validated.** Services write raw event-type strings, so validating
+  against `AuditEventType` would turn an unrecognised filter into "no filter" and return everything.
+  An unknown `event_type` correctly returns zero rows.
+- **Trade-actions queue depth is usually uninformative in this phase.** The trade-action queue drains on
+  arrival, so `queued` is usually zero. The cumulative counters (`processed`, `created`, `closed`)
+  carry the activity signal instead.
+- **Feeds are bounded by row count, not time.** A tile counting over a count-limited feed must be
+  labelled by that population (`REJECTED · IN FEED`, `of N shown`), never as a time window.
+- **Books are the authority for tradeable asset classes**, not the market feed — the feed carries
+  `INDEX` (a benchmark, never traded) and omits `BOND` (priced off the curve, never ticked).
+
+- **Deferred (honest):** per-action processing latency and the `ms` column render `n/a` with the
+  reason — audits record when an action was written, not how long it took; feed rows omit book, side
+  and quantity for the same reason. Both need `trade_processor` timing plus a wider audit payload.
+
+**Review pass (simplification sweep, 2026-08-03).** Full detail in `phase-6a-notes.md`
+(decisions 6–12). Every mid-build reversal had left the losing option's code behind; the sweep
+removed five dead units (`FEED_SERVICE`/`FEED_EVENT_TYPES` on generator config,
+`REJECTED_WINDOW_MS`, `queueLevelOf`/`QUEUE_DEPTH_WARN` and the unused `queueStatusOf` fields,
+`countRejected`, `intentRateOf`), unified startup seeding and the 10 s blotter sync into one
+`sync_open_trades()`, made `set_config` validate both fields before applying either, aligned the
+target bounds to `[1, 10000]` on both sides with env values clamped at import, and reverted an
+undocumented `FLUSH_INTERVAL_MS` 500 → 1000 drift back to the Phase 4 contract. A later same-day
+pass removed the rate mechanism entirely (Generator RATE tile, Trade Actions THROUGHPUT tile,
+`useCounterRate`). Verified against the live stack: clamps (1 → 100, 99999 → 10000, 0 → 1),
+atomic 400 on mixed valid/invalid config, restart adoption of 33 blotter trades at `opened: 0`.
+
+**Contracts added by the review pass (6b/6c inherit):**
+
+- **`usePolling` exposes `refetch()`; write flows reconcile by refetching server truth**, never by
+  optimistic client state — this deleted Generator's `runningOverride` and draft-reconcile
+  effects. 6b's Books CRUD and New Trade forms must use the same pattern.
+- **No client-side rate derivation.** The per-minute velocity tiles (Generator RATE, Trade
+  Actions THROUGHPUT) and the `useCounterRate` hook were removed in a later 2026-08-03 pass:
+  sampling windows, restart detection and a two-poll warm-up state existed to answer a question
+  nothing operational consumed, and the generator they instrumented is slated for replacement by
+  real-data strategies in homework 5. Cumulative counters stay on screen; if a rate is ever
+  genuinely needed, derive it from monotonic counters — never from a count-limited feed.
+- **`npm run deadcode` (knip) joins lint/build in every phase's verification.** Known accepted
+  flags awaiting 6b/6c: `positionsOf` (Books), `apiPut`/`apiDelete` (CRUD), `ApiError`, and a few
+  internal-only exports from Phases 3–5 listed in the notes.
+
+### Phase 6b-1 — Books screen + New Trade (the first write forms)
 - **Inherited from the Phase 4 revision:** `positionsOf` in `domain/valuations.js` is written,
   tested against live data and **unwired** — net exposure per book × symbol is the natural content
   of the **Books** screen. It nets signed market value (so offsetting trades net rather than sum
   gross), weights entry by |quantity|, and propagates worst-case freshness.
-- **Goal:** remaining views + finish UI states + config persistence.
-- **Concepts:** forms (create/edit/delete), optimistic vs refetch, POST/PUT/DELETE,
-  polling status views, consistent empty/error/service-down states.
-- **Backend deps:** books CRUD (exists). **Generator `GET /events`** and **Trade
-  Action `GET /events`/`GET /status`** — *small additions* to add here, else placeholder.
+- **Goal:** the Books screen (list, create, edit) and the New Trade dialog — the first real write
+  forms, establishing the write-path patterns everything later reuses.
+- **Concepts:** forms (create/edit), POST/PUT, the **validation-error state** (first of the nine
+  UI states to appear on a write path), refetch-after-write in a form context (rule inherited
+  from 6a — no optimistic client state).
+- **Decided:** Books renders the mockup's card grid from `/blotter/books/summary` (which already
+  returns name, asset class, active/closed counts and realized/unrealized PnL), expanding to
+  `positionsOf` net exposure per symbol on drill-down. New Trade derives its instrument list and last
+  price from the live market feed rather than duplicating `shared/catalog.py`.
+- **From review (2026-08-03): a new book does not appear on Valuations — explained, settled.**
+  This is a designed consequence, not a bug: Valuations consumes exactly one source, the valuation
+  stream (`useValuationFeedContext`), and both the book-risk cards (`bookRisksOf`) and the book
+  filter (`bookOptionsOf`) derive from `bookId`/`bookName` carried on each valuation event. A book
+  with no valued open trade emits no events, so it is invisible until its first trade is priced.
+  **Settled (2026-08-03): option (a) — Valuations stays stream-only.** The alternative, **(b)**,
+  would have added a `/blotter/books/summary` poll whose only contribution to this screen is a
+  PnL sum and zeroed cards for valuation-less books — a second data path is not worth that.
+  Everything the screen shows, including the UNREALIZED PNL summary card, keeps deriving from
+  stream rows (`summarizeValuations` over the open valuation set): one source, nothing to
+  reconcile, no extra request cycle. The new Books screen becomes the authoritative roster and
+  Valuations states its population explicitly ("books with open valuations").
+- **Backend deps:** books CRUD (exists), trade-action `POST /trade-actions` for New Trade
+  (exists). No backend changes in this phase — delete/close guards belong to 6b-2, so the Books
+  screen ships without a delete button rather than with an unguarded one.
+- **Proxy to add:** `/api/books` → `books-service:8004`.
+- **Review checklist:** create/edit a book round-trips and the roster refetches (no optimistic
+  rows); New Trade validates before submitting (validation-error state renders, nothing is sent);
+  a successful New Trade appears in Trades within one blotter poll and values within one pricing
+  tick; a duplicate submit is idempotent via `client_request_id`; service-down on books renders
+  the honest unavailable state; `npm run lint/build/deadcode` clean (`positionsOf` and
+  `apiPut`/`apiDelete` come off the accepted-knip-flags list here).
+
+### Phase 6b-2 — Book lifecycle: delete guard, reassignment, per-book Flatten
+- **Goal:** make destructive book operations safe — the heaviest backend feature since Phase 3,
+  which is why it has its own gate.
+- **From review (2026-08-03):** deleting or closing a book that still has trades must be refused
+  by the backend, not just hidden in the UI. Closing a book is a *move operation*: reassign its
+  transactions to another book, then close the empty book.
+- **Settled (2026-08-03, plan review):**
+  - **Reassignment lives in trade-action-service** as a new action type (it mutates trades, and
+    trade lifecycle state has exactly one writer — the same ownership rule as every other trade
+    mutation), with an audit row per moved trade and the blotter picking the change up through
+    its normal read path.
+  - **Closed-trade history stays attributed to the original book; only active positions move.**
+    History is a record of what happened, and what happened happened in the original book.
+- **Scope:** a guard on books `DELETE /books/{id}` (refuse when the blotter shows any trades for
+  the book); the reassignment action type end to end; an optional `book_id` on
+  `POST /trade-actions/close-all` — `close_all_trades(session, close_reason)` currently filters
+  on status only, so the mockup's per-book **Flatten** would close every book's trades; and the
+  UI flow — pick target book → move → confirm close.
+- **Review checklist:** DELETE on a book with trades is refused with a clear error surfaced in
+  the UI (and allowed once empty); reassigning N active trades writes N audit rows with the
+  original and target book recorded; reassigned trades keep valuing without interruption (the
+  pricing active-set survives the move); closed trades stay under the original book after a
+  move; Flatten with `book_id` closes only that book's trades — verified against a second book
+  left untouched; the close-book flow refuses to close while active trades remain.
 - **Generator realism — ✅ resolved in the Phase 4 revision, not here.** The open book used to grow
   without bound: `TRADE_GENERATION_INTERVAL_MS=200` (five trades/second) with a fixed
   `CLOSE_PROBABILITY=0.3` meant opens permanently outran closes — past 2,000 open trades at ~$1m
@@ -406,27 +548,174 @@ stack traces remain structured stdout logs.
     5,000, which provides publication-burst headroom but does not accelerate those inserts. The UI
     was reporting the resulting staleness truthfully; the primary fixes are to bound the book
     (above) and batch valuation persistence if this scale becomes a requirement.
-  - Also worth handling here: `_open_trades` is in-memory, so after a restart the generator cannot
-    close trades it did not open — orphans accumulate. Seeding it from the active book on startup
-    belongs with this work.
+  - ✅ **Resolved in 6a:** `_open_trades` was in-memory, so after a restart the generator could not
+    close trades it did not open and orphans accumulated. It now seeds from the active book at
+    startup via `blotter_client.active_trades()` — verified at 24 adopted trades against
+    `opened: 0` on a fresh process.
   - The **market tick** generator needs no change: it is already a mean-reverting Gaussian walk at
     ~0.065%/tick with realistic tick sizes and spreads. The prices were never the unrealistic part.
-- **Proxy to add:** `/api/books`, `/api/trade-generation`, `/api/trade-action`.
 
-### End-of-project — deferred big backend features
-Build **after** the UI is complete; then swap the placeholders for real data.
-- [ ] Enrich audits with useful low-frequency technical transitions such as
-  `DEPENDENCY_DOWN` / `DEPENDENCY_RECOVERED`, `WORKER_FAILED` / `WORKER_RECOVERED`, and
-  persistence failure/recovery. Record state changes, not every retry.
-- [ ] European option (Black–Scholes, `math.erf`, no scipy) pricing + fields.
-- [ ] IRS instruments and pricing, consuming the Phase 3 USD government curve.
-- [ ] alpha/beta per book (rolling window, `MARKET_INDEX` benchmark) in valuation stream.
-- [ ] Alembic migrations for the new instruments + metrics.
-- [ ] Wire the frontend alpha/beta + option/IRS cells to the new data.
+### Phase 6c — UI states, streams badge, config persistence
+- **Goal:** finish the UI-state sweep, add the global streams badge, settle config persistence.
+- **Scope:** the bottom-left `2 / 2 streams · connected` badge (deferred since Phase 3, present in
+  every mockup); every view checked against the nine states listed in the conventions above;
+  a decision on what persists beyond column preferences (filters, tabs, page size) and one storage-key
+  scheme.
+- **Build order (fixed, 2026-08-03 plan review):** the three units below are independent, so each
+  lands and verifies before the next starts — the drawer rework is the structurally hardest UI
+  change in the plan and must not share a debugging surface with the rest.
+  1. **Detail panel rework** — push-aside layout + tabs together (they are the same component;
+     doing them separately means restyling the panel twice).
+  2. **Sidebar collapse + streams badge** — one layout unit (the badge lives in the sidebar and
+     must render in icon-only mode).
+  3. **States sweep + config persistence** — the sweep's required deliverable is a
+     **nine-states × views matrix in the phase notes**, every cell either "handled (how)" or
+     "N/A (why)". Without the matrix, "checked every view" is unverifiable at review.
+- **Review checklist:** drawer open/close keeps the table visible and its live PnL updating;
+  Escape and focus behavior survive the loss of `showModal()` (focus returns to the triggering
+  row, Escape closes, focus cannot tab behind the panel); audit tab reachable in two
+  interactions from a row; sidebar collapse persists across reload and the badge renders in both
+  modes; the state matrix is complete; storage keys follow the one agreed scheme;
+  `npm run lint/build/deadcode` clean.
+- **Accepted in review (2026-08-03) — three UI changes:**
+  1. **The trade-detail drawer pushes the table aside instead of covering it.** A trader watching
+     the book must not miss a P&L change on another position while inspecting one. This replaces
+     the Phase 5 overlay-drawer decision: the panel becomes a layout sibling of the table (grid
+     column, not `<dialog>` backdrop), which also means rethinking what `showModal()` provided —
+     Escape handling and focus management have to survive the change.
+  2. **The detail panel gets tabs instead of one long scroll** — Details / Valuation history /
+     Audit. Audit events currently sit too low to be found (another student hit the same issue).
+  3. **The sidebar collapses to icons** to maximize workspace, with the expanded state
+     persisted. Interacts with the streams badge (icon-only rendering) and the Phase 1
+     `--sidebar-width` token, which becomes two values.
+- **Settled by decision (requirements audit 2026-08-03, confirmed by the project owner):**
+  - **System Overview stays as designed — no headline PnL/count tiles.** The homework lists
+    total PnL and counts as *example* elements; the deliberate split here is Business Overview
+    as the money view and System Overview as the technical view. This is a README justification,
+    not UI work.
+  - **Configurability scope is what already shipped:** column visibility/order, sorting,
+    filters, persisted table prefs, runtime generator config. No density toggle, PnL thresholds
+    or pinned books planned — the README describes and argues the shipped scope (the homework
+    asks for domain sensibility, not option count).
+- **Docs:** ✅ `workflow.md`'s notes format was rewritten in 6a to match what Phases 4–5 actually do
+  (decision log → process flows → files for review at the end), and the two dangling
+  "implementation artifact" references were removed.
+
+### Phase 7a — real-data seam review (before the end-of-project features)
+
+- **Goal:** make the boundary decisions the end-of-project features will sit on, with the
+  homework-5 real-data lens (Yahoo Finance / OpenFin, signal strategies). Output is **recorded
+  decisions, not features** — this phase is deliberately cheap so it cannot endanger the
+  homework-4 deliverables it precedes.
+- **Why before, not after:** the end-of-project work lands directly on these seams. Options and
+  IRS add new asset classes, which collides immediately with `SYMBOL_BY_CLASS` (one symbol per
+  class) and the static `shared/catalog.py` universe; IRS discounting is built on the curve
+  representation the homework grades as a decision — and homework 5's real data will feed that
+  same curve; alpha/beta's rolling window is trivial against the simulator's steady ticks but
+  must survive real bars with gaps. Deciding first avoids building those features twice.
+- **Scope (decisions to record):**
+  - **Instrument universe:** how the catalog and `SYMBOL_BY_CLASS` restructure when a class has
+    many symbols and instruments carry parameters (strike, maturity, legs) — the options/IRS
+    migration design depends on this.
+  - **Curve representation** in the database and on the stream — reviewed against both IRS
+    discounting and a future real-rates source.
+  - **Benchmark series ownership** for alpha/beta: who stores the rolling window, what happens
+    on gaps, too-few observations, and zero benchmark variance (all named by the homework).
+  - **Market-data adapter boundary:** confirm the snapshot + named-SSE-stream contract is the
+    seam a Yahoo/OpenFin producer can stand behind with zero consumer change; list anything
+    downstream that assumes simulator internals (tick regularity, tick sizes, mean-reversion).
+  - **Strategy plug-in sketch:** strategies as intent producers beside the generator — the
+    GENERATED/MANUAL split becomes a strategy label; `gen-` prefixes stop being the only
+    automated marker.
+- **Constraint in force from now on (6b/6c included):** no new design may deepen simulator
+  coupling; anything simulator-specific stays behind the market-data service boundary.
+
+### End-of-project — deferred big backend features (phases E1–E5)
+
+Build **after** the UI is complete. Restructured in the 2026-08-03 plan review from a flat
+checklist into phases, because these are the graded deliverables and they deserve the same
+loop (propose → accept → implement → verify → notes) as everything else. Two ordering rules:
+**Alembic comes first** (options and IRS need schema changes, and migrations are how schema
+lands — building instruments first means doing the schema work twice), and **every feature
+wires its own frontend cells in the same phase** (big-bang integration at the end is how gaps
+survive until review; every prior phase wired UI with its data and caught them early).
+
+All of E1–E5 build on the Phase 7a seam decisions (instrument universe, curve representation,
+benchmark ownership) — do not start them with 7a unresolved.
+
+- **E1 — Alembic baseline + instrument-universe migration.** Introduce Alembic over the current
+  schema, then land the 7a instrument-universe restructure (catalog / `SYMBOL_BY_CLASS` → a
+  representation where a class has many symbols and instruments carry parameters) as the first
+  real migration. *Concepts:* migrations as code, autogenerate vs hand-written, baseline-stamping
+  an existing database. *Review checklist:* `alembic upgrade head` from an empty database and
+  from the current schema both succeed; downgrade of the new migration works; the running stack
+  is unaffected (same trades, same valuations).
+- **E2 — European options.** Black–Scholes pricing (`math.erf`, no scipy) in pricing-service,
+  option instrument fields via an E1-style migration, generator/New Trade able to produce one,
+  and the option cells wired on Trades/Valuations in the same phase. *Review checklist:* a known
+  BS test vector prices correctly; an option trade values on the stream like any other; the UI
+  shows option fields only for options (honest N/A elsewhere).
+- **E3 — IRS.** IRS instruments and pricing consuming the curve per the 7a curve-representation
+  decision; migration + frontend cells in-phase. *Review checklist:* a par swap prices near zero
+  at inception; a curve shift moves the IRS valuation in the expected direction; cells wired.
+- **E4 — alpha/beta per book.** Rolling window against `MARKET_INDEX` per the 7a
+  benchmark-ownership decision, published on the valuation stream; wires the Valuations
+  book-risk cards to real values. *Review checklist:* the homework's named edge cases return
+  honest nulls, not numbers — gaps in the series, too few observations, zero benchmark
+  variance; beta of the benchmark against itself ≈ 1 as a sanity vector.
+- **E5 — observability pack** (smallest; flexes if time runs short). Low-frequency transition
+  audits (`DEPENDENCY_DOWN`/`RECOVERED`, `WORKER_FAILED`/`RECOVERED`, persistence
+  failure/recovery — state changes, not every retry), rendered as the homework's per-service
+  status-change timeline on the monitoring view; per-action processing latency via timing in
+  `trade_processor` plus a wider audit payload (book, side, quantity), unblocking the "average
+  processing time" stat and the per-row `ms` column that render honest `n/a` today (recorded in
+  6a; elevated by the requirements audit). *Review checklist:* stopping a dependency writes one
+  DOWN and one RECOVERED row, not a retry storm; the timeline renders them; the `ms` column and
+  average replace their `n/a` states.
+
+### Phase 7b — consolidation sweep (after the end-of-project features)
+
+- **Goal:** the project-wide simplification pass over the *complete* codebase, as the last work
+  before homework 5. Runs after the end-of-project features precisely so their build debris is
+  included — sweeping first and building after would deposit new leftovers on a clean floor
+  (the 6a review pass demonstrated that reversals during a build always leave some).
+- **Scope:**
+  - Project-wide dead-export and duplication sweep (`npm run deadcode` across the app); the
+    accepted knip flags carried since 6a get resolved here rather than carried further.
+  - Machinery-that-outlived-its-decision review across all phases, 6a-style, now that the
+    feature set is final.
+  - **Re-verify the performance rules against real-feed behavior:** the 500 ms scheduler,
+    buffer bounds and queue sizes were measured against the simulator's steady cadence; real
+    feeds burst and gap, so the burst case gets measured before homework 5 relies on it.
+    Bursts are produced with the tools already in the stack — drop the generator interval to
+    its 100 ms floor for a sustained burst, and use pricing's `POST /scenario` shock for a
+    single revaluation spike — since no real feed exists until homework 5. Record the numbers
+    the same way Phase 4 did (long tasks, flush sizes, staleness counts).
+- **Deadline valve:** if homework-4 time runs short, this phase compresses safely — it improves
+  the codebase but gates no graded deliverable. Phase 7a does not have that property, which is
+  why the two halves are ordered the way they are.
 
 ### Also required for submission (not a UI phase)
 - [ ] `docs/wireframes/*.png` — the homework requires wireframes. We have full designs
   in `docs/designs/`; export/rename them (or trace simple wireframes) into
   `docs/wireframes/` with the required filenames.
 - [ ] README additions: architecture, proxy, SSE streams, live-state approach,
-  configurability, options/IRS, alpha/beta, known limitations.
+  configurability, options/IRS, alpha/beta, known limitations. Per the requirements audit also
+  cover: which benchmark alpha/beta uses and why (`MARKET_INDEX`); which views poll instead of
+  stream and why that is allowed (monitoring explicitly; trade-gen/trade-action use the audits
+  endpoint — "stream **lub endpoint**" per the homework); why Monitoring has no separate
+  sidebar page (System Overview doubles as it); why top-level PnL lives on Business Overview
+  rather than System Overview (deliberate money-view/technical-view split); and the
+  WARNING-severity departure from the errors-panel mockup.
+
+### Optional extensions ("zadanie dla chętnych") — tracked, mostly not planned
+Status after the 2026-08-03 requirements audit, so the option list is a decision, not an
+accident. None are required; revisit only if time remains after Phase 7b.
+- **Local view-config persistence — largely done already** (column visibility/order and table
+  prefs in localStorage since Phases 3–5; 6c settles what else persists).
+- **Simple charts — done in spirit:** dependency-free SVG sparklines (Phase 3) and the benchmark
+  card; no charting library, by design.
+- **Scenario shock — backend half exists:** pricing already ships `POST /scenario`. A UI view is
+  a candidate stretch goal after Phase 7b, and pairs naturally with real data in homework 5.
+- **PnL attribution, configurable layouts, operational alerts — not planned** (PnL thresholds
+  were declined in 6c, so alerts have no configuration to ride on).

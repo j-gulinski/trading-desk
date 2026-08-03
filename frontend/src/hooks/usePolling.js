@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 const MIN_RETRY_DELAY_MS = 1000
 
@@ -14,13 +14,18 @@ export function usePolling(
 
   const savedFn = useRef(fetchFn)
   savedFn.current = fetchFn
+  const tickRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
+    let inFlight = false
     let timer
     let requestController
 
     async function tick() {
+      if (inFlight) return
+      inFlight = true
+      clearTimeout(timer)
       const startedAt = Date.now()
       requestController = new AbortController()
       const timeout = timeoutMs == null
@@ -39,6 +44,7 @@ export function usePolling(
         setError(err)
       } finally {
         clearTimeout(timeout)
+        inFlight = false
         if (!cancelled) {
           setLoading(false)
           const elapsedMs = Date.now() - startedAt
@@ -48,13 +54,17 @@ export function usePolling(
       }
     }
 
+    tickRef.current = tick
     tick()
     return () => {
       cancelled = true
+      tickRef.current = null
       clearTimeout(timer)
       requestController?.abort()
     }
   }, [intervalMs, timeoutMs])
 
-  return { data, error, loading, lastPolled, lastUpdated }
+  const refetch = useCallback(() => tickRef.current?.(), [])
+
+  return { data, error, loading, lastPolled, lastUpdated, refetch }
 }

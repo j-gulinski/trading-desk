@@ -756,6 +756,68 @@ signed market value, unrealized PnL, notional, latest price, and worst-case fres
 It is not a hook, not context state, and not executed by the current Valuations screen. It remains
 available for a future position- or book-oriented view.
 
+## Decision index (the forks of this phase, in one place)
+
+This note is organised by question rather than by decision, so the forks are collected here.
+Each is argued in full either above or in `frontend-plan.md` § Phase 4.
+
+1. **Denormalize `book_name`, `quantity`, `trade_price` onto every valuation event** rather than
+   have the browser join reference data. Measured at 19% of a 513-byte event; the alternative
+   needs a client cache plus a gap-filling path for trades created mid-session. `book_name`
+   moves out first if size ever matters.
+2. **Merge policy: a final valuation is terminal; otherwise strictly newer wins** — enforced on
+   the server *and* in `mergeValuation`, because the server cannot guarantee record order against
+   its own transaction boundary. The one race found in review (a stale non-final re-opening a
+   closed trade, 1 in 158) was fixed on the publish path, not just the cache.
+3. **One shared 500 ms scheduler for the whole app** instead of per-feed timers — two flush
+   opportunities per one-second freshness tick, aligned so they can enter React as one commit.
+4. **The fixed two-second reconnect stays; exponential backoff rejected again** — same reasoning
+   as Phase 3, re-examined rather than assumed.
+5. **Render cap of 250 rows on Valuations** (later 100 in Phase 5) — the measured render cost
+   decision, not a guess.
+6. **Pricing's per-client queue: 500 → 5,000** — buys publication-burst headroom, explicitly does
+   *not* fix per-valuation insert cost; recorded to keep the limit honest.
+7. **The Phase 3 row flash was dropped, not inherited** — a useful signal on ten sparse rows is
+   noise and real render cost when one tick updates hundreds. Mechanism reused, policy re-decided.
+8. **~300 lines of Positions machinery deleted** once the unbounded generator was fixed at the
+   source — the screen had grown compensations for a backend bug. `positionsOf` survives, unwired,
+   for Phase 6b.
+
+## Concepts seen for the first time in this phase
+
+**Inversion of control between hooks.** `useBufferedUpdates(onFlush) -> pushUpdate`: the feed
+passes in *what flushing means* (merge pending into my state), the buffer hands back *how to
+submit* one update. Timing and coalescing live in the generic hook; identity, merge rules and
+setters stay in the feed. This is the pattern that let one buffering implementation serve two
+different feeds — and it is why the market feed could be rewritten onto the shared hooks without
+changing its behavior.
+
+**Two refs, two different jobs.** `bufferRef` holds mutable work that must never render — events
+land there for free between flushes. `onFlushRef` holds the *current* flush behavior so one
+long-lived subscription always calls this render's logic without resubscribing. Phase 3
+introduced the latest-ref idiom; Phase 4 shows the two reasons to reach for a ref, side by side
+in one hook.
+
+**A tick-divisor scheduler.** One module-level 500 ms interval; each subscriber declares its
+cadence and the clock converts it to "every N base ticks" (feeds 1, freshness 2). Independent
+timers at 500 and 1,000 ms would drift and produce back-to-back renders; a divisor cannot drift,
+and the second flush plus freshness enter React in the same task, batched into one commit. The
+timer also stops entirely when the last subscriber unmounts — a scheduler is a resource with a
+lifecycle, like any other.
+
+**Supersession needs identity, not just time.** The contract has `valuation_time` but no producer
+epoch or sequence number, and timestamps can only express ordering. "Final is terminal" had to be
+added as a separate rule precisely because *newer* does not mean *authoritative* across a close.
+The durable lesson: replay and dedup need explicit identity; clocks are not identity.
+
+**Memoised provider values and per-feed contexts.** Two feeds share one provider, but each hook
+memoises its returned object, so a screen consuming valuations does not re-render on market
+ticks. Context is not the performance problem — unmemoised context *values* are.
+
+**Measure, then cap.** The 250-row decision came from counting work per wire event, per flush and
+per render — the note records those numbers. A cap chosen without the numbers would be
+indistinguishable from superstition; this one can be revisited when the numbers change.
+
 ## Focused reading order
 
 1. `frontend/src/hooks/streamClock.js`

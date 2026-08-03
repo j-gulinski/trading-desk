@@ -57,7 +57,7 @@ export const TRADE_COLUMNS = [
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerNote: 'unrealized · realized at close',
+    headerNote: 'realized once closed',
   },
   {
     id: 'return',

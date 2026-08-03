@@ -824,6 +824,63 @@ state is reconciled from a snapshot and then kept live. If a later feature requi
 auditable tick tape, it should use durable replay with server event IDs rather than
 overloading this screen's UI buffer.
 
+## Concepts seen for the first time in this phase
+
+This is the phase where the app becomes real-time, and nearly every technique below is reused
+by Phases 4–6 without change.
+
+**Server-Sent Events and `EventSource`.** A long-lived HTTP GET where the server keeps the
+response open and writes `event:`/`data:` records separated by blank lines; the browser parses
+the framing and dispatches named `MessageEvent`s. One direction only — which is exactly the
+shape of a market feed, and why SSE beat WebSocket here (see the decision table). The key mental
+adjustment: `new EventSource(url)` is not a Promise; it is a connection object with a lifecycle.
+
+**An effect that owns a network resource.** Phase 1's cleanup removed an event listener; here the
+same `useEffect` pattern creates and tears down a live connection. Get it wrong and every remount
+leaks a socket. This is the strongest version of "an effect's cleanup must mirror its setup" in
+the project.
+
+**The transport/domain boundary.** `useSseStream` knows how to connect, parse JSON, report
+status, and reconnect — and nothing else. It never decides how observations merge; the feed hook
+never touches `EventSource`. The proof of the boundary came in Phase 4: a second stream reused
+the transport hook unchanged.
+
+**A ref that holds the latest callback.** The connection must survive re-renders, but the handler
+closes over fresh state each render. Storing the handler in a ref (`ref.current = handler` each
+render, transport calls `ref.current(event)`) decouples the two lifetimes: a healthy connection
+never restarts just because React rendered. This "latest ref" idiom recurs in every later hook
+that bridges a long-lived resource and React state.
+
+**Buffer, coalesce, flush — bounding render work.** Raw ticks land in a mutable ref keyed by
+instrument (latest-per-key wins), and a timer flushes the buffer into React state on a fixed
+cadence. Ticks can arrive at any rate; renders happen at most twice a second. The decomposition
+matters as much as the throttle: *arrival* (ref write, free) is separated from *publication*
+(state write, a render).
+
+**Reconciling a snapshot with a live stream.** Neither alone is correct: the snapshot is complete
+but instantly aging; the stream is current but starts mid-flow. Seed from the snapshot, let newer
+stream values win through an ordered merge, and re-snapshot on reconnect to fill whatever the
+outage dropped. The merge discipline built here becomes the Phase 4 valuation rules and Phase 5's
+row-value selection.
+
+**Freshness is derived, not reported.** An open connection proves transport, nothing more.
+LIVE/STALE is computed per instrument from browser receipt time against a threshold — which is
+why a healthy socket with a silent instrument correctly shows STALE, and why every later screen
+computes freshness rather than trusting a flag.
+
+**Versioned browser persistence.** History and tick counts survive a refresh via
+`sessionStorage`, written with a version stamp so a shape change invalidates cleanly instead of
+crashing on parse. The rule: persisted state is input from an old version of the app — validate
+it like any other input.
+
+**Stable snapshot sorting.** Live-sorting a table on a streaming column makes rows jump on every
+tick. Capturing the sort key once — a snapshot of values at sort time — keeps order deterministic
+while cells keep updating in place. Reused verbatim by Valuations and Trades.
+
+**Container queries.** With a fixed sidebar, viewport-width breakpoints lie about the space a
+table actually has. `.content` is a CSS container and component styles query *it* — layout
+decisions track the column that contains them.
+
 ## Failure behavior and limits
 
 | Condition | Behavior |
