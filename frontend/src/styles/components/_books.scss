@@ -65,6 +65,15 @@
   border-radius: var(--radius-md);
   background: var(--bg-panel);
 }
+.book-tile--inactive {
+  border-style: dashed;
+  background: transparent;
+
+  .book-tile__name,
+  .book-tile__metric-value {
+    color: var(--text-secondary);
+  }
+}
 .book-tile__head {
   display: flex;
   align-items: flex-start;
@@ -148,7 +157,12 @@
     outline-offset: 1px;
   }
 }
-.book-tile__edit {
+.book-tile__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.book-tile__action {
   min-height: 28px;
   padding: 0 var(--sp-3);
   border: 1px solid var(--border);
@@ -167,6 +181,15 @@
   &:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
+  }
+}
+.book-tile__action--danger {
+  border-color: rgba(248, 113, 113, 0.32);
+  color: var(--neg);
+
+  &:hover {
+    border-color: rgba(248, 113, 113, 0.6);
+    color: var(--neg);
   }
 }
 

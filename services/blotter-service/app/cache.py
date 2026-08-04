@@ -64,6 +64,16 @@ class IndexedStore:
         with self._lock:
             return self._by_id.get(obj_id)
 
+    def update_field(self, obj_id, field, value):
+        with self._lock:
+            obj = self._by_id.get(obj_id)
+            if obj is None or getattr(obj, field) == value:
+                return False
+            self._remove(obj_id)
+            setattr(obj, field, value)
+            self._add(obj)
+            return True
+
     def __len__(self):
         with self._lock:
             return len(self._by_id)

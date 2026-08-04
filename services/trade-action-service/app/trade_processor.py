@@ -56,12 +56,42 @@ def _close_all(intent):
     action_queue.incr("closed", len(trade_ids))
 
 
+def _reassign(intent):
+    source_id = _parse_uuid(intent.get("book_id"))
+    target_id = _parse_uuid(intent.get("target_book_id"))
+
+    def reject(session, message):
+        write_audit(SERVICE_NAME, "ACTION_REJECTED", message, entity_type="BOOK",
+                    entity_id=str(source_id) if source_id else None,
+                    correlation_id=intent.get("client_request_id"),
+                    severity="WARNING", session=session)
+        return action_queue.incr("rejected")
+
+    with session_scope() as session:
+        source = repository.get_book(session, source_id) if source_id else None
+        target = repository.get_active_book(session, target_id) if target_id else None
+        if source is None or target is None or source_id == target_id:
+            return reject(session, "Reassign rejected: unknown or same book")
+        if source.expected_asset_class != target.expected_asset_class:
+            return reject(session, "Reassign rejected: asset class mismatch")
+        trade_ids = repository.reassign_active_trades(session, source_id, target_id)
+        for trade_id in trade_ids:
+            write_audit(SERVICE_NAME, "TRADE_REASSIGNED",
+                        f"Trade moved from {source.name} to {target.name}",
+                        entity_type="TRADE", entity_id=trade_id,
+                        payload={"from_book_id": str(source_id), "to_book_id": str(target_id)},
+                        correlation_id=intent.get("client_request_id"), session=session)
+    action_queue.incr("reassigned", len(trade_ids))
+
+
 def _process(intent):
     action = intent.get("action_type")
     if action == "CLOSE_TRADE":
         _close(intent)
     elif action == "CLOSE_ALL":
         _close_all(intent)
+    elif action == "REASSIGN_TRADES":
+        _reassign(intent)
     else:
         _open(intent)
 

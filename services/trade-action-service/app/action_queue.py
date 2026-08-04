@@ -9,6 +9,7 @@ stats = {
     "processed": 0,
     "created": 0,
     "closed": 0,
+    "reassigned": 0,
     "rejected": 0,
     "duplicates": 0,
 }

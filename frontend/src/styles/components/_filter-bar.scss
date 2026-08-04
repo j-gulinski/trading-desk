@@ -50,6 +50,20 @@
     border-color: var(--border-strong);
   }
 }
+.filter-bar__check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  input {
+    margin: 0;
+    accent-color: var(--accent);
+  }
+}
 .filter-bar__select-field {
   display: flex;
   align-items: center;

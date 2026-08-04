@@ -246,6 +246,48 @@
     cursor: default;
   }
 }
+.form-dialog__submit--danger {
+  background: var(--neg);
+
+  &:hover:not(:disabled) {
+    background: #ef4444;
+  }
+  &:focus-visible {
+    outline-color: var(--neg);
+  }
+}
+.form-dialog__cancel {
+  min-height: 40px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+.form-dialog__actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+.form-dialog__message {
+  margin: 0 0 var(--sp-4);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
 .form-dialog__submit-error {
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid rgba(248, 113, 113, 0.3);

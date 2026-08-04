@@ -98,5 +98,5 @@ lives in `docs/frontend-plan.md`.
 
 Phase 6 is split into **6a / 6b-1 / 6b-2 / 6c** — it had grown to roughly four screens, and Phases 4
 and 5 each ran three revision passes past their stated goal. 6b was split again once the
-book-lifecycle work (delete guard, trade reassignment, per-book Flatten) turned out to be the
+book-lifecycle work (delete guard, trade reassignment) turned out to be the
 heaviest backend feature since Phase 3. Each sub-phase gets its own notes file and review gate.

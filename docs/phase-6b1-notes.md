@@ -39,8 +39,7 @@ being averaged into one number that is true of neither.
 ### 2. Books does not get a Delete button
 
 The backend `DELETE /books/{id}` deactivates a book with no check for open trades — it would
-silently orphan live positions. The mockup shows Delete and Flatten; both wait for 6b-2, where the
-guard is built. Shipping the button first would be exactly the kind of UI that lies about what the
+silently orphan live positions. Delete waits for 6b-2, where the guard is built. Shipping the button first would be exactly the kind of UI that lies about what the
 system can do.
 
 ### 3. The instrument list comes from the market feed, and the book fixes the asset class
@@ -150,7 +149,7 @@ within one 5 s poll and carries a fair value within one pricing tick.
 
 ## Honest gaps
 
-- **No Delete or Flatten on the cards** — 6b-2, with the backend guard that makes them safe.
+- **No Delete on the cards** — 6b-2, with the backend guard that makes it safe.
 - **Cards show a short UUID, not a `BOOK-EQ-01` code.** No such column exists on `books`; the
   mockup's codes are cosmetic, and inventing a scheme would be fiction.
 - **`EST. NOTIONAL` ignores contract multipliers** (futures `multiplier: 50`). It is labelled
@@ -206,7 +205,7 @@ Against the live stack, on a freshly recreated database:
 
 ## Known limits
 
-- Delete, reassignment and per-book Flatten are 6b-2.
+- Delete and reassignment are 6b-2.
 - Both dialogs are `<dialog showModal()>` overlays that close on backdrop click. 6c replaces all
   three drawers (trade detail plus these two) with one shared push-aside panel that slides the page
   content left instead of covering it.

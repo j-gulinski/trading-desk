@@ -394,8 +394,8 @@ and config persistence — roughly four screens. Phases 4 and 5 had each run thr
 their one-line goal, and in both cases the extra passes edited an earlier phase's screens, pulled a
 slice of a later phase forward, and changed a backend service. The split puts a review gate between
 those. 6b was split again in the 2026-08-03 plan review: the book-lifecycle work (delete guard,
-trade reassignment, per-book Flatten) is the heaviest backend feature since Phase 3 and deserves its
-own gate rather than riding along with the first write forms.
+trade reassignment) is the heaviest backend feature since Phase 3 and deserves its own gate rather
+than riding along with the first write forms.
 
 ### Phase 6a — Generator + Trade Actions ✅ (built and verified)
 
@@ -503,7 +503,8 @@ atomic 400 on mixed valid/invalid config, restart adoption of 33 blotter trades 
   is genuinely new. Extends 6a's `gen-` convention.
 - **Two sources on one screen, labelled by source.** The card PnL is blotter-sourced (≤5 s) and the
   drill-down PnL is stream-sourced (≤0.5 s); they are sampled at different instants and are not
-  reconciled into a single false number.
+  reconciled into a single false number. **Superseded in 6b-2:** the drill-down now reads the
+  blotter too, so the screen has one source.
 - **New Trade is a global action, not a screen feature.** It lives in the top bar on every route
   (matching the designs) and is owned by `AppShell`, fetching its own book list when opened rather
   than being handed one by the host screen. `+ Create book` stays on Books, where it belongs.
@@ -512,7 +513,7 @@ atomic 400 on mixed valid/invalid config, restart adoption of 33 blotter trades 
   2 tabs ~8 ms, **3 tabs deadlocks every request including page loads**. Applies to production
   builds too. 6c fix: release the streams while a tab is hidden, reconnect on `visibilitychange`.
 
-**Deferred (honest):** no Delete or Flatten on the cards until 6b-2's backend guard exists;
+**Deferred (honest):** no Delete on the cards until 6b-2's backend guard exists;
 `apiDelete` stays on the accepted-knip list one more phase. `positionsOf` and `apiPut` came off it
 here. Book cards show a short UUID rather than the mockup's `BOOK-EQ-01` codes — no such column
 exists. `EST. NOTIONAL` is labelled `QTY × LAST PRICE` and ignores contract multipliers.
@@ -555,7 +556,65 @@ exists. `EST. NOTIONAL` is labelled `QTY × LAST PRICE` and ignores contract mul
   the honest unavailable state; `npm run lint/build/deadcode` clean (`positionsOf` and
   `apiPut`/`apiDelete` come off the accepted-knip-flags list here).
 
-### Phase 6b-2 — Book lifecycle: delete guard, reassignment, per-book Flatten
+### Phase 6b-2 — Book lifecycle: delete guard and trade reassignment ✅ (built and verified)
+
+- **Outcome:** `Delete` is real and safe. books-service refuses to deactivate a book with open
+  positions (asking the blotter over HTTP, and refusing when it cannot ask); `REASSIGN_TRADES` joins
+  the trade-action queue so a book can be emptied first; deactivated books stay reachable behind an
+  **Include deactivated** filter.
+- **Full detail:** `docs/phase-6b2-notes.md`.
+
+**Contracts and rules later phases inherit**
+
+- **The guard is on ACTIVE trades, not any trade.** `DELETE /books/{id}` is a soft delete, and
+  closed trades stay attributed to the book they happened in — so "any trade" would make every book
+  that ever traded permanently undeletable. Deleting means *stops accepting trades, leaves the
+  roster*, never *never existed*.
+- **Guard the state transition, not the route.** `PUT /books/{id}` also accepts `is_active`, so the
+  same guard fronts both endpoints. A rule attached to one URL is bypassable by the next one.
+- **Cross-service reads fail closed.** books-service reaches the blotter through `blotter_client.py`
+  (the 6a trade-generation precedent, not a new pattern) rather than querying `trades` directly, and
+  a destructive operation that cannot verify its precondition is **refused with 503** — distinct
+  from the `409` that means the precondition genuinely failed.
+- **The blotter re-indexes on disagreement.** Its ACTIVE-trade cache is keyed by `book_id` and was
+  never updated after load, so a reassignment would have been invisible until restart. It now
+  corrects itself when a streamed valuation's `book_id` disagrees with the cached one — pricing
+  re-reads its active set every 2 s, so the truth is already on the wire. `IndexedStore.update_field`
+  does the remove-mutate-add atomically; doing it from the caller corrupts the index.
+- **`202 accepted` cannot be chained.** Trade-action enqueues; the effect lands later. The move →
+  delete flow reports the acknowledgement and lets the 5 s roster poll reconcile, rather than
+  auto-continuing into the guard it would race.
+- **`ApiError` carries the response body.** Status codes stay diagnostic and the copy stays ours,
+  but a server-supplied *reason* (the open-trade count on a 409) is not a status code.
+- **A new trade mutation must be added to the Trade Actions feed list.** `FEED_EVENT_TYPES` is an
+  explicit allow-list; a mutation missing from it is invisible on the screen whose job is showing
+  every mutation.
+- **A soft-deleted book is hidden, not gone.** It still owns its closed trades and their realized
+  PnL, so the roster hides it by default, says how many are hidden, and brings them back — marked
+  `DEACTIVATED`, without actions — behind **Include deactivated**. Deactivated books are never
+  offered as move targets.
+- **One button, one action; the guard is the only copy of the rule.** `Move` is its own control on
+  any book with open positions; `Delete` always opens the confirm and surfaces the backend's
+  refusal (*"Refused — this book still has 3 open positions."*). The first cut had Delete open the
+  move form when positions remained — a client-side branch duplicating a rule the backend already
+  enforces.
+- **A screen reads one source.** Books is blotter-only: the roster from `/blotter/books/summary`,
+  the expanded card's per-symbol netting from `/blotter/trades?book_id=…&status=ACTIVE`. This
+  supersedes 6b-1's "two sources on one screen, labelled by source" — same cache behind both calls,
+  so the card total and the drill-down agree when sampled together. It required the blotter's
+  `latest_valuation` to project `current_price` and `multiplier`: `MARK` is the price of one unit,
+  not the value of the position.
+
+**Dropped from the approved scope: per-book Flatten** (and the `book_id` filter on close-all it
+needed). Move already empties a book, so Flatten was a second route to the same outcome that
+additionally required scoping the most destructive query in the system. `close_all_trades` stays
+global and unreachable from the UI.
+
+**One fix beyond the approved scope, caused by this phase:** the blotter re-index above — without it
+a reassignment looks like it silently failed until the service restarts.
+
+#### Original plan (as approved)
+
 - **Goal:** make destructive book operations safe — the heaviest backend feature since Phase 3,
   which is why it has its own gate.
 - **From review (2026-08-03):** deleting or closing a book that still has trades must be refused
@@ -569,16 +628,15 @@ exists. `EST. NOTIONAL` is labelled `QTY × LAST PRICE` and ignores contract mul
   - **Closed-trade history stays attributed to the original book; only active positions move.**
     History is a record of what happened, and what happened happened in the original book.
 - **Scope:** a guard on books `DELETE /books/{id}` (refuse when the blotter shows any trades for
-  the book); the reassignment action type end to end; an optional `book_id` on
-  `POST /trade-actions/close-all` — `close_all_trades(session, close_reason)` currently filters
-  on status only, so the mockup's per-book **Flatten** would close every book's trades; and the
-  UI flow — pick target book → move → confirm close.
+  the book); the reassignment action type end to end; the UI flow — pick target book → move →
+  confirm close. The approved scope also listed an optional `book_id` on
+  `POST /trade-actions/close-all` for a per-book **Flatten**; that was dropped at build time as a
+  duplicate route to an outcome move already produces (see the outcome section above).
 - **Review checklist:** DELETE on a book with trades is refused with a clear error surfaced in
   the UI (and allowed once empty); reassigning N active trades writes N audit rows with the
   original and target book recorded; reassigned trades keep valuing without interruption (the
   pricing active-set survives the move); closed trades stay under the original book after a
-  move; Flatten with `book_id` closes only that book's trades — verified against a second book
-  left untouched; the close-book flow refuses to close while active trades remain.
+  move; the close-book flow refuses to close while active trades remain.
 - **Generator realism — ✅ resolved in the Phase 4 revision, not here.** The open book used to grow
   without bound: `TRADE_GENERATION_INTERVAL_MS=200` (five trades/second) with a fixed
   `CLOSE_PROBABILITY=0.3` meant opens permanently outran closes — past 2,000 open trades at ~$1m

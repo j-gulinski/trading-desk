@@ -55,7 +55,7 @@ the owning poll refetches server truth out of cycle (`usePolling().refetch()`).
 | Trade Actions | — | `/queue/status` every 2 s; monitoring audits every 3 s | trade intents → Trade Action |
 | Generator | — | generator `/status` every 2 s; monitoring audits (generated intents) every 3 s; books summary every 30 s | start / stop / generate-once / config → Trade Generator |
 | System Overview | none of its own — stream health is read from both shared feed contexts | monitoring `/status` every 5 s; monitoring audits (errors) every 5 s | — |
-| Books | valuation feed (shared context) for per-symbol net exposure on drill-down | `/blotter/books/summary` every 5 s | create / edit book → Books |
+| Books | — | `/blotter/books/summary` every 5 s; `/blotter/trades?book_id&status=ACTIVE` every 5 s while a card is expanded | create / edit / delete book → Books; `REASSIGN_TRADES` → Trade Action |
 | New Trade (top bar, every route) | market feed (shared context) for instrument list & quoted price | `/blotter/books/summary` once per open | `OPEN_TRADE` intents → Trade Action |
 
 ## Decisions that define the system
@@ -66,6 +66,8 @@ the owning poll refetches server truth out of cycle (`usePolling().refetch()`).
 - Pricing owns valuation and PnL calculation.
 - PostgreSQL owns durable history; streams and caches are delivery/read models.
 - Blotter may combine live and historical data, but it does not become a second writer.
+- Books owns which books exist; it asks Blotter over HTTP about trades rather than reading the
+  `trades` table, and refuses a destructive operation it cannot verify.
 
 Trade closing is guarded in SQL:
 
@@ -77,6 +79,10 @@ WHERE trade_id = :id AND status = 'ACTIVE'
 
 Only `rowcount == 1` means the close won. A unique `client_request_id` makes resubmitting an intent
 idempotent.
+
+Retiring a book is guarded the same way, one level up: a book is deactivated only when Blotter
+reports zero ACTIVE trades for it. If Blotter cannot answer, the deletion is refused rather than
+allowed — `409` means the book still has positions, `503` means we could not tell.
 
 ### Tick-to-screen order
 

@@ -1,49 +1,95 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePolling } from '../../hooks/usePolling.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
-import { useValuationFeedContext } from '../../providers/feedContext.js'
-import { apiGet } from '../../services/apiClient.js'
+import { apiDelete, apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { BOOK_SUMMARY_POLL_INTERVAL_MS } from '../../config/books.js'
-import { bookPositionsOf, bookSummariesOf, summarizeBooks } from '../../domain/books.js'
-import { positionsOf, valuationRowsOf } from '../../domain/valuations.js'
+import {
+  bookPositionsOf,
+  bookSummariesOf,
+  moveTargetsOf,
+  summarizeBooks,
+} from '../../domain/books.js'
+import { describeApiError } from '../../domain/apiErrors.js'
 import { countOptions } from '../../domain/filters.js'
 import { formatNumber } from '../../domain/formatting.js'
 import EmptyState from '../../components/EmptyState.jsx'
+import ConfirmDialog from '../../components/ConfirmDialog.jsx'
 import FilterBar from '../../components/filters/FilterBar.jsx'
 import BookCard from '../../components/books/BookCard.jsx'
 import BookFormDialog from '../../components/books/BookFormDialog.jsx'
+import MoveTradesDialog from '../../components/books/MoveTradesDialog.jsx'
+
+function describeDeleteError(error) {
+  if (error?.status === 409) {
+    const open = Number(error.body?.active_trades)
+    return Number.isFinite(open)
+      ? `Refused — this book still has ${formatNumber(open)} open ${
+          open === 1 ? 'position' : 'positions'
+        }.`
+      : 'Refused — this book still has open positions.'
+  }
+  if (error?.status === 503 && error.body?.error === 'open trades could not be verified') {
+    return 'Blotter service unavailable — open positions could not be checked, so nothing was deleted.'
+  }
+  return describeApiError(error, {
+    service: 'Books service',
+    outcome: 'the book was not deleted.',
+  })
+}
 
 export default function Books() {
   const summary = usePolling(
     ({ signal }) => apiGet(endpoints.blotter.booksSummary, { signal }),
     { intervalMs: BOOK_SUMMARY_POLL_INTERVAL_MS },
   )
-  const { valuations } = useValuationFeedContext()
   const { now } = useElapsedTime()
 
   const [expandedId, setExpandedId] = useState(null)
   const [dialog, setDialog] = useState(null)
+  const [notice, setNotice] = useState(null)
   const [activeClass, setActiveClass] = useState(null)
   const [query, setQuery] = useState('')
+  const [includeDeactivated, setIncludeDeactivated] = useState(false)
 
   const allBooks = bookSummariesOf(summary.data)
-  const totals = summarizeBooks(allBooks)
+  const roster = allBooks.filter((book) => book.isActive || includeDeactivated)
+  const totals = summarizeBooks(roster)
+  const deactivatedCount = allBooks.filter((book) => !book.isActive).length
   const search = query.trim().toLowerCase()
-  const books = allBooks.filter(
+  const books = roster.filter(
     (book) =>
       (!activeClass || book.assetClass === activeClass) &&
       (!search || book.name.toLowerCase().includes(search)),
   )
-  const positions =
-    expandedId == null
-      ? []
-      : bookPositionsOf(
-          positionsOf(valuationRowsOf(Object.values(valuations), now)),
-          expandedId,
-        )
+  const openTrades = usePolling(
+    ({ signal }) =>
+      expandedId == null
+        ? Promise.resolve(null)
+        : apiGet(endpoints.blotter.trades({ book_id: expandedId, status: 'ACTIVE' }), { signal })
+            .then((trades) => ({ bookId: expandedId, trades })),
+    { intervalMs: BOOK_SUMMARY_POLL_INTERVAL_MS },
+  )
+  const refetchOpenTrades = openTrades.refetch
+  useEffect(() => {
+    if (expandedId != null) refetchOpenTrades()
+  }, [expandedId, refetchOpenTrades])
 
+  const positions =
+    openTrades.data?.bookId === expandedId ? bookPositionsOf(openTrades.data.trades, now) : []
+
+  const target = dialog?.bookId ? allBooks.find((book) => book.id === dialog.bookId) : null
   const unavailable = summary.error != null && summary.data == null
+
+  function openAction(type, book) {
+    setNotice(null)
+    setDialog({ type, bookId: book.id })
+  }
+
+  function acknowledge(message) {
+    setNotice(message)
+    summary.refetch()
+  }
 
   let content
   if (summary.loading) {
@@ -54,6 +100,10 @@ export default function Books() {
     )
   } else if (allBooks.length === 0) {
     content = <EmptyState message="No books yet — create the first one." />
+  } else if (roster.length === 0) {
+    content = (
+      <EmptyState message="Every book is deactivated — tick “Include deactivated” to see them." />
+    )
   } else if (books.length === 0) {
     content = <EmptyState message="No books match these filters." />
   } else {
@@ -68,7 +118,9 @@ export default function Books() {
             onToggleExpand={() =>
               setExpandedId((current) => (current === book.id ? null : book.id))
             }
-            onEdit={() => setDialog({ type: 'edit', bookId: book.id })}
+            onEdit={() => openAction('edit', book)}
+            onMove={() => openAction('move', book)}
+            onDelete={() => openAction('delete', book)}
           />
         ))}
       </div>
@@ -79,13 +131,18 @@ export default function Books() {
     <section className="page">
       <div className="books-header">
         <span className="books-header__meta">
-          {formatNumber(totals.books)} books · {formatNumber(totals.openPositions)} open
-          positions
+          {formatNumber(totals.books)} books · {formatNumber(totals.openPositions)} open positions
+          {deactivatedCount > 0 && !includeDeactivated
+            ? ` · ${formatNumber(deactivatedCount)} deactivated hidden`
+            : ''}
         </span>
         <button
           type="button"
           className="books-button books-button--accent"
-          onClick={() => setDialog({ type: 'create' })}
+          onClick={() => {
+            setNotice(null)
+            setDialog({ type: 'create' })
+          }}
         >
           + Create book
         </button>
@@ -94,7 +151,7 @@ export default function Books() {
       <FilterBar
         label="CLASS"
         ariaLabel="Filter books by asset class"
-        options={countOptions(allBooks, (book) => book.assetClass)}
+        options={countOptions(roster, (book) => book.assetClass)}
         value={activeClass}
         onChange={setActiveClass}
         search={{
@@ -103,11 +160,26 @@ export default function Books() {
           onChange: setQuery,
           placeholder: 'Search book name…',
         }}
-      />
+      >
+        <label className="filter-bar__check">
+          <input
+            type="checkbox"
+            checked={includeDeactivated}
+            onChange={(event) => setIncludeDeactivated(event.target.checked)}
+          />
+          Include deactivated
+        </label>
+      </FilterBar>
 
       {summary.error != null && summary.data != null && (
         <div className="blotter-notice" role="status">
           Book list refresh failed — showing the last available data.
+        </div>
+      )}
+
+      {notice && (
+        <div className="blotter-notice blotter-notice--ok" role="status">
+          {notice}
         </div>
       )}
 
@@ -121,6 +193,38 @@ export default function Books() {
         />
       )}
 
+      {dialog?.type === 'move' && target != null && (
+        <MoveTradesDialog
+          book={target}
+          targets={moveTargetsOf(allBooks, target)}
+          onAccepted={acknowledge}
+          onClose={() => setDialog(null)}
+        />
+      )}
+
+      {dialog?.type === 'delete' && target != null && (
+        <ConfirmDialog
+          eyebrow="BOOKS"
+          title="Delete book"
+          subtitle={target.name}
+          message={
+            target.closedTrades > 0
+              ? `This book stops accepting trades and leaves the roster. Its ${formatNumber(
+                  target.closedTrades,
+                )} closed ${
+                  target.closedTrades === 1 ? 'trade keeps its' : 'trades keep their'
+                } history here.`
+              : 'This book stops accepting trades and leaves the roster.'
+          }
+          confirmLabel="Delete book"
+          onConfirm={async () => {
+            await apiDelete(endpoints.books.book(target.id))
+            acknowledge(`${target.name} deleted.`)
+          }}
+          describeError={describeDeleteError}
+          onClose={() => setDialog(null)}
+        />
+      )}
     </section>
   )
 }

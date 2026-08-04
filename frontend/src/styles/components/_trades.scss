@@ -7,6 +7,11 @@
   color: var(--warn);
   font-size: 12px;
 }
+.blotter-notice--ok {
+  border-color: rgba(61, 220, 132, 0.28);
+  background: rgba(61, 220, 132, 0.06);
+  color: var(--pos);
+}
 
 .blotter-toolbar {
   display: flex;

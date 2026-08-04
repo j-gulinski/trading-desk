@@ -3,6 +3,7 @@ const GENERATED_PREFIX = 'gen-'
 const DIRECTION_BY_EVENT = {
   TRADE_CREATED: { direction: 'IN', label: 'TRADE_IN', tone: 'healthy' },
   TRADE_CLOSED: { direction: 'OUT', label: 'TRADE_OUT', tone: 'stale' },
+  TRADE_REASSIGNED: { direction: 'MOVED', label: 'REASSIGNED', tone: 'info' },
   ACTION_REJECTED: { direction: 'REJECTED', label: 'REJECTED', tone: 'down' },
 }
 

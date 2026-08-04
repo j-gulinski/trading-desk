@@ -67,9 +67,21 @@ function PositionList({ positions }) {
   )
 }
 
-export default function BookCard({ book, expanded, positions, onToggleExpand, onEdit }) {
+export default function BookCard({
+  book,
+  expanded,
+  positions,
+  onToggleExpand,
+  onEdit,
+  onMove,
+  onDelete,
+}) {
   return (
-    <article className={`book-tile${expanded ? ' book-tile--expanded' : ''}`}>
+    <article
+      className={`book-tile${expanded ? ' book-tile--expanded' : ''}${
+        book.isActive ? '' : ' book-tile--inactive'
+      }`}
+    >
       <header className="book-tile__head">
         <div>
           <h3 className="book-tile__name">{book.name}</h3>
@@ -96,9 +108,27 @@ export default function BookCard({ book, expanded, positions, onToggleExpand, on
           {formatNumber(book.activeTrades)} open · {formatNumber(book.closedTrades)} closed{' '}
           {expanded ? '↑' : '→'}
         </button>
-        <button type="button" className="book-tile__edit" onClick={onEdit}>
-          Edit
-        </button>
+        {book.isActive ? (
+          <div className="book-tile__actions">
+            <button type="button" className="book-tile__action" onClick={onEdit}>
+              Edit
+            </button>
+            {book.activeTrades > 0 && (
+              <button type="button" className="book-tile__action" onClick={onMove}>
+                Move
+              </button>
+            )}
+            <button
+              type="button"
+              className="book-tile__action book-tile__action--danger"
+              onClick={onDelete}
+            >
+              Delete
+            </button>
+          </div>
+        ) : (
+          <StatusPill level="stale" label="DEACTIVATED" compact />
+        )}
       </footer>
 
       {expanded && (

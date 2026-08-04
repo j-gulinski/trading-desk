@@ -27,6 +27,10 @@ def handle_valuation(valuation: dict) -> None:
         if loaded is None or loaded.status != "ACTIVE":
             return
         cache.trades.add(loaded)
+    else:
+        book_id = valuation.get("book_id")
+        if book_id and cache.trades.update_field(trade_id, "book_id", str(book_id)):
+            log.info("trade_reindexed", trade_id=trade_id, book_id=str(book_id))
 
     cache.record_valuation(valuation)
 
@@ -51,28 +55,24 @@ def _trade_to_dict(trade) -> dict:
 
 def _live_valuation(trade_id: str) -> dict | None:
     valuation = cache.get_valuation(trade_id)
-    if valuation is not None:
-        return {
-            "fair_value": valuation.get("fair_value"),
-            "unrealized_pnl": valuation.get("unrealized_pnl"),
-            "realized_pnl": valuation.get("realized_pnl"),
-            "total_pnl": valuation.get("total_pnl"),
-            "currency": valuation.get("currency"),
-            "valuation_time": valuation.get("valuation_time"),
-            "source": "valuation-stream",
-        }
-    history = repository.valuation_history(trade_id, limit=1)
-    if not history:
-        return None
-    latest = history[0]
+    source = "valuation-stream"
+    if valuation is None:
+        history = repository.valuation_history(trade_id, limit=1)
+        if not history:
+            return None
+        valuation = history[0]
+        source = "valuations-db"
+    payload = valuation.get("valuation_payload") or {}
     return {
-        "fair_value": latest.get("fair_value"),
-        "unrealized_pnl": latest.get("unrealized_pnl"),
-        "realized_pnl": latest.get("realized_pnl"),
-        "total_pnl": latest.get("total_pnl"),
-        "currency": latest.get("currency"),
-        "valuation_time": latest.get("valuation_time"),
-        "source": "valuations-db",
+        "fair_value": valuation.get("fair_value"),
+        "unrealized_pnl": valuation.get("unrealized_pnl"),
+        "realized_pnl": valuation.get("realized_pnl"),
+        "total_pnl": valuation.get("total_pnl"),
+        "currency": valuation.get("currency"),
+        "current_price": payload.get("current_price"),
+        "multiplier": payload.get("multiplier"),
+        "valuation_time": valuation.get("valuation_time"),
+        "source": source,
     }
 
 
@@ -135,6 +135,7 @@ def books_summary() -> list[dict]:
             "book_id": book_id,
             "name": book["name"],
             "expected_asset_class": book["expected_asset_class"],
+            "is_active": book["is_active"],
             "active_trades": len(active),
             "closed_trades": closed_by_book.get(book_id, 0),
             "realized_pnl": realized,

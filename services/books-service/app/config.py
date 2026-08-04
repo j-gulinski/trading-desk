@@ -1,5 +1,7 @@
-from shared.config import LOG_LEVEL
+from shared.config import LOG_LEVEL, BLOTTER_SERVICE_URL
 
 SERVICE_NAME = "books-service"
 HOST = "0.0.0.0"
 PORT = 8004
+
+BLOTTER_TRADES_URL = f"{BLOTTER_SERVICE_URL}/trades" if BLOTTER_SERVICE_URL else None

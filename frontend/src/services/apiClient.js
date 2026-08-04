@@ -1,12 +1,13 @@
 import { WRITE_TIMEOUT_MS } from '../config/api.js'
 
 export class ApiError extends Error {
-  constructor(message, { path, status = null, cause = null } = {}) {
+  constructor(message, { path, status = null, cause = null, body = null } = {}) {
     super(message)
     this.name = 'ApiError'
     this.path = path
     this.status = status
     this.cause = cause
+    this.body = body
   }
 }
 
@@ -41,7 +42,8 @@ async function request(path, options = {}) {
   }
 
   if (!res.ok) {
-    throw new ApiError(`Request failed (${res.status})`, { path, status: res.status })
+    const body = await res.json().catch(() => null)
+    throw new ApiError(`Request failed (${res.status})`, { path, status: res.status, body })
   }
 
   if (res.status === 204) return null
