@@ -62,15 +62,12 @@ def _live_valuation(trade_id: str) -> dict | None:
             return None
         valuation = history[0]
         source = "valuations-db"
-    payload = valuation.get("valuation_payload") or {}
     return {
         "fair_value": valuation.get("fair_value"),
         "unrealized_pnl": valuation.get("unrealized_pnl"),
         "realized_pnl": valuation.get("realized_pnl"),
         "total_pnl": valuation.get("total_pnl"),
         "currency": valuation.get("currency"),
-        "current_price": payload.get("current_price"),
-        "multiplier": payload.get("multiplier"),
         "valuation_time": valuation.get("valuation_time"),
         "source": source,
     }
@@ -117,6 +114,54 @@ def trade_detail(trade_id: str) -> dict | None:
     }
 
 
+def _net_positions(active) -> tuple[Decimal, list[dict]]:
+    unrealized = Decimal("0")
+    by_symbol: dict[str, dict] = {}
+
+    for trade in active:
+        position = by_symbol.setdefault(trade.symbol, {
+            "symbol": trade.symbol,
+            "asset_class": trade.asset_class,
+            "trades": 0,
+            "net_quantity": Decimal("0"),
+            "gross_quantity": Decimal("0"),
+            "entry_cost": Decimal("0"),
+            "unrealized_pnl": Decimal("0"),
+            "current_price": None,
+            "valuation_time": None,
+            "unvalued": 0,
+        })
+        quantity = trade.quantity or Decimal("0")
+        position["trades"] += 1
+        position["net_quantity"] += -quantity if trade.side == "SELL" else quantity
+        position["gross_quantity"] += abs(quantity)
+        position["entry_cost"] += abs(quantity) * (trade.trade_price or Decimal("0"))
+
+        valuation = cache.get_valuation(trade.trade_id)
+        if valuation is None:
+            position["unvalued"] += 1
+            continue
+        trade_unrealized = valuation.get("unrealized_pnl") or Decimal("0")
+        unrealized += trade_unrealized
+        position["unrealized_pnl"] += trade_unrealized
+        valued_at = valuation.get("valuation_time")
+        if valued_at is not None and (
+            position["valuation_time"] is None or valued_at >= position["valuation_time"]
+        ):
+            position["valuation_time"] = valued_at
+            position["current_price"] = (valuation.get("valuation_payload") or {}).get(
+                "current_price"
+            )
+
+    positions = []
+    for position in sorted(by_symbol.values(), key=lambda p: p["symbol"]):
+        gross = position.pop("gross_quantity")
+        entry_cost = position.pop("entry_cost")
+        position["average_entry"] = entry_cost / gross if gross else None
+        positions.append(position)
+    return unrealized, positions
+
+
 def books_summary() -> list[dict]:
     books = repository.list_books()
     realized_by_book = repository.realized_pnl_by_book()
@@ -125,11 +170,7 @@ def books_summary() -> list[dict]:
     for book in books:
         book_id = book["book_id"]
         active = cache.trades.query(book_id=book_id, status="ACTIVE")
-        unrealized = Decimal("0")
-        for trade in active:
-            valuation = cache.get_valuation(trade.trade_id)
-            if valuation is not None:
-                unrealized += valuation.get("unrealized_pnl") or Decimal("0")
+        unrealized, positions = _net_positions(active)
         realized = realized_by_book.get(book_id) or Decimal("0")
         summaries.append({
             "book_id": book_id,
@@ -142,5 +183,6 @@ def books_summary() -> list[dict]:
             "unrealized_pnl": unrealized,
             "total_pnl": realized + unrealized,
             "currency": "USD",
+            "positions": positions,
         })
     return summaries

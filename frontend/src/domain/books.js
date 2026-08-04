@@ -24,6 +24,7 @@ export function bookSummariesOf(raw) {
       unrealizedPnl: toNum(book.unrealized_pnl),
       currency: book.currency ?? null,
       isActive: book.is_active !== false,
+      positions: Array.isArray(book.positions) ? book.positions : [],
     }))
 }
 
@@ -41,63 +42,24 @@ export function summarizeBooks(books) {
   }
 }
 
-export function bookPositionsOf(trades, now) {
-  const positions = new Map()
-
-  for (const trade of Array.isArray(trades) ? trades : []) {
-    const symbol = trade.symbol ?? 'UNKNOWN'
-    let position = positions.get(symbol)
-    if (!position) {
-      position = {
-        id: symbol,
-        symbol,
-        assetClass: trade.asset_class ?? 'UNKNOWN',
-        trades: 0,
-        netQuantity: 0,
-        grossQuantity: 0,
-        entryCost: 0,
-        unrealizedPnl: 0,
-        price: null,
-        valuedAtMs: null,
-        unvalued: 0,
-        stale: 0,
-      }
-      positions.set(symbol, position)
+export function bookPositionsOf(book, now) {
+  return (book?.positions ?? []).map((position) => {
+    const valuedAt = Date.parse(position.valuation_time ?? '')
+    const stale =
+      position.unvalued > 0 ||
+      !Number.isFinite(valuedAt) ||
+      now - valuedAt > VALUATION_STALE_AFTER_MS
+    return {
+      id: position.symbol,
+      symbol: position.symbol,
+      assetClass: position.asset_class ?? 'UNKNOWN',
+      netQuantity: toNum(position.net_quantity) ?? 0,
+      averageEntry: toNum(position.average_entry),
+      price: toNum(position.current_price),
+      unrealizedPnl: toNum(position.unrealized_pnl) ?? 0,
+      status: stale ? 'STALE' : 'LIVE',
     }
-
-    const quantity = toNum(trade.quantity) ?? 0
-    const signed = trade.side === 'SELL' ? -quantity : quantity
-    const entryPrice = toNum(trade.trade_price)
-    position.trades += 1
-    position.netQuantity += signed
-    position.grossQuantity += Math.abs(quantity)
-    if (entryPrice != null) position.entryCost += Math.abs(quantity) * entryPrice
-
-    const valuation = trade.latest_valuation
-    if (valuation == null) {
-      position.unvalued += 1
-      continue
-    }
-    position.unrealizedPnl += toNum(valuation.unrealized_pnl) ?? 0
-    const valuedAt = Date.parse(valuation.valuation_time ?? '')
-    if (!Number.isFinite(valuedAt)) {
-      position.unvalued += 1
-      continue
-    }
-    if (now - valuedAt > VALUATION_STALE_AFTER_MS) position.stale += 1
-    if (position.valuedAtMs == null || valuedAt >= position.valuedAtMs) {
-      position.valuedAtMs = valuedAt
-      position.price = toNum(valuation.current_price)
-    }
-  }
-
-  return Array.from(positions.values())
-    .map((position) => ({
-      ...position,
-      averageEntry: position.grossQuantity > 0 ? position.entryCost / position.grossQuantity : null,
-      status: position.unvalued > 0 || position.stale > 0 ? 'STALE' : 'LIVE',
-    }))
-    .sort((a, b) => a.symbol.localeCompare(b.symbol))
+  })
 }
 
 export function bookFormValuesOf(book) {

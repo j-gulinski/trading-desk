@@ -1,20 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { apiPost } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { buildReassignIntent } from '../../domain/tradeActions.js'
 import { describeApiError } from '../../domain/apiErrors.js'
 import { formatNumber } from '../../domain/formatting.js'
+import { useAsyncAction } from '../../hooks/useAsyncAction.js'
+import { useModalDialog } from '../../hooks/useModalDialog.js'
 
 export default function MoveTradesDialog({ book, targets, onAccepted, onClose }) {
-  const dialogRef = useRef(null)
+  const { dialogRef, close, closeOnBackdrop } = useModalDialog()
   const [targetId, setTargetId] = useState(() => (targets.length === 1 ? targets[0].id : ''))
-  const [error, setError] = useState(null)
-  const [pending, setPending] = useState(false)
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (dialog && !dialog.open) dialog.showModal()
-  }, [])
+  const { pending, error, run, clearError, setError } = useAsyncAction()
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -23,26 +19,21 @@ export default function MoveTradesDialog({ book, targets, onAccepted, onClose })
       return
     }
 
-    setPending(true)
-    setError(null)
-    try {
-      await apiPost(endpoints.tradeAction.submit, buildReassignIntent(book.id, targetId))
+    const succeeded = await run(
+      () => apiPost(endpoints.tradeAction.submit, buildReassignIntent(book.id, targetId)),
+      (err) => describeApiError(err, {
+        service: 'Trade-action service',
+        outcome: 'nothing was moved.',
+      }),
+    )
+    if (succeeded) {
       const target = targets.find((candidate) => candidate.id === targetId)
       onAccepted(
         `Accepted — ${formatNumber(book.activeTrades)} open ${
           book.activeTrades === 1 ? 'position is' : 'positions are'
         } moving to ${target?.name ?? 'the selected book'}.`,
       )
-      dialogRef.current?.close()
-    } catch (err) {
-      setError(
-        describeApiError(err, {
-          service: 'Trade-action service',
-          outcome: 'nothing was moved.',
-        }),
-      )
-    } finally {
-      setPending(false)
+      close()
     }
   }
 
@@ -52,9 +43,7 @@ export default function MoveTradesDialog({ book, targets, onAccepted, onClose })
       className="form-dialog"
       aria-labelledby="move-trades-title"
       onClose={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) event.currentTarget.close()
-      }}
+      onClick={closeOnBackdrop}
     >
       <article className="form-dialog__surface">
         <header className="form-dialog__head">
@@ -67,7 +56,7 @@ export default function MoveTradesDialog({ book, targets, onAccepted, onClose })
             type="button"
             className="form-dialog__close"
             aria-label="Close move form"
-            onClick={() => dialogRef.current?.close()}
+            onClick={close}
           >
             ×
           </button>
@@ -97,7 +86,7 @@ export default function MoveTradesDialog({ book, targets, onAccepted, onClose })
                   autoFocus
                   onChange={(event) => {
                     setTargetId(event.target.value)
-                    setError(null)
+                    clearError()
                   }}
                 >
                   <option value="">Select a book…</option>

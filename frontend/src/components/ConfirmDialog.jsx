@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useAsyncAction } from '../hooks/useAsyncAction.js'
+import { useModalDialog } from '../hooks/useModalDialog.js'
 
 export default function ConfirmDialog({
   eyebrow,
@@ -10,25 +11,13 @@ export default function ConfirmDialog({
   describeError,
   onClose,
 }) {
-  const dialogRef = useRef(null)
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (dialog && !dialog.open) dialog.showModal()
-  }, [])
+  const { dialogRef, close, closeOnBackdrop } = useModalDialog()
+  const { pending, error, run } = useAsyncAction()
 
   async function handleConfirm() {
-    setPending(true)
-    setError(null)
-    try {
-      await onConfirm()
-      dialogRef.current?.close()
-    } catch (err) {
-      setError(describeError(err))
-    } finally {
-      setPending(false)
+    const succeeded = await run(onConfirm, describeError)
+    if (succeeded) {
+      close()
     }
   }
 
@@ -38,9 +27,7 @@ export default function ConfirmDialog({
       className="form-dialog"
       aria-labelledby="confirm-dialog-title"
       onClose={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) event.currentTarget.close()
-      }}
+      onClick={closeOnBackdrop}
     >
       <article className="form-dialog__surface">
         <header className="form-dialog__head">
@@ -53,7 +40,7 @@ export default function ConfirmDialog({
             type="button"
             className="form-dialog__close"
             aria-label="Close"
-            onClick={() => dialogRef.current?.close()}
+            onClick={close}
           >
             ×
           </button>
@@ -72,7 +59,7 @@ export default function ConfirmDialog({
             <button
               type="button"
               className="form-dialog__cancel"
-              onClick={() => dialogRef.current?.close()}
+              onClick={close}
             >
               Cancel
             </button>

@@ -106,7 +106,6 @@ def valuation_history(trade_id: str, limit: int = 100) -> list[dict]:
                 "realized_pnl": v.realized_pnl,
                 "total_pnl": v.total_pnl,
                 "currency": v.currency,
-                "valuation_payload": v.valuation_payload,
             }
             for v in rows
         ]

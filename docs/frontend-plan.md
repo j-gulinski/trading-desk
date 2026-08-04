@@ -598,12 +598,13 @@ exists. `EST. NOTIONAL` is labelled `QTY × LAST PRICE` and ignores contract mul
   refusal (*"Refused — this book still has 3 open positions."*). The first cut had Delete open the
   move form when positions remained — a client-side branch duplicating a rule the backend already
   enforces.
-- **A screen reads one source.** Books is blotter-only: the roster from `/blotter/books/summary`,
-  the expanded card's per-symbol netting from `/blotter/trades?book_id=…&status=ACTIVE`. This
-  supersedes 6b-1's "two sources on one screen, labelled by source" — same cache behind both calls,
-  so the card total and the drill-down agree when sampled together. It required the blotter's
-  `latest_valuation` to project `current_price` and `multiplier`: `MARK` is the price of one unit,
-  not the value of the position.
+- **A total and its breakdown must come from one response.** Books is one request:
+  `/blotter/books/summary` returns each book's totals *and* its netted `positions`, computed in the
+  same pass over the same cached valuations. This supersedes 6b-1's "two sources on one screen,
+  labelled by source". Two sources were the first bug; two *requests* against one source were the
+  second — between `/books/summary` and `/trades?book_id=…` the generator trades and prices tick, so
+  the card read −83.92 against a −75.26 breakdown of the same book. Faster polling narrows that
+  window and never closes it.
 
 **Dropped from the approved scope: per-book Flatten** (and the `book_id` filter on close-all it
 needed). Move already empties a book, so Flatten was a second route to the same outcome that

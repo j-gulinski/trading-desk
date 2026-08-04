@@ -94,31 +94,40 @@ The two steps are deliberately not chained. Trade-action answers `202 accepted` 
 not moved yet when the form closes. Auto-continuing into the delete would race the worker and hit
 the guard. The UI reports the acknowledgement and the 5 s roster poll reconciles.
 
-### 7. The Books screen reads one source: the blotter
+### 7. One number, one request — the card total and its breakdown are computed together
 
-The screen used to mix two. Card PnL came from `/blotter/books/summary` (5 s poll) while the
-drill-down came from the shared valuation SSE stream (sub-second) — two numbers for the same book,
-sampled at different instants, that a reviewer would reasonably read as a bug.
+The card's `UNREALIZED` and the drill-down's per-symbol `UNREALIZED` are the same quantity at two
+levels of detail, so they must agree. Twice they did not, and each time the cause was structural
+rather than arithmetic.
 
-Everything now comes from the blotter: the roster from `/books/summary`, and the expanded card's
-per-symbol netting from `/trades?book_id=…&status=ACTIVE`, which already carries each trade's latest
-valuation. Same cache behind both, so the card total and the drill-down rows agree when sampled
-together (measured: −246.20 against −246.20 across two open XAUUSD legs).
+**First cause: two sources.** The card came from `/blotter/books/summary` (5 s poll); the drill-down
+came from the valuation SSE stream (sub-second). Different pipes, different instants.
 
-This needed one addition: `latest_valuation` projected `fair_value` and PnL but not the per-unit
-price, so the blotter now passes `current_price` and `multiplier` through from the valuation
-payload. The `MARK` column needs the price of one unit, not the value of the position — for a
-futures leg those differ by a factor of 50.
+**Second cause, after moving the drill-down onto the blotter: two requests.** `/books/summary` and
+`/trades?book_id=…` read the same cache, but not at the same moment. Between them the generator
+opens and closes trades and every symbol re-prices, so the totals drift — measured at −83.92 on the
+card against −75.26 in the breakdown of the *same* single-symbol book. Polling faster narrows the
+window; it cannot close it. Any design where a number and its decomposition arrive in separate
+responses is inconsistent by construction.
 
-Two consequences worth stating. Staleness is now measured against the mark's own `valuation_time`
-rather than against when the browser last heard from the stream, which is the more honest number —
-it ages a stale mark even if the connection is healthy. And a trade with no valuation at all is now
+**The fix is one request.** `/books/summary` now nets its own positions: the loop that already walks
+each book's ACTIVE trades to sum unrealized PnL groups them by symbol on the way past and returns a
+`positions` array alongside the totals. The card total is the sum of the rows below it because both
+came out of the same pass over the same cached valuations. There is nothing left to reconcile.
+
+It also deleted code. The screen went back to a single `usePolling`, and the second fetch, its
+`bookId` staleness guard and its refetch-on-expand effect all disappeared. Netting moved to the
+service that owns the data; `bookPositionsOf` is now a formatter.
+
+Two consequences worth stating. Staleness is measured against the mark's own `valuation_time`
+rather than against when the browser last heard from the stream — the more honest number, since it
+ages a stale mark even while the connection is healthy. And a trade with no valuation at all is now
 visible: it counts into the netting and pushes the position to `STALE`, where the stream-fed version
-simply did not know it existed.
+did not know it existed.
 
-The screen no longer touches `useValuationFeedContext`. It does not reduce the connection count —
-the streams are opened once by `FeedProvider` for the whole app — it removes a second source of
-truth from one screen.
+The screen no longer touches `useValuationFeedContext`. That does not reduce the connection count —
+`FeedProvider` opens the streams once for the whole app — it removes a second source of truth from
+one screen.
 
 ### 8. Deactivated books stay visible behind a filter
 
@@ -243,8 +252,10 @@ Against the live stack:
   push-aside panel.
 - Delete is per-book; there is no multi-select.
 - A deactivated book cannot be reactivated from the UI (the `PUT` accepts it; no control calls it).
-- The card total and the drill-down are two requests at two instants, so they can differ by a tick
-  or two while prices move. Same source, same cache — different sample times.
+- `/books/summary` now nets positions for **every** book on every poll, not just the expanded one.
+  The catalog has a handful of symbols per asset class so the payload stays small, but the cost is
+  paid whether or not a card is open. The alternative — a second endpoint for the open card — is
+  the inconsistency this phase removed.
 - `positionsOf` in `domain/valuations.js`, the stream-side netting the drill-down used to call, is
   now unreferenced and back on the accepted-knip list. It was left in place rather than deleted;
   Valuations is the screen that would use it.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import EmptyState from '../EmptyState.jsx'
 import { apiGet, apiPost, apiPut } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
@@ -9,6 +9,8 @@ import {
 } from '../../config/books.js'
 import { bookFormErrorsOf, bookFormValuesOf, bookPayloadOf } from '../../domain/books.js'
 import { describeApiError } from '../../domain/apiErrors.js'
+import { useAsyncAction } from '../../hooks/useAsyncAction.js'
+import { useModalDialog } from '../../hooks/useModalDialog.js'
 
 function FieldError({ id, message }) {
   if (!message) return null
@@ -20,19 +22,13 @@ function FieldError({ id, message }) {
 }
 
 export default function BookFormDialog({ bookId = null, onSaved, onClose }) {
-  const dialogRef = useRef(null)
+  const { dialogRef, close, closeOnBackdrop } = useModalDialog()
   const editing = bookId != null
 
   const [values, setValues] = useState(() => (editing ? null : bookFormValuesOf(null)))
   const [loadError, setLoadError] = useState(null)
   const [errors, setErrors] = useState({})
-  const [pending, setPending] = useState(false)
-  const [submitError, setSubmitError] = useState(null)
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (dialog && !dialog.open) dialog.showModal()
-  }, [])
+  const { pending, error: submitError, run } = useAsyncAction()
 
   useEffect(() => {
     if (!editing) return undefined
@@ -75,25 +71,19 @@ export default function BookFormDialog({ bookId = null, onSaved, onClose }) {
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
 
-    setPending(true)
-    setSubmitError(null)
-    try {
+    const saved = await run(async () => {
       const payload = bookPayloadOf(values)
       if (editing) await apiPut(endpoints.books.book(bookId), payload)
       else await apiPost(endpoints.books.list, payload)
+    }, (err) => err?.status === 500
+      ? 'Could not save — the name may already be taken.'
+      : describeApiError(err, {
+          service: 'Books service',
+          outcome: 'the book was not saved.',
+        }))
+    if (saved) {
       onSaved()
-      dialogRef.current?.close()
-    } catch (err) {
-      setSubmitError(
-        err?.status === 500
-          ? 'Could not save — the name may already be taken.'
-          : describeApiError(err, {
-              service: 'Books service',
-              outcome: 'the book was not saved.',
-            }),
-      )
-    } finally {
-      setPending(false)
+      close()
     }
   }
 
@@ -106,9 +96,7 @@ export default function BookFormDialog({ bookId = null, onSaved, onClose }) {
       className="form-dialog"
       aria-labelledby="book-form-title"
       onClose={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) event.currentTarget.close()
-      }}
+      onClick={closeOnBackdrop}
     >
       <article className="form-dialog__surface">
         <header className="form-dialog__head">
@@ -122,7 +110,7 @@ export default function BookFormDialog({ bookId = null, onSaved, onClose }) {
             className="form-dialog__close"
             aria-label="Close book form"
             autoFocus
-            onClick={() => dialogRef.current?.close()}
+            onClick={close}
           >
             ×
           </button>

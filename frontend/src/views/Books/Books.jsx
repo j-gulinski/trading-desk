@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { usePolling } from '../../hooks/usePolling.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { apiDelete, apiGet } from '../../services/apiClient.js'
@@ -62,22 +62,6 @@ export default function Books() {
       (!activeClass || book.assetClass === activeClass) &&
       (!search || book.name.toLowerCase().includes(search)),
   )
-  const openTrades = usePolling(
-    ({ signal }) =>
-      expandedId == null
-        ? Promise.resolve(null)
-        : apiGet(endpoints.blotter.trades({ book_id: expandedId, status: 'ACTIVE' }), { signal })
-            .then((trades) => ({ bookId: expandedId, trades })),
-    { intervalMs: BOOK_SUMMARY_POLL_INTERVAL_MS },
-  )
-  const refetchOpenTrades = openTrades.refetch
-  useEffect(() => {
-    if (expandedId != null) refetchOpenTrades()
-  }, [expandedId, refetchOpenTrades])
-
-  const positions =
-    openTrades.data?.bookId === expandedId ? bookPositionsOf(openTrades.data.trades, now) : []
-
   const target = dialog?.bookId ? allBooks.find((book) => book.id === dialog.bookId) : null
   const unavailable = summary.error != null && summary.data == null
 
@@ -114,7 +98,7 @@ export default function Books() {
             key={book.id}
             book={book}
             expanded={expandedId === book.id}
-            positions={expandedId === book.id ? positions : []}
+            positions={expandedId === book.id ? bookPositionsOf(book, now) : []}
             onToggleExpand={() =>
               setExpandedId((current) => (current === book.id ? null : book.id))
             }
@@ -131,10 +115,10 @@ export default function Books() {
     <section className="page">
       <div className="books-header">
         <span className="books-header__meta">
-          {formatNumber(totals.books)} books · {formatNumber(totals.openPositions)} open positions
+          {formatNumber(totals.books)} books 
           {deactivatedCount > 0 && !includeDeactivated
             ? ` · ${formatNumber(deactivatedCount)} deactivated hidden`
-            : ''}
+            : ''} · {formatNumber(totals.openPositions)} open positions
         </span>
         <button
           type="button"
