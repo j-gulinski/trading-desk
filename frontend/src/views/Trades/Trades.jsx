@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useValuationFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
+import { STORAGE_KEYS } from '../../config/storage.js'
 import { usePolling } from '../../hooks/usePolling.js'
 import { useTableState } from '../../hooks/useTableState.js'
 import { apiGet } from '../../services/apiClient.js'
@@ -10,7 +11,6 @@ import {
   DEFAULT_TRADE_COLUMNS,
   DEFAULT_TRADE_SORT,
   TRADE_COLUMNS,
-  TRADE_COLUMNS_STORAGE_KEY,
   TRADE_FALLBACK_SORT,
   TRADE_HISTORY_FETCH_LIMIT,
   TRADE_PAGE_SIZE,
@@ -37,6 +37,7 @@ import EmptyState from '../../components/EmptyState.jsx'
 import TradeStatusTabs from '../../components/trades/TradeStatusTabs.jsx'
 import TradeTable from '../../components/trades/TradeTable.jsx'
 import TradeDetail from './TradeDetail.jsx'
+import { PANEL_ID, usePanelCoordinator } from '../../layout/panelContext.js'
 
 const INITIAL_FILTERS = { lifecycle: 'BOTH', book: null, assetClass: null, query: '' }
 
@@ -57,6 +58,7 @@ function emptyTableMessage({ snapshot, rows, lifecycleRows, lifecycle }) {
 
 export default function Trades() {
   const { valuations, status, seedStatus } = useValuationFeedContext()
+  const { activePanel, openPanel, closePanel } = usePanelCoordinator()
   const { now } = useElapsedTime()
   const snapshot = usePolling(
     async ({ signal }) => {
@@ -72,6 +74,20 @@ export default function Trades() {
   const [selectedTradeId, setSelectedTradeId] = useState(null)
   const [page, setPage] = useState(0)
   const { lifecycle, query } = filters
+
+  useEffect(() => {
+    if (selectedTradeId != null && activePanel !== PANEL_ID.tradeDetail) setSelectedTradeId(null)
+  }, [activePanel, selectedTradeId])
+
+  function selectTrade(tradeId) {
+    setSelectedTradeId(tradeId)
+    openPanel(PANEL_ID.tradeDetail)
+  }
+
+  function closeTradeDetail() {
+    setSelectedTradeId(null)
+    closePanel(PANEL_ID.tradeDetail)
+  }
 
   function updateFilters(patch) {
     const [changed] = Object.keys(patch)
@@ -96,7 +112,7 @@ export default function Trades() {
 
   const table = useTableState({
     columns: TRADE_COLUMNS,
-    storageKey: TRADE_COLUMNS_STORAGE_KEY,
+    storageKey: STORAGE_KEYS.tradeColumns,
     defaultVisibleColumns: DEFAULT_TRADE_COLUMNS,
     defaultSort: DEFAULT_TRADE_SORT,
     fallbackSort: TRADE_FALLBACK_SORT,
@@ -129,7 +145,7 @@ export default function Trades() {
         table={table}
         rows={visibleRows}
         selectedTradeId={selectedTradeId}
-        onSelect={setSelectedTradeId}
+        onSelect={selectTrade}
         caption={`${lifecycleLabel} trades with live valuation and PnL`}
       />
     ) : (
@@ -260,12 +276,12 @@ export default function Trades() {
         {tableContent}
       </section>
 
-      {selectedRow && (
+      {activePanel === PANEL_ID.tradeDetail && selectedRow && (
         <TradeDetail
           key={selectedRow.trade.id}
           row={selectedRow}
           bookNames={bookNames}
-          onClose={() => setSelectedTradeId(null)}
+          onClose={closeTradeDetail}
         />
       )}
     </section>

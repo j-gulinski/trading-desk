@@ -42,7 +42,9 @@ export default function BusinessOverview() {
         ? 'Connecting to the valuation stream…'
         : status === 'RECONNECTING'
           ? 'Valuation stream unavailable — retrying.'
-          : 'No trades are being valued yet.'
+          : status === 'SUSPENDED'
+            ? 'Valuations paused while this tab is in the background.'
+            : 'No trades are being valued yet.'
 
   return (
     <section className="page">

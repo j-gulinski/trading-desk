@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { useValuationFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { useTableState } from '../../hooks/useTableState.js'
+import { STORAGE_KEYS } from '../../config/storage.js'
 import {
   DEFAULT_VALUATION_SORT,
   MAX_RENDERED_ROWS,
   VALUATION_COLUMNS,
-  VALUATION_COLUMNS_STORAGE_KEY,
   VALUATION_FALLBACK_SORT,
 } from '../../config/valuations.js'
 import {
@@ -51,7 +51,7 @@ export default function Valuations() {
 
   const table = useTableState({
     columns: VALUATION_COLUMNS,
-    storageKey: VALUATION_COLUMNS_STORAGE_KEY,
+    storageKey: STORAGE_KEYS.valuationColumns,
     defaultSort: DEFAULT_VALUATION_SORT,
     fallbackSort: VALUATION_FALLBACK_SORT,
     captureSnapshot: (column) => captureValuationSnapshot(openRows, column),
@@ -102,6 +102,8 @@ export default function Valuations() {
     tableContent = <EmptyState message="Connecting to the valuation stream…" />
   } else if (status === 'RECONNECTING') {
     tableContent = <EmptyState message="Valuation stream unavailable — retrying." />
+  } else if (status === 'SUSPENDED') {
+    tableContent = <EmptyState message="Valuations paused while this tab is in the background." />
   } else {
     tableContent = <EmptyState message="No open positions are being valued right now." />
   }

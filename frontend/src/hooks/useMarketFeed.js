@@ -3,6 +3,7 @@ import { apiGet } from '../services/apiClient.js'
 import { endpoints } from '../services/endpoints.js'
 import { useBufferedUpdates } from './useBufferedUpdates.js'
 import { useSseStream } from './useSseStream.js'
+import { STORAGE_KEYS } from '../config/storage.js'
 import { useStreamSeed } from './useStreamSeed.js'
 import { STREAM_EVENTS } from '../config/marketData.js'
 import {
@@ -13,12 +14,10 @@ import {
   restoreInstruments,
 } from '../domain/marketData.js'
 
-const TICK_COUNT_STORAGE_KEY = 'market-data.tick-count'
-const MARKET_STATE_STORAGE_KEY = 'market-data.feed-state'
 
 function readStoredTickCount() {
   try {
-    const stored = Number(window.sessionStorage.getItem(TICK_COUNT_STORAGE_KEY))
+    const stored = Number(window.sessionStorage.getItem(STORAGE_KEYS.marketTickCount))
     return Number.isSafeInteger(stored) && stored >= 0 ? stored : 0
   } catch {
     return 0
@@ -27,7 +26,7 @@ function readStoredTickCount() {
 
 function storeTickCount(count) {
   try {
-    window.sessionStorage.setItem(TICK_COUNT_STORAGE_KEY, String(count))
+    window.sessionStorage.setItem(STORAGE_KEYS.marketTickCount, String(count))
   } catch {
     return
   }
@@ -35,7 +34,7 @@ function storeTickCount(count) {
 
 function readStoredInstruments() {
   try {
-    const stored = window.sessionStorage.getItem(MARKET_STATE_STORAGE_KEY)
+    const stored = window.sessionStorage.getItem(STORAGE_KEYS.marketFeedState)
     return restoreInstruments(stored ? JSON.parse(stored) : null)
   } catch {
     return {}
@@ -45,7 +44,7 @@ function readStoredInstruments() {
 function storeInstruments(instruments) {
   try {
     window.sessionStorage.setItem(
-      MARKET_STATE_STORAGE_KEY,
+      STORAGE_KEYS.marketFeedState,
       JSON.stringify(instrumentsForStorage(instruments)),
     )
   } catch {

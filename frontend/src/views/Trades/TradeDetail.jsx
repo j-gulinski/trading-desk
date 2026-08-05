@@ -6,7 +6,7 @@ import { normalizeAuditEvents } from '../../domain/auditEvents.js'
 import { tradeDetailOf } from '../../domain/trades.js'
 import { buildCloseTradeIntent } from '../../domain/tradeActions.js'
 import { BLOTTER_POLL_INTERVAL_MS } from '../../config/trades.js'
-import TradeDetailDialog from '../../components/trades/TradeDetailDialog.jsx'
+import TradeDetailPanel from '../../components/trades/TradeDetailPanel.jsx'
 
 const CLOSE_STALL_MS = 15000
 
@@ -52,7 +52,7 @@ export default function TradeDetail({ row, bookNames, onClose }) {
   }
 
   return (
-    <TradeDetailDialog
+    <TradeDetailPanel
       row={row}
       detail={detailData}
       auditEvents={normalizeAuditEvents(detail.data?.audit_logs)}

@@ -78,6 +78,5 @@ export const DEFAULT_VALUATION_SORT = { column: 'unrealized', direction: 'desc' 
 
 export const VALUATION_FALLBACK_SORT = { column: 'trade', direction: 'asc' }
 
-export const VALUATION_COLUMNS_STORAGE_KEY = 'valuations.visible-columns'
 
 export const ALPHA_BETA_UNAVAILABLE = 'Pricing does not publish book alpha/beta yet'

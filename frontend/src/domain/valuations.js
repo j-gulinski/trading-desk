@@ -57,7 +57,7 @@ export function valuationsFromSeed(seed) {
     .map((valuation) => ({ ...valuation, receivedAtMs }))
 }
 
-export function mergeValuation(previous, update) {
+function mergeValuation(previous, update) {
   if (previous?.closed) return previous
   if (update.closed) return update
 
@@ -104,70 +104,6 @@ function singleCurrencyOf(rows) {
     else if (currency !== rowCurrency) return null
   }
   return currency
-}
-
-export function positionsOf(rows) {
-  const positions = new Map()
-
-  for (const row of rows) {
-    const { valuation } = row
-    if (valuation.closed) continue
-
-    const key = `${valuation.bookId}::${valuation.symbol}`
-    let position = positions.get(key)
-    if (!position) {
-      position = {
-        id: key,
-        bookName: valuation.bookName ?? formatShortId(valuation.bookId),
-        symbol: valuation.symbol,
-        assetClass: valuation.assetClass,
-        currency: valuation.currency,
-        trades: 0,
-        netQuantity: 0,
-        grossQuantity: 0,
-        entryCost: 0,
-        marketValue: 0,
-        unrealizedPnl: 0,
-        notional: 0,
-        price: null,
-        live: 0,
-        stale: 0,
-        lastUpdateMs: null,
-      }
-      positions.set(key, position)
-    }
-
-    const quantity = valuation.signedQuantity
-    position.trades += 1
-    if (Number.isFinite(quantity)) {
-      position.netQuantity += quantity
-      position.grossQuantity += Math.abs(quantity)
-      if (Number.isFinite(valuation.entryPrice)) {
-        position.entryCost += Math.abs(quantity) * valuation.entryPrice
-      }
-    }
-    position.marketValue += (quantity < 0 ? -1 : 1) * (valuation.fairValue ?? 0)
-    position.unrealizedPnl += valuation.unrealizedPnl ?? 0
-    position.notional += valuation.notional ?? 0
-    if (row.status === 'LIVE') position.live += 1
-    else position.stale += 1
-
-    const seenAt = valuation.receivedAtMs
-    if (seenAt != null && (position.lastUpdateMs == null || seenAt >= position.lastUpdateMs)) {
-      position.lastUpdateMs = seenAt
-      position.price = valuation.price
-    }
-  }
-
-  return Array.from(positions.values())
-    .map((position) => ({
-      ...position,
-      averageEntry: position.grossQuantity > 0 ? position.entryCost / position.grossQuantity : null,
-      returnPercent:
-        position.notional > 0 ? (position.unrealizedPnl / position.notional) * 100 : null,
-      status: position.stale > 0 ? 'STALE' : 'LIVE',
-    }))
-    .sort((a, b) => a.bookName.localeCompare(b.bookName) || a.symbol.localeCompare(b.symbol))
 }
 
 function accumulate(target, row) {

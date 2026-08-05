@@ -22,14 +22,13 @@ import { formatClockTime, formatNumber } from '../../domain/formatting.js'
 import StatCard from '../../components/cards/StatCard.jsx'
 import StreamHeader from '../../components/status/StreamHeader.jsx'
 import FilterBar from '../../components/filters/FilterBar.jsx'
+import { STORAGE_KEYS } from '../../config/storage.js'
 import EmptyState from '../../components/EmptyState.jsx'
 import ColumnPicker from '../../components/tables/ColumnPicker.jsx'
 import SortCaptureStatus from '../../components/tables/SortCaptureStatus.jsx'
 import MarketTable from '../../components/marketdata/MarketTable.jsx'
 import MarketIndexCard from '../../components/marketdata/MarketIndexCard.jsx'
 
-const MARKET_COLUMNS_STORAGE_KEY = 'market-data.visible-columns'
-const CURVE_COLUMNS_STORAGE_KEY = 'market-data.curve-visible-columns'
 const BENCHMARK_ID = 'MARKET_INDEX'
 
 const marketColumnById = new Map(MARKET_COLUMNS.map((column) => [column.id, column]))
@@ -61,7 +60,7 @@ export default function MarketData() {
 
   const marketTable = useTableState({
     columns: MARKET_COLUMNS,
-    storageKey: MARKET_COLUMNS_STORAGE_KEY,
+    storageKey: STORAGE_KEYS.marketColumns,
     defaultSort: DEFAULT_MARKET_SORT,
     fallbackSort: MARKET_FALLBACK_SORT,
     captureSnapshot: (column, capturedAt) =>
@@ -71,7 +70,7 @@ export default function MarketData() {
 
   const curveTable = useTableState({
     columns: CURVE_COLUMNS,
-    storageKey: CURVE_COLUMNS_STORAGE_KEY,
+    storageKey: STORAGE_KEYS.curveColumns,
     defaultSort: DEFAULT_CURVE_SORT,
     captureSnapshot: (column, capturedAt) =>
       captureMarketSnapshot(curveRows, column, capturedAt),
@@ -112,6 +111,8 @@ export default function MarketData() {
       content = <EmptyState message="Connecting to market data…" />
     } else if (status === 'RECONNECTING') {
       content = <EmptyState message="Market data stream unavailable — retrying." />
+    } else if (status === 'SUSPENDED') {
+      content = <EmptyState message="Market data paused while this tab is in the background." />
     } else {
       content = <EmptyState message="No instruments published yet." />
     }

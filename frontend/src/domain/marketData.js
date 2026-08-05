@@ -96,7 +96,7 @@ export function instrumentsFromSnapshot(snapshot) {
   return [...spots, ...curves]
 }
 
-export function mergeInstrument(prev, update) {
+function mergeInstrument(prev, update) {
   let sourceRestarted = false
 
   if (prev) {

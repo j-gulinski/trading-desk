@@ -17,7 +17,11 @@ export function useSseStream(url, { events = ['message'], onEvent } = {}) {
     let reconnectTimer
     let stopped = false
 
-    setStatus(STREAM_STATUS.connecting)
+    function disconnect() {
+      clearTimeout(reconnectTimer)
+      source?.close()
+      source = undefined
+    }
 
     function connect() {
       const current = new EventSource(url)
@@ -29,7 +33,7 @@ export function useSseStream(url, { events = ['message'], onEvent } = {}) {
       })
 
       current.addEventListener('error', () => {
-        if (stopped || failed) return
+        if (stopped || failed || current !== source || document.hidden) return
         failed = true
         current.close()
         setStatus(STREAM_STATUS.reconnecting)
@@ -49,12 +53,29 @@ export function useSseStream(url, { events = ['message'], onEvent } = {}) {
       }
     }
 
-    connect()
+    function handleVisibility() {
+      if (stopped) return
+      if (document.hidden) {
+        disconnect()
+        setStatus(STREAM_STATUS.suspended)
+      } else if (source == null) {
+        setStatus(STREAM_STATUS.connecting)
+        connect()
+      }
+    }
+
+    if (document.hidden) {
+      setStatus(STREAM_STATUS.suspended)
+    } else {
+      setStatus(STREAM_STATUS.connecting)
+      connect()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
 
     return () => {
       stopped = true
-      clearTimeout(reconnectTimer)
-      source?.close()
+      document.removeEventListener('visibilitychange', handleVisibility)
+      disconnect()
     }
   }, [url, eventNames])
 

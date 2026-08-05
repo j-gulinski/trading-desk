@@ -661,7 +661,38 @@ a reassignment looks like it silently failed until the service restarts.
   - The **market tick** generator needs no change: it is already a mean-reverting Gaussian walk at
     ~0.065%/tick with realistic tick sizes and spreads. The prices were never the unrealistic part.
 
-### Phase 6c — UI states, streams badge, config persistence
+### Phase 6c — UI states, streams badge, config persistence ✅ (built and verified)
+
+- **Outcome:** all five overlays became one push-aside `SidePanel` (the trade detail gained tabs),
+  the sidebar collapses to icons with the streams badge, and a hidden tab releases its two SSE
+  connections. Built in the fixed order below, each unit verified before the next.
+- **Full detail:** `docs/phase-6c-notes.md` — including the required nine-states × views matrix.
+
+**Contracts and rules later phases inherit**
+
+- **One panel at a time, five callers.** Any new drawer uses `components/panel/SidePanel.jsx` and
+  claims an id through `layout/panelContext.js`; `AppShell` unmounts the previous caller first. The
+  push still comes from `.content:has(.side-panel)` in CSS, so layout does not need lifting into
+  shell state. A panel that omits the class gets no push.
+- **Non-modal panels own their chrome.** `usePanelChrome` supplies Escape, focus-in, focus return to
+  the trigger, and a Tab trap. Anything that opens a panel must be focusable — table rows now are.
+- **`SUSPENDED` is a real stream status.** A hidden tab closes its `EventSource` and reports
+  `SUSPENDED`; returning to visible reconnects *and re-seeds* through `useStreamSeed`. Any new view
+  branching on stream status must handle it rather than fall through to "no data".
+- **One storage-key scheme:** `STORAGE_KEYS` in `config/storage.js`, `<area>.<thing>`. Durable view
+  preferences (columns, sidebar) in `localStorage`; transient session state (market snapshot, tick
+  count) in `sessionStorage`. **Filters, tab selection and page size are deliberately not
+  persisted** — a filter that survives a reload reads as missing data.
+- **Class names track what a thing is.** `form-dialog__*` became `panel-form__*` when the dialogs
+  stopped being dialogs; `_form-dialog.scss` is gone.
+
+**Honest gap carried forward:** the three-tab connection fix could not be verified end to end —
+Playwright reports every page as visible, so background tabs never fire `visibilitychange`. The
+mechanism was verified by dispatching the event directly. **One manual three-tab check in Chrome is
+outstanding.**
+
+#### Original plan (as approved)
+
 - **Goal:** finish the UI-state sweep, add the global streams badge, settle config persistence.
 - **Scope:** the bottom-left `2 / 2 streams · connected` badge (deferred since Phase 3, present in
   every mockup); every view checked against the nine states listed in the conventions above;

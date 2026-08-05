@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { STREAM_STATUS } from '../config/stream.js'
 
 export function useStreamSeed(status, load) {
   const [seedStatus, setSeedStatus] = useState('loading')
@@ -25,9 +26,11 @@ export function useStreamSeed(status, load) {
   useEffect(runSeed, [runSeed])
 
   useEffect(() => {
-    const reconnected = previousStatusRef.current === 'RECONNECTING' && status === 'CONNECTED'
+    const wasInterrupted =
+      previousStatusRef.current === STREAM_STATUS.reconnecting ||
+      previousStatusRef.current === STREAM_STATUS.suspended
     previousStatusRef.current = status
-    return reconnected ? runSeed() : undefined
+    return wasInterrupted && status === STREAM_STATUS.connected ? runSeed() : undefined
   }, [status, runSeed])
 
   return seedStatus

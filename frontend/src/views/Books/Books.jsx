@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePolling } from '../../hooks/usePolling.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { apiDelete, apiGet } from '../../services/apiClient.js'
@@ -14,11 +14,12 @@ import { describeApiError } from '../../domain/apiErrors.js'
 import { countOptions } from '../../domain/filters.js'
 import { formatNumber } from '../../domain/formatting.js'
 import EmptyState from '../../components/EmptyState.jsx'
-import ConfirmDialog from '../../components/ConfirmDialog.jsx'
+import ConfirmPanel from '../../components/panel/ConfirmPanel.jsx'
 import FilterBar from '../../components/filters/FilterBar.jsx'
 import BookCard from '../../components/books/BookCard.jsx'
-import BookFormDialog from '../../components/books/BookFormDialog.jsx'
-import MoveTradesDialog from '../../components/books/MoveTradesDialog.jsx'
+import BookFormPanel from '../../components/books/BookFormPanel.jsx'
+import MoveTradesPanel from '../../components/books/MoveTradesPanel.jsx'
+import { PANEL_ID, usePanelCoordinator } from '../../layout/panelContext.js'
 
 function describeDeleteError(error) {
   if (error?.status === 409) {
@@ -44,9 +45,10 @@ export default function Books() {
     { intervalMs: BOOK_SUMMARY_POLL_INTERVAL_MS },
   )
   const { now } = useElapsedTime()
+  const { activePanel, openPanel, closePanel: closeActivePanel } = usePanelCoordinator()
 
   const [expandedId, setExpandedId] = useState(null)
-  const [dialog, setDialog] = useState(null)
+  const [panel, setPanel] = useState(null)
   const [notice, setNotice] = useState(null)
   const [activeClass, setActiveClass] = useState(null)
   const [query, setQuery] = useState('')
@@ -62,13 +64,23 @@ export default function Books() {
       (!activeClass || book.assetClass === activeClass) &&
       (!search || book.name.toLowerCase().includes(search)),
   )
-  const target = dialog?.bookId ? allBooks.find((book) => book.id === dialog.bookId) : null
+  const target = panel?.bookId ? allBooks.find((book) => book.id === panel.bookId) : null
   const unavailable = summary.error != null && summary.data == null
 
   function openAction(type, book) {
     setNotice(null)
-    setDialog({ type, bookId: book.id })
+    setPanel({ type, bookId: book.id })
+    openPanel(PANEL_ID.books)
   }
+
+  function closeBooksPanel() {
+    setPanel(null)
+    closeActivePanel(PANEL_ID.books)
+  }
+
+  useEffect(() => {
+    if (panel != null && activePanel !== PANEL_ID.books) setPanel(null)
+  }, [activePanel, panel])
 
   function acknowledge(message) {
     setNotice(message)
@@ -125,7 +137,8 @@ export default function Books() {
           className="books-button books-button--accent"
           onClick={() => {
             setNotice(null)
-            setDialog({ type: 'create' })
+            setPanel({ type: 'create' })
+            openPanel(PANEL_ID.books)
           }}
         >
           + Create book
@@ -169,25 +182,25 @@ export default function Books() {
 
       {content}
 
-      {(dialog?.type === 'create' || dialog?.type === 'edit') && (
-        <BookFormDialog
-          bookId={dialog.type === 'edit' ? dialog.bookId : null}
+      {activePanel === PANEL_ID.books && (panel?.type === 'create' || panel?.type === 'edit') && (
+        <BookFormPanel
+          bookId={panel.type === 'edit' ? panel.bookId : null}
           onSaved={summary.refetch}
-          onClose={() => setDialog(null)}
+          onClose={closeBooksPanel}
         />
       )}
 
-      {dialog?.type === 'move' && target != null && (
-        <MoveTradesDialog
+      {activePanel === PANEL_ID.books && panel?.type === 'move' && target != null && (
+        <MoveTradesPanel
           book={target}
           targets={moveTargetsOf(allBooks, target)}
           onAccepted={acknowledge}
-          onClose={() => setDialog(null)}
+          onClose={closeBooksPanel}
         />
       )}
 
-      {dialog?.type === 'delete' && target != null && (
-        <ConfirmDialog
+      {activePanel === PANEL_ID.books && panel?.type === 'delete' && target != null && (
+        <ConfirmPanel
           eyebrow="BOOKS"
           title="Delete book"
           subtitle={target.name}
@@ -206,7 +219,7 @@ export default function Books() {
             acknowledge(`${target.name} deleted.`)
           }}
           describeError={describeDeleteError}
-          onClose={() => setDialog(null)}
+          onClose={closeBooksPanel}
         />
       )}
     </section>

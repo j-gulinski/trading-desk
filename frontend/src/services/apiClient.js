@@ -1,6 +1,6 @@
 import { WRITE_TIMEOUT_MS } from '../config/api.js'
 
-export class ApiError extends Error {
+class ApiError extends Error {
   constructor(message, { path, status = null, cause = null, body = null } = {}) {
     super(message)
     this.name = 'ApiError'

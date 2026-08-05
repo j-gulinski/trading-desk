@@ -57,7 +57,7 @@ function snapshotValuationOf(data, trade) {
   }
 }
 
-export function tradeOf(data, bookNames = new Map()) {
+function tradeOf(data, bookNames = new Map()) {
   if (!data || typeof data.trade_id !== 'string' || data.trade_id.length === 0) return null
 
   const status = String(data.status ?? 'UNKNOWN').toUpperCase()
@@ -216,7 +216,7 @@ export function sortTradeRows(rows, sort) {
   })
 }
 
-export function valuationHistoryOf(data) {
+function valuationHistoryOf(data) {
   if (!Array.isArray(data)) return []
   return data.map((valuation, index) => ({
     id: `${valuation.valuation_time ?? 'unknown'}:${index}`,

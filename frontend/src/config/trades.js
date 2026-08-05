@@ -112,5 +112,3 @@ export const DEFAULT_TRADE_COLUMNS = [
 export const DEFAULT_TRADE_SORT = { column: 'pnl', direction: 'desc' }
 
 export const TRADE_FALLBACK_SORT = { column: 'trade', direction: 'asc' }
-
-export const TRADE_COLUMNS_STORAGE_KEY = 'trades.visible-columns'
