@@ -5,14 +5,12 @@ const LABEL = {
   [STREAM_STATUS.connected]: 'connected',
   [STREAM_STATUS.connecting]: 'connecting',
   [STREAM_STATUS.reconnecting]: 'reconnecting',
-  [STREAM_STATUS.suspended]: 'paused · tab hidden',
 }
 
 function weakest(statuses) {
   const order = [
     STREAM_STATUS.reconnecting,
     STREAM_STATUS.connecting,
-    STREAM_STATUS.suspended,
     STREAM_STATUS.connected,
   ]
   return order.find((status) => statuses.includes(status)) ?? STREAM_STATUS.connecting

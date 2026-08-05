@@ -1,7 +1,7 @@
 ---
 phase: 1
 status: complete
-revised: 2026-08-03
+revised: 2026-08-05
 tags:
   - frontend
   - shell
@@ -9,159 +9,105 @@ tags:
   - styles
 ---
 
-# Phase 1 notes — App shell
+# Phase 1 — what you should know
 
-## Phase outcome in one line
+This phase created the React single-page application, its navigation shell, and the styling rules
+that later screens reuse.
 
-A navigable dark-theme app shell — sidebar, top bar, eight placeholder pages — with routing,
-styling and composition patterns that every later phase builds on without revisiting.
+## 1. How the application starts
 
-## What was decided and why
+`index.html` contains one `<div id="root">`. `main.jsx` calls `createRoot(...).render(<App />)`, so
+React owns everything inside that element. Navigation changes React state; it does not load another
+HTML page.
 
-### 1) Hand-rolled hash routing instead of react-router
+`StrictMode` is enabled in development. It deliberately repeats setup and cleanup to expose effects
+that leak listeners, timers, or network connections.
 
-The real fork of this phase. react-router would work, but it hides exactly the mechanics this
-project is meant to teach: what a route *is*, how the browser's `hashchange` event drives
-re-render, why refresh and back/forward keep working. `useHashRoute` is ~20 lines and the whole
-"router engine" stays inspectable. The cost — no nested routes, no loaders — is nothing this app
-needs. Hash-based (`#/market-data`) over the History API because it needs zero server
-configuration: the server always serves one `index.html` and the fragment never reaches it.
+## 2. Routing is deliberately small
 
-### 2) One route registry that feeds both the menu and the router
+The application uses hash URLs such as `#/market-data`. `useHashRoute`:
 
-`routes/routes.js` is the single source of truth; `Sidebar` and `App` both read it. The
-alternative — a menu array here, a route switch there — is how menus and routing drift apart.
-Unknown paths fall back to the first route rather than a 404 page, which is the right behavior
-for an internal dashboard.
+1. reads `window.location.hash`;
+2. stores the current path in React state;
+3. listens for the browser's `hashchange` event;
+4. removes the listener when the hook unmounts.
 
-### 3) Design tokens as CSS custom properties, not SCSS variables
+Hash routing needs no server fallback configuration because the fragment after `#` is handled only
+by the browser. Back, forward, and refresh still work. A larger router was unnecessary because the
+application does not need nested routes or route loaders.
 
-`--bg-app`, `--accent`, `--sp-*` are runtime CSS values, so components written in any later phase
-reference them with `var(--…)` without importing anything, and a future theme switch would be one
-root-level override. SCSS still provides the file structure (partials, `@use`), but the *values*
-live in the browser.
+`routes/routes.js` is the single route registry. Both `App` and `Sidebar` read it, preventing the
+menu and rendered pages from drifting apart. Unknown paths fall back to the first route.
 
-### 4) All eight views stubbed up front
+## 3. The shell uses composition
 
-Every sidebar link works from day one, each page saying honestly that it is a placeholder. This
-sets the project's "honest UI" rule from the start — navigation is never a dead end, and each
-later phase replaces one stub with a real screen instead of also inventing shell wiring.
+```text
+App
+└── AppShell
+    ├── Sidebar
+    ├── TopBar
+    └── current page through children
+```
 
-## Suggested inspection order
+`App` chooses the route. `AppShell` only provides the frame and renders `{children}`. This is React
+**composition**: a reusable component owns structure while callers supply its content.
 
-Read the files in this order — it goes entry point → styling → routing → composition →
-content, which mirrors how the app is implemented.
+Data flows down through props. `TopBar` receives route metadata; `Sidebar` receives the active path.
+Keeping this direction predictable makes later state bugs easier to locate.
 
-1. **Boot** — `index.html` → `src/main.jsx`
-2. **Styles** — `styles/_variables.scss` → `styles/_layout.scss` → `styles/main.scss`
-3. **Routing foundation** — `routes/routes.js` → `hooks/useHashRoute.js`
-4. **The shell** — `App.jsx` → `layout/AppShell.jsx` → `layout/Sidebar.jsx` → `layout/TopBar.jsx`
-5. **The pages** — `components/PagePlaceholder.jsx` → `views/*/*.jsx`
+## 4. Styling has a token layer
 
----
+Theme values such as colors, spacing, widths, and fonts are CSS custom properties:
 
-## 1. Boot
+```css
+color: var(--text-primary);
+gap: var(--sp-4);
+```
 
-**`index.html` — the single entry point**
-One empty `<div id="root">` and a script tag loading `main.jsx`. A React app is a
-single-page app: the browser loads one HTML file and everything else is JavaScript
-rendering into that one div.
+The values remain available at browser runtime and can be overridden by a future theme. SCSS is
+used only to organize partial files with `@use`.
 
-**`src/main.jsx` — React boot**
-`createRoot(document.getElementById('root')).render(<App/>)` is the handoff from HTML to
-React — it mounts `App` into the root div. `import './styles/main.scss'` once here applies
-global styles to the whole document. `<StrictMode>` is a dev-only wrapper that
-double-invokes effects to help catch bugs. This is the top of the execution flow.
+The shell is a flex layout: Sidebar beside the flexible content column. `min-width: 0` on the
+content column is important—it allows later wide tables to scroll inside the page instead of
+forcing the entire application wider than the viewport.
 
-## 2. Styles
+## 5. The reusable hook pattern begins here
 
-**`styles/_variables.scss` — design tokens**
-The dark theme as CSS custom properties (`--bg-app`, `--accent`, `--pos`, spacing, fonts,
-`--sidebar-width`). Change a color here and it ripples everywhere. Read this first among
-the styles — everything else references these `var(--…)`.
+`useHashRoute` establishes the lifecycle used by later hooks:
 
-**`styles/_layout.scss` — the shell layout**
-Structural CSS only. `.app-shell { display:flex }` puts sidebar and content side by side;
-`.sidebar` is `position: sticky` so it stays while `.content` (`flex:1; min-width:0`)
-scrolls. `min-width:0` is the subtle one — it lets wide tables scroll later instead of
-blowing out the layout. Active-link styling lives here (`.sidebar__link--active`).
+```text
+read current external value
+→ subscribe in useEffect
+→ update React state when it changes
+→ unsubscribe in effect cleanup
+```
 
-**`styles/main.scss` — style entry**
-`@use "variables"` then `@use "layout"` pulls the partials in, then base resets
-(`box-sizing`, body background/font, scrollbars). Underscore-prefixed files are SCSS
-*partials* — they only compile when `@use`d from here.
+Later polling, SSE, clocks, and panel listeners follow the same ownership rule: the effect that
+acquires an external resource must release it.
 
-## 3. Routing foundation
+## Mental model
 
-**`routes/routes.js` — the route registry (the spine)**
-The single source of truth: an array of `{ path, label, subtitle, group, component }`.
-Both the sidebar and the router read it, so the menu and routing can never disagree (DRY).
-`findRoute(path)` looks up a route and falls back to the first (home) view for unknown
-paths. Read this before the components — they all depend on it.
+```text
+index.html
+  └── main.jsx
+      └── App: hash path → route registry → page component
+          └── AppShell: Sidebar + TopBar + page
 
-**`hooks/useHashRoute.js` — the router mechanism**
-A custom hook. `readPath()` strips `#/` off `window.location.hash` (`#/market-data` →
-`"market-data"`). The `useEffect` subscribes to the browser's `hashchange` event and
-updates state so React re-renders on navigation; the cleanup removes the listener.
-Changing the hash never reloads the page, yet back/forward/refresh still work. This is the
-whole "router engine."
+styles/main.scss
+  └── tokens → layout → component styles
+```
 
-## 4. The shell
+## Current limits
 
-**`App.jsx` — wiring it together**
-Three lines of logic: `useHashRoute()` gives the current path → `findRoute()` maps it to a
-route → render `route.component` inside `<AppShell route={route}>`. This is the
-`path → route → component` pipeline. Everything above feeds into here.
+- Hash routing is intentionally flat; there are no nested routes or loaders.
+- Unknown routes return to the first screen instead of showing a dedicated 404 page.
+- Later phases replaced the original placeholder pages but kept this routing and composition model.
 
-**`layout/AppShell.jsx` — the frame**
-Composition in action: renders `<Sidebar>` + `<TopBar>` + `{children}`. It doesn't know
-*which* page shows — `App` passes the page as `children` and the active `route` as a prop.
-Data flows *down* via props. Reusable frame; routing logic stays in `App`.
+## Main files
 
-**`layout/Sidebar.jsx` — navigation rendering**
-Loops `GROUP_ORDER`, filters `ROUTES` by group, renders each as `<a href="#/path">`.
-`isActive = route.path === activePath` drives the highlight class. The links are plain
-anchors to hashes — that's what triggers `useHashRoute`. The `sidebar__spacer` div will
-later push the "streams connected" badge to the bottom.
-
-**`layout/TopBar.jsx` — header from route data**
-Pure presentation: reads `route.label` + `route.subtitle` for the title, plus the
-"New trade" button (styled placeholder, no handler yet). Shows one data source (the route)
-feeding multiple parts of the UI.
-
-## 5. The pages
-
-**`components/PagePlaceholder.jsx` + `views/*/*.jsx`**
-`PagePlaceholder` takes a `note` prop and renders it — write markup once, reuse with
-different data (props). Each of the 8 view files is a stub rendering `<PagePlaceholder>`
-with its own text. These are the real files we fill in phase by phase.
-
-## Concepts seen for the first time in this phase
-
-**A single-page app is one div.** The browser loads `index.html` once; everything after that is
-JavaScript rendering into `<div id="root">`. "Navigation" is state change, not page load — which
-is why it is instant, and why something (the hash, here) must make refresh and back/forward still
-mean something.
-
-**Composition and one-way data flow.** `App → AppShell → Sidebar/TopBar/page` — each component
-receives what it needs as props (or `children`) and knows nothing about its parent. `AppShell`
-does not know which page it frames. When a bug appears later, this direction is what makes it
-findable: data has exactly one path down.
-
-**A custom hook is a function that owns a subscription.** `useHashRoute` packages three things
-that always travel together: read the current value, subscribe to changes (`hashchange` →
-`setState` → re-render), and unsubscribe on cleanup. Every later hook in this project —
-`usePolling`, `useSseStream`, `useElapsedTime` — is this same shape with a different source.
-
-**`useEffect` cleanup is not optional.** The listener added on mount must be removed in the
-returned cleanup function, or every remount (and StrictMode's deliberate double-mount) leaks one
-listener. Phase 3 raises the stakes: the thing being cleaned up becomes a live network connection.
-
-**SCSS partials and the token layer.** Underscore files compile only when `@use`d from
-`main.scss`, giving a controlled load order: tokens first, structure second, resets last.
-Components never hard-code a color; they say `var(--accent)` and the theme stays swappable.
-
-**The flexbox shell and `min-width: 0`.** `display: flex` on the shell, `position: sticky` on the
-sidebar, `flex: 1` on the content. The non-obvious part: a flex child's default `min-width: auto`
-refuses to shrink below its content, so one wide table would stretch the whole app sideways —
-`min-width: 0` on the content column is what lets Phase 3's tables scroll inside it instead.
+- `frontend/src/main.jsx` — React boot.
+- `frontend/src/App.jsx` — path-to-page selection.
+- `frontend/src/routes/routes.js` — route registry.
+- `frontend/src/hooks/useHashRoute.js` — browser hash subscription.
+- `frontend/src/layout/AppShell.jsx` — shared application frame.
+- `frontend/src/styles/_variables.scss` and `_layout.scss` — tokens and shell layout.

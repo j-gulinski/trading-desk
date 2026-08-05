@@ -1,342 +1,149 @@
 ---
 phase: 5
 status: complete
-reviewed: 2026-07-30
+revised: 2026-08-05
 tags:
   - frontend
   - blotter
   - trades
   - pnl
   - trade-action
-  - valuations
-  - pagination
 ---
 
-# Phase 5 — Trades & PnL (teaching notes)
+# Phase 5 — what you should know
 
-This is the “how we got there” version: decisions, trade-offs, and the exact path for one trade row.
+This phase built the operational Trades & PnL blotter. It combines authoritative trade lifecycle
+data with live valuations and adds the first asynchronous write: closing a trade.
 
-## Phase outcome in one line
+## 1. Different sources keep different authority
 
-Phase 5 builds a practical operational blotter for discovery + close:
-- membership and lifecycle are owned by Blotter,
-- live marks are owned by the existing valuation stream from Phase 4,
-- per-trade investigation (history + audit + close action) is on-demand and polling.
-
-Net result: one screen that is fast, bounded, and consistent without adding duplicate stream infrastructure.
-
-## What was decided and why
-
-### 1) Stream is kept at app scope, polling at route scope
-
-There is only one valuation SSE connection in the app-wide provider (`FeedProvider`).  
-Trades screen adds route-local polling (`/trades/overview`) every 5 seconds.
-
-Why:
-- SSE is great for “fast moving values.”
-- Blotter row membership (`open/closed history`, lifecycle, close details) is authoritative in Blotter and is not a good fit for stream events.
-- Polling for one service and stream for another gives clear ownership; there is no event fan-in from two producers for the same membership state.
-
-### 2) Keep three freshness sources, not a second cache
-
-For a trade row, the app uses:
-- `row` data from Blotter poll (`tradeOf` projection),
-- valuation from live stream when available,
-- fallback valuation from Blotter snapshot when stream has no newer value.
-
-Why:
-- Live-only valuation would lose a value for rows not currently fed or during reconnect.
-- Snapshot-only valuation would never feel “live.”
-- Combined ownership preserves both correctness and responsiveness.
-
-### 3) Keep `Open / Both / Closed` as the lifecycle model
-
-Trade states are normalized to `OPEN` / `CLOSED` for display logic:
-- `CLOSED` means not-`ACTIVE` (includes `CANCELLED` for counting/presentation where intended).
-- `tradeRowsOf` computes `lifecycle` from poll state plus valuation terminal flags.
-
-Decision points:
-- Default is **Both**, because this aligns with the “blotter” mental model and the tab count usage in the header.
-- `Both` is valid and intentionally included because `Closed` in this phase means non-open history, not only final close events.
-
-### 4) Honest total counts are solved with `books/summary`
-
-`/trades?limit=250` is a window, not the full closed set.
-
-Count decision:
-- `open`: exact from loaded rows.
-- `closed`: `Math.max(summary.closed, closedTradeCountOf(books))`.
-
-Why this exists:
-- Prevents incorrect `250+` style labels.
-- Makes the `Closed` and `Both` tabs truthful while still keeping response size bounded.
-
-### 5) Close only in this phase; open/reopen deferred
-
-UI currently supports manual close:
-- `Close price` is taken from current row valuation price (not hand-entered).
-- `close_reason` is fixed to `MANUAL_CLOSE`.
-- close action uses `POST /api/trade-action/trade-actions` and waits for downstream state changes.
-
-Open/reopen requires extra workflow and permission semantics, so it is intentionally deferred.
-
-## Mental model: what owns what
+The screen intentionally uses both polling and streaming:
 
 ```text
-App shell:
-FeedProvider
- ├─ useValuationFeed -> ValuationFeedContext (tradeId -> live valuation)
- └─ useMarketFeed   -> MarketFeedContext (not used in Trades.jsx)
-
-Trades screen:
- ├─ usePolling(5s)   -> /blotter/trades/overview
- │                      -> members, status, counts, fallback valuation
- ├─ useElapsedTime(1s) -> freshness labeling only
- └─ useTableState     -> sorting, visible columns, captured snapshots
-
-Trade details (selected row):
- └─ usePolling(5s) -> /blotter/trades/{id}
-                        -> valuation history + audit for that one trade
+Blotter poll (5 s)     → membership, lifecycle, books, closed history, fallback values
+Valuation SSE context → current mark, fair value, live PnL
 ```
 
-## `useTableState` process flow (how sorting/states stay stable)
+Polling alone would make marks lag. Streaming alone would not provide complete membership and
+closed history. The screen derives rows from both without mutating either source.
 
-`Trades.jsx` passes two key inputs into `useTableState`:
-- columns schema (`TRADE_COLUMNS`)
-- `defaultVisibleColumns` for the compact default layout.
+For a value present in both places, terminal flags and valuation timestamps decide which wins. A
+stream value wins equal-time ties because it includes browser receipt time for freshness.
 
-Flow inside `useTableState`:
-
-1. **Initial visible columns**
-   - `readStoredPreference()` loads previous preference from localStorage if present.
-   - Current defaults are:
-     - required columns: always visible,
-     - optional columns: visible only if they are in `DEFAULT_TRADE_COLUMNS` or explicitly enabled by the user.
-   - Practical simplification for this phase: if you want a full reset on process restart, this migration branch can be removed in a follow-up; it remains mainly for backward-compatible preference preservation.
-   - New columns only appear when frontend schema/config changes and the bundle reloads (not from API payload changes).
-
-2. **Initial sort**
-   - Starts from configured default sort (`pnl desc`) if the column is visible; otherwise fallback sort.
-   - A snapshot field (`MARK/Fair/PNL/Return/Updated/Valuation`) starts with `snapshot: null`.
-
-3. **Snapshot capture**
-   - `sortTradeRows()` gets values from either `structuralValueOf` (trade fields) or `snapshotValueOf(row, sort.column)`.
-   - On first render with rows, if the current sort column is snapshot-based, `applySort()` captures one full-value snapshot map:
-     - `captureTradeSnapshot(rows, column)` stores row-by-row comparable values for that column.
-   - That snapshot becomes the basis for future order while the value keeps changing live.
-   - Result: if marks stream in and out, snapshot-driven columns keep deterministic ordering and avoid row jumping every tick.
-
-4. **User sort/visibility actions**
-   - Clicking header calls `toggleSort(column)`:
-     - flips direction or establishes default direction for that column,
-     - re-captures snapshot when needed.
-   - Hiding current sort column calls `applyDefaultSort(next)`.
-   - Reorder/toggle/reset only touch local column state, not trade data state.
-
-In short: `useTableState` only owns table projection settings (columns + sort config), not business data. That separation is what keeps stream churn and polling churn out of the sorting logic.
-
-## Trades pipeline (screen-level process flow)
+## 2. The row pipeline is derived at render time
 
 ```text
-usePolling poll callback
- └─ GET /blotter/trades/overview?limit=250
-      ├─ derive books + rows
-         └─ tradeRowsOf(rows, valuations, now)
-            ├─ value selection (stream vs snapshot)
-            ├─ lifecycle, valuationStatus, pnl
-            └─ returns trade rows
-               └─ summarizeTradeRows(rows) -> open/closed counts
-                  └─ closedTotal = max(summary.closed, closedTradeCountOf(books))
-                     └─ table tabs render counts
-               └─ matchesTradeFilters(...) across book/class/search
-               └─ sortTradeRows(..., table.sort)
-                  └─ visibleRows = page slice
-                     └─ TradeTable -> DataTable render
+/trades/overview snapshot + valuation context + current time
+→ normalize trades
+→ choose stream or snapshot value
+→ derive OPEN/CLOSED and valuation freshness
+→ filters
+→ captured sort
+→ 50-row page
+→ DataTable
 ```
 
-## One row path (the most important flow)
+Open rows display unrealized PnL; closed rows display realized PnL. Missing valuations become
+PENDING rather than fabricated zeroes.
 
-For each `/trades` poll row:
+`Open / Both / Closed` is the lifecycle filter, with Both as the default operational view. Closed
+counts use the book summary because the loaded trade response is only a bounded window. The page
+distinguishes total counts from currently loaded rows.
 
-1. `tradesFromSnapshot()` turns backend snake_case into frontend row objects.
-2. `tradeRowsOf(trades, valuations, now)`:
-   - choose value source:
-     - if stream valuation exists and is newer/equal-or-more-authoritative than snapshot, use it;
-     - else use snapshot value.
-   - compute lifecycle:
-     - not active => closed.
-   - compute valuation status:
-     - `CLOSED`/`CANCELLED` are terminal.
-     - otherwise `LIVE`/`STALE` by time rules, `PENDING` when missing value.
-   - pick `pnl`:
-     - open => unrealized,
-     - closed => realized.
-3. Table filters/sort/page derive from projected rows and visible settings.
-4. Selection triggers side-panel with `key=trade.id` so detail state remounts cleanly.
+## 3. `useTableState` owns presentation, not business data
 
-## Trade detail flow (drawer + detail endpoint)
+`useTableState` manages:
+
+- visible and ordered columns;
+- persisted column preferences;
+- active sort and direction;
+- captured comparison values for live-changing columns;
+- fallback sort when the active column is hidden.
+
+The trade objects and valuations stay outside the hook. Snapshot sorting keeps row order stable
+while marks and PnL continue changing inside cells.
+
+## 4. Detail data is loaded only when selected
+
+Selecting a trade opens the shared Phase 6c `SidePanel`. The list row is available immediately;
+`TradeDetail` separately polls `/trades/{id}` for valuation history and audit events.
 
 ```text
-user clicks trade row/button
- └─ Trades.jsx maps selectedTradeId and derives selectedRow from rows
-    └─ renders <TradeDetail key={selectedRow.trade.id} ... />
-       └─ TradeDetail poll starts immediately: GET /blotter/trades/{id} every 5s
-          ├─ tradeDetailOf(...) -> detail trade + valuationHistory
-          ├─ normalizeAuditEvents(...) -> events
-          ├─ buildCloseTradeIntent(...) when closing
-          └─ close action state:
-             - closeTrade() -> POST /api/trade-action/trade-actions
-             - close spinner + 15s stall timer
-             - clears automatically only when detail.trade.status changes from ACTIVE
-       └─ TradeDetailDialog consumes:
-          - current row fields (instant availability)
-          - detail snapshot fields (if available)
-          - row valuation for live mark display
-          - on close:
-             - detail panel closes => component unmounts
-             - polling is automatically aborted by effect cleanup
+selected list row
+  ├── immediate identity + live metrics
+  └── detail poll (5 s)
+      ├── persisted valuation history
+      └── audit trail
 ```
 
-One subtle but important pattern:
-- `TradeDetail` is recreated with `key={trade.id}` on selection changes.  
-  That guarantees poll timing and closing state are fresh for each trade, and stale status/spinner state cannot bleed across rows.
+Keying the detail session by trade ID resets its polling and close-action state when another trade
+is selected. Phase 6c suppresses the replacement entry animation, so switching rows changes content
+without visually closing and reopening the panel.
 
-## Value selection rule (stream vs snapshot) — in plain terms
+## 5. Closing is accepted first and confirmed later
 
-The row does not mutate the stream cache. It derives value at render time:
-- if stream has a value and snapshot has none → use stream
-- if snapshot has value and stream missing → use snapshot
-- if both have values → choose based on terminal flags and timestamps
-- tie case on equal valuation timestamps favors stream (it has browser receipt timing for freshness display)
+The frontend submits a `CLOSE_TRADE` intent with the current mark as `close_price` and a unique
+`client_request_id`.
 
-This is the same principle as Phase 4’s stream merge discipline but applied to list rows.
+```text
+click Confirm
+→ POST trade action
+→ 202 Accepted: queued, not completed
+→ worker closes the trade and writes audit
+→ pricing publishes terminal valuation
+→ blotter/detail poll observes non-ACTIVE status
+→ pending UI clears
+```
 
-## What refreshes what in list vs detail
+The UI does not pretend a `202` means the trade is already closed. It waits for authoritative state
+to change. A 15-second note reports a slow workflow without declaring failure.
 
-### Trades list
+`client_request_id` is idempotency/correlation metadata: retries can be recognized and the action
+can be traced across services.
 
-Re-renders when:
-- 5-second Blotter poll resolves (`trades`, `books`),
-- 500 ms/1-second stream clock updates valuation freshness and merged values,
-- local filter/sort/page/column selections change.
+## 6. A window is not an archive
 
-What is **not** in list state:
-- valuation history,
-- audit logs,
-- one-trade detail payload.
+- The overview loads a bounded recent trade set.
+- Pagination shows 50 rows at a time.
+- Search and filters operate on the loaded window.
+- Detail history is fetched only for the selected trade.
+- Summary endpoints provide totals the list window cannot know.
 
-### Trade detail drawer
+This keeps the dashboard responsive while being honest about what is loaded. Full historical
+navigation requires server-side pagination.
 
-Re-renders (and fetches) when:
-- selected trade changes (new `key` => remount),
-- `/trades/{id}` poll returns,
-- close action state changes (`closing`, `closeNote`).
+## Mental model
 
-It merges:
-- row identity from list (`row`) for instant UI,
-- detail payload for history/audit/closed_at/close price if available,
-- live metric display is still pulled from row, so mark/fair value updates stay current even while history is polling 5s.
+```text
+FeedProvider → ValuationFeedContext ───────────────┐
+                                                   ├── tradeRowsOf → Trades table
+Blotter /trades/overview poll ─────────────────────┘
 
-## Close action sequence (what you see and why)
+selected trade → /trades/{id} poll → SidePanel history + audit
 
-1. User confirms in panel.
-2. Frontend sends intent payload with:
-   - `action_type: CLOSE_TRADE`,
-   - `trade_id`,
-   - `close_price` (current mark from row),
-   - `client_request_id` for idempotency metadata.
-3. Trade-action service returns `202`; no immediate close in DB.
-4. Worker closes trade and emits audit (`TRADE_CLOSED`) or rejection.
-5. Pricing finalization turns that into final valuation (`final: true`) and publishes it.
-6. Blotter consumes the final valuation and drops cached active row for that id.
-7. Poll lists + detail catch the new status; close spinner clears only when detail confirms non-active status.
+Close button → trade-action queue → pricing finalization → blotter truth → UI confirmation
+```
 
-Why `close_price` came up in review:
-- without a price, close would use the fallback branch intended for “close all” automation and could compute realized PnL from stale/unrelated values.
+## Concepts to keep
 
-## Conversation-based decisions (directly from your questions)
+- **Source ownership:** poll lifecycle, stream live values, and derive the display from both.
+- **Confirmation by observation:** an asynchronous acknowledgement is not completion.
+- **Remount by key:** use identity to prevent state from leaking between selected records.
+- **On-demand detail:** keep expensive one-record history outside list state.
+- **Label populations honestly:** totals and loaded-window counts are different numbers.
 
-- **“Why not use only polling in trades?”**  
-  Polling remains for membership and lifecycle; stream remains for per-trade mark updates. Using only polling would make mark behavior laggy; using only stream would lose closed history and lifecycle accuracy.
+## Current limits
 
-- **“Why isn’t valuation table same as trades table?”**  
-  Different task shape: valuations is a fixed open-book ranking; trades is a paged operational table with open/closed history and close action.
+- Full closed-history navigation is not implemented.
+- Search and filters cover the loaded trade window, not the entire archive.
+- Manual close exists; reopen does not.
+- Close reason is fixed to `MANUAL_CLOSE`; optional price override is not exposed.
 
-- **“Should we remove stream from trade screen?”**  
-  Removing stream would remove live marks. The chosen compromise is: keep stream for marks, do not add any second stream or extra feed service.
+## Main files
 
-- **“Why both open/closed/defaults?”**  
-  `Both` is a valid filter for operational workflows and is kept as default so users can switch to context instantly.
-
-- **“Are open/closed tabs not working because both can be unselected?”**  
-  This implementation uses `aria-pressed` toggle style, not checkbox semantics. One tab is always active by current value and drives filtering.
-
-## Performance and scale boundary to remember
-
-- List is paged (50 rows/page), not full historical dump.
-- `/trades` closed branch is still windowed by backend limit.
-- Search and filters apply to loaded window only.
-- Detail fetch happens only on selection.
-- Poll and stream intervals are reused; no extra high-frequency loop added for this screen.
-
-## Concepts seen for the first time in this phase
-
-**The first write path — and confirmation by observation.** Closing a trade returns `202
-Accepted`: the queue took the intent, nothing has happened yet. The UI never fakes the outcome;
-the spinner clears only when the *detail poll* shows `status` leaving `ACTIVE` — the state change
-is observed, not assumed. Four services run between the click and that observation, and the
-screen's honesty does not depend on any of them being fast.
-
-**Idempotency metadata on writes.** Every intent carries a `client_request_id` generated at the
-call site. If a retry or a double-click ever submits twice, the backend can recognize the
-duplicate. Phase 6a later leaned on the same field for something unplanned: telling generated
-intents (`gen-` prefix) from manual ones in the audit trail — a reminder that correlation ids
-outlive their first purpose.
-
-**Remount-by-key as state hygiene.** `<TradeDetail key={trade.id}>` forces a full remount when
-the selection changes, so poll timing, close-pending state and stall timers can never bleed from
-one trade to another. Resetting state by *changing identity* is often simpler and safer than
-resetting every field by hand.
-
-**Native `<dialog>` doing the heavy lifting.** The drawer keeps `showModal()` for focus trapping,
-Escape handling and backdrop-click dismissal — behavior that is easy to get subtly wrong by hand —
-and restyles only its position and backdrop. Reach for platform semantics first; spend CSS, not
-JavaScript, on appearance.
-
-**Derive at render time; never mutate the cache.** A row's displayed value is *chosen* on every
-render — stream vs snapshot by terminal flags and timestamps — rather than written back into
-either source. Both sources stay authoritative for what they own, and a wrong choice is a pure
-function fix, not a data repair.
-
-**Counts must name their population.** The `250+` label reported on rows the screen had not
-loaded; the fix (`closed_trades` from one `GROUP BY` on `/books/summary`) made the tab count the
-real total while the meta line discloses the loaded window. This phase's rule — a screen must not
-report on rows it does not show — became the label discipline 6a applied prospectively.
-
-**A window is not an archive.** Paging (50 rows/page) slices an already-bounded ~250-row load;
-search and filters apply to that window only, and the screen says so. Making the boundary
-explicit is what keeps the page honest until real server-side pagination exists.
-
-**One aggregate request over three chatty ones.** The drawer's `/trades/{id}` returns trade,
-valuation history and audits together, polled only while the drawer is open. Detail data stays
-out of list state entirely — on-demand fetching *is* the performance strategy for drill-downs.
-
-## Files for first-pass review (phase-5 relevant)
-
-1. `frontend/src/views/Trades/Trades.jsx`
-2. `frontend/src/views/Trades/TradeDetail.jsx`
-3. `frontend/src/components/trades/TradeDetailDialog.jsx`
-4. `frontend/src/components/trades/TradeStatusTabs.jsx`
-5. `frontend/src/domain/trades.js`
-6. `frontend/src/components/trades/TradeCell.jsx`
-7. `frontend/src/config/trades.js`
-8. `services/blotter-service/app/service.py`
-9. `services/blotter-service/app/repository.py`
-10. `services/trade-action-service/app/trade_processor.py`
-11. `services/pricing-service/app/cache.py` (for close finalization behavior)
-
-## Known limits (what belongs to next phase)
-
-- Full historical closed archive navigation is still server-side work.
-- Open/reopen flow is still out of scope in Phase 5.
-- Close reason, audit review depth, and optional price override are intentionally deferred.
+- `frontend/src/views/Trades/Trades.jsx` and `TradeDetail.jsx`.
+- `frontend/src/components/trades/TradeDetailPanel.jsx` and `TradeTable.jsx`.
+- `frontend/src/domain/trades.js` and `config/trades.js`.
+- `services/blotter-service/app/` — trade read model and detail aggregation.
+- `services/trade-action-service/app/trade_processor.py` — close processing.
+- `services/pricing-service/app/cache.py` — terminal valuation behavior.

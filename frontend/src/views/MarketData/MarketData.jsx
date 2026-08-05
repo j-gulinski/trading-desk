@@ -111,8 +111,6 @@ export default function MarketData() {
       content = <EmptyState message="Connecting to market data…" />
     } else if (status === 'RECONNECTING') {
       content = <EmptyState message="Market data stream unavailable — retrying." />
-    } else if (status === 'SUSPENDED') {
-      content = <EmptyState message="Market data paused while this tab is in the background." />
     } else {
       content = <EmptyState message="No instruments published yet." />
     }

@@ -102,8 +102,6 @@ export default function Valuations() {
     tableContent = <EmptyState message="Connecting to the valuation stream…" />
   } else if (status === 'RECONNECTING') {
     tableContent = <EmptyState message="Valuation stream unavailable — retrying." />
-  } else if (status === 'SUSPENDED') {
-    tableContent = <EmptyState message="Valuations paused while this tab is in the background." />
   } else {
     tableContent = <EmptyState message="No open positions are being valued right now." />
   }

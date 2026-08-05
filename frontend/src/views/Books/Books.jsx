@@ -135,6 +135,7 @@ export default function Books() {
         <button
           type="button"
           className="books-button books-button--accent"
+          data-panel-trigger
           onClick={() => {
             setNotice(null)
             setPanel({ type: 'create' })
@@ -184,6 +185,7 @@ export default function Books() {
 
       {activePanel === PANEL_ID.books && (panel?.type === 'create' || panel?.type === 'edit') && (
         <BookFormPanel
+          key={`${panel.type}:${panel.bookId ?? 'new'}`}
           bookId={panel.type === 'edit' ? panel.bookId : null}
           onSaved={summary.refetch}
           onClose={closeBooksPanel}

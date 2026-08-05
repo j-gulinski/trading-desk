@@ -117,7 +117,6 @@ export default function TradeDetailPanel({
       eyebrow="TRADE DETAIL"
       title={trade.tradeRef}
       subtitle={`${trade.bookName} · ${trade.symbol ?? 'UNKNOWN'} · ${trade.assetClass}`}
-      closeLabel="Close trade details"
       onClose={onClose}
       headActions={
         <>
@@ -141,7 +140,7 @@ export default function TradeDetailPanel({
         ) : null
       }
       tabs={
-        <PanelTabs tabs={tabs} activeId={tab} onSelect={setTab} idPrefix="trade-detail" />
+        <PanelTabs tabs={tabs} activeId={tab} onSelect={setTab} />
       }
       footer={
         <>
@@ -155,13 +154,8 @@ export default function TradeDetailPanel({
       }
     >
       {tab === 'details' && (
-        <div
-          id="trade-detail-panel-details"
-          role="tabpanel"
-          aria-labelledby="trade-detail-tab-details"
-          className="trade-detail__tabpanel"
-        >
-          <section className="trade-detail__metrics" aria-label="Latest valuation">
+        <div className="trade-detail__tabpanel">
+          <section className="trade-detail__metrics">
             <Metric
               label="Fair value"
               value={formatAmount(valuation?.fairValue)}
@@ -221,12 +215,7 @@ export default function TradeDetailPanel({
       )}
 
       {tab === 'history' && (
-        <div
-          id="trade-detail-panel-history"
-          role="tabpanel"
-          aria-labelledby="trade-detail-tab-history"
-          className="trade-detail__tabpanel"
-        >
+        <div className="trade-detail__tabpanel">
           {loading && !detail && <EmptyState message="Loading valuation history…" />}
           {!loading && !detail && <EmptyState message="Valuation history is unavailable." />}
           {detail && detail.valuationHistory.length === 0 && (
@@ -239,12 +228,7 @@ export default function TradeDetailPanel({
       )}
 
       {tab === 'audit' && (
-        <div
-          id="trade-detail-panel-audit"
-          role="tabpanel"
-          aria-labelledby="trade-detail-tab-audit"
-          className="trade-detail__tabpanel"
-        >
+        <div className="trade-detail__tabpanel">
           {loading && !detail && <EmptyState message="Loading trade audit events…" />}
           {!loading && auditEvents.length === 0 && (
             <EmptyState

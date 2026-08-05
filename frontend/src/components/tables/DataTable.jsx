@@ -99,17 +99,8 @@ export default function DataTable({
               <tr
                 key={rowKey(row)}
                 className={rowClass || undefined}
-                tabIndex={onRowClick ? 0 : undefined}
+                data-panel-trigger={onRowClick ? '' : undefined}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
-                onKeyDown={
-                  onRowClick
-                    ? (event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return
-                        event.preventDefault()
-                        onRowClick(row)
-                      }
-                    : undefined
-                }
               >
                 {columns.map((column) => (
                   <td

@@ -26,9 +26,7 @@ export function useStreamSeed(status, load) {
   useEffect(runSeed, [runSeed])
 
   useEffect(() => {
-    const wasInterrupted =
-      previousStatusRef.current === STREAM_STATUS.reconnecting ||
-      previousStatusRef.current === STREAM_STATUS.suspended
+    const wasInterrupted = previousStatusRef.current === STREAM_STATUS.reconnecting
     previousStatusRef.current = status
     return wasInterrupted && status === STREAM_STATUS.connected ? runSeed() : undefined
   }, [status, runSeed])

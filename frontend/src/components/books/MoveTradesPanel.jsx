@@ -45,7 +45,6 @@ export default function MoveTradesPanel({ book, targets, onAccepted, onClose }) 
       eyebrow="BOOKS"
       title="Move open positions"
       subtitle={`out of ${book.name}`}
-      closeLabel="Close move form"
       onClose={onClose}
     >
       <p className="panel-form__message">

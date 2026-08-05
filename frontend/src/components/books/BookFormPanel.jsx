@@ -98,7 +98,6 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
       eyebrow="BOOKS"
       title={editing ? 'Edit book' : 'Create book'}
       subtitle={editing ? 'name, asset class & description' : 'a new empty trading book'}
-      closeLabel="Close book form"
       onClose={onClose}
     >
       {editing && values == null && loadError == null && (

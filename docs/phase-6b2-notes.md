@@ -1,7 +1,7 @@
 ---
 phase: 6b-2
 status: complete
-reviewed: 2026-08-04
+revised: 2026-08-05
 tags:
   - backend
   - books
@@ -10,254 +10,115 @@ tags:
   - lifecycle
 ---
 
-# Phase 6b-2 — Book lifecycle: delete guard and trade reassignment (teaching notes)
+# Phase 6b-2 — what you should know
 
-The first phase where the browser can retire something. It ships two things: books-service refuses
-to deactivate a book that still holds open positions, and trades can be moved from one book to
-another so that a book *can* be retired.
+This phase made book retirement safe. A book with open positions cannot be deactivated; positions
+can be reassigned to a compatible book first.
 
-## What was decided and why
+## 1. Delete is a guarded soft delete
 
-### 1. The guard is on *open* positions, not on *any* trade
+`DELETE /books/{id}` sets `is_active = false`. It does not remove the historical book or its closed
+trades. The precondition is therefore **zero ACTIVE trades**, not zero trades of any kind.
 
-`DELETE /books/{id}` is a **soft delete** (`is_active = False`), and closed trades stay attributed
-to the book they happened in. So "refuse when the book has trades" would make every book that ever
-traded permanently undeletable — its closed history never goes away.
+The guard covers every route that can perform the transition, including `PUT` with
+`is_active: false`. Guard the state change, not only one HTTP route.
 
-The guard is therefore **no ACTIVE trades**. Deleting a book means *it stops accepting trades and
-leaves the roster*, not *it never existed*. A hard delete was never on the table: it would need
-`ON DELETE CASCADE` across trades and valuations, which is a data-loss button.
+## 2. Destructive checks fail closed
 
-### 2. The guard sits on the state transition, not on the route
+Books-service asks blotter whether the book has active trades instead of reading another service's
+tables directly.
 
-`PUT /books/{id}` copies whitelisted fields from the body and `is_active` is one of them —
-`deactivate_book` is literally `update_book(book_id, {"is_active": False})`. Guarding only `DELETE`
-would have left the same transition reachable through the edit endpoint. Both routes are guarded;
-`PUT` whenever the body carries `is_active: false`.
-
-### 3. books-service asks the blotter over HTTP, and fails closed
-
-books-service shares the database, so it *could* read the `trades` table. It doesn't — trade reads
-belong to the blotter, the same ownership rule that keeps trade writes inside trade-action-service.
-6a set this precedent when trade-generation grew a `blotter_client.py`.
-
-**The consequence that matters:** if the blotter cannot answer, the delete is refused with **503**,
-not allowed. A destructive operation that cannot verify its precondition must not proceed. The two
-refusals carry different codes so the UI can say different things — `409` is *you can't*, `503` is
-*we can't tell*. The cost is honest: books-service now has a runtime dependency on a path that used
-to be pure local state.
-
-### 4. Reassignment lives in trade-action-service
-
-`REASSIGN_TRADES` joins `OPEN_TRADE`, `CLOSE_TRADE` and `CLOSE_ALL` in the same queue, worker and
-audit path. Moving a trade between books is a write to `trades`, and `trades` has exactly one writer.
-
-Validation reuses the rule that already guards `OPEN_TRADE`: the target book must be active and its
-`expected_asset_class` must match the source's. Books are the authority for asset class (a 6a
-contract), so the check is book-to-book rather than trade-by-trade — a per-trade filter would move
-some trades and leave others, which is worse than refusing. Only ACTIVE trades move; each one gets a
-`TRADE_REASSIGNED` audit row carrying `from_book_id`/`to_book_id` and the caller's
-`client_request_id`, so a move of N trades is reconstructable from the audit trail alone.
-
-### 5. The blotter would not have noticed the move — the one real find
-
-The blotter serves ACTIVE trades from an in-memory `IndexedStore` **indexed by `book_id`**, filled
-once at startup. `handle_valuation` inserts a trade only when it is absent; for one already cached
-it just records the valuation. Nothing ever updated a cached field. After a move, `/books/summary`
-counts and every `book_id` filter would have kept reporting the old book until restart — the screen
-would have shown the move as having silently failed.
-
-The fix rides the stream that already exists: pricing rebuilds its active set from the database
-every 2 s, so the corrected `book_id` is already on the wire. The blotter compares the streamed
-`book_id` against the cached one and re-indexes on disagreement.
-
-The re-index is one atomic operation (`IndexedStore.update_field`) rather than remove-mutate-add
-from the caller. The blotter serves requests on threads, and — subtler — the naive version is simply
-wrong: `_add` removes an existing entry by reading the *stored* object's fields, so mutating first
-makes the removal look in the **new** book's bucket and leaves a stale entry under the old key.
-
-**Worth keeping:** a denormalised cache is only as correct as its invalidation, and "this field
-never changes" is an assumption a later feature can quietly invalidate.
-
-### 6. Move is its own button, and Delete does not pre-empt the guard
-
-The first cut hid Move behind Delete: clicking Delete on a book with open positions opened the move
-form instead of the confirm. It was clever and it was worse — the button did two different things
-depending on state, and the only way to move positions was to pretend you wanted to delete.
-
-Now each button does one thing. `Move` appears on any book with open positions and reassigns them.
-`Delete` always opens the confirm; if positions remain, the backend refuses and the panel shows
-*"Refused — this book still has 3 open positions."* The rule lives in exactly one place — the guard
-— instead of being duplicated as a client-side branch that decides which dialog to open.
-
-The two steps are deliberately not chained. Trade-action answers `202 accepted` — the trades have
-not moved yet when the form closes. Auto-continuing into the delete would race the worker and hit
-the guard. The UI reports the acknowledgement and the 5 s roster poll reconciles.
-
-### 7. One number, one request — the card total and its breakdown are computed together
-
-The card's `UNREALIZED` and the drill-down's per-symbol `UNREALIZED` are the same quantity at two
-levels of detail, so they must agree. Twice they did not, and each time the cause was structural
-rather than arithmetic.
-
-**First cause: two sources.** The card came from `/blotter/books/summary` (5 s poll); the drill-down
-came from the valuation SSE stream (sub-second). Different pipes, different instants.
-
-**Second cause, after moving the drill-down onto the blotter: two requests.** `/books/summary` and
-`/trades?book_id=…` read the same cache, but not at the same moment. Between them the generator
-opens and closes trades and every symbol re-prices, so the totals drift — measured at −83.92 on the
-card against −75.26 in the breakdown of the *same* single-symbol book. Polling faster narrows the
-window; it cannot close it. Any design where a number and its decomposition arrive in separate
-responses is inconsistent by construction.
-
-**The fix is one request.** `/books/summary` now nets its own positions: the loop that already walks
-each book's ACTIVE trades to sum unrealized PnL groups them by symbol on the way past and returns a
-`positions` array alongside the totals. The card total is the sum of the rows below it because both
-came out of the same pass over the same cached valuations. There is nothing left to reconcile.
-
-It also deleted code. The screen went back to a single `usePolling`, and the second fetch, its
-`bookId` staleness guard and its refetch-on-expand effect all disappeared. Netting moved to the
-service that owns the data; `bookPositionsOf` is now a formatter.
-
-Two consequences worth stating. Staleness is measured against the mark's own `valuation_time`
-rather than against when the browser last heard from the stream — the more honest number, since it
-ages a stale mark even while the connection is healthy. And a trade with no valuation at all is now
-visible: it counts into the netting and pushes the position to `STALE`, where the stream-fed version
-did not know it existed.
-
-The screen no longer touches `useValuationFeedContext`. That does not reduce the connection count —
-`FeedProvider` opens the streams once for the whole app — it removes a second source of truth from
-one screen.
-
-### 8. Deactivated books stay visible behind a filter
-
-A soft-deleted book still owns its closed trades and their realized PnL, so hiding it permanently
-would hide history the blotter still reports. The roster shows active books by default and an
-**Include deactivated** checkbox brings the rest back, marked `DEACTIVATED` and without Edit or
-Delete. The header states what is hidden (`… · 7 deactivated hidden`) rather than silently dropping
-rows. Deactivated books are never offered as move targets.
-
-## Scope change during the build
-
-**Per-book Flatten was dropped.** The original plan paired the delete guard with a per-book Flatten
-button (and an optional `book_id` on `POST /trade-actions/close-all` to scope it). Move already
-empties a book, so Flatten was a second way to do the same thing that additionally needed a filter
-on the most destructive query in the system. It is not built; `close_all_trades` is unchanged and
-still global, and nothing in the UI calls it. The card therefore carries `Edit` and `Delete` where
-`docs/designs/Books.png` shows a third `Flatten` button — a deliberate deviation from the mockup.
-
-## Mental model: what owns what
-
-```
-  books-service ─── DELETE /books/{id} ──┐
-                    PUT (is_active:false)│ guard: blotter says 0 ACTIVE?
-                                         ├──> 409 has open trades
-                    blotter_client ──────┘    503 could not verify (fail closed)
-                         │ GET /trades?book_id&status=ACTIVE
-                         ▼
-  blotter-service ── owns trade reads ── IndexedStore[book_id] ──> /books/summary
-                         ▲                      ▲
-                         │                      │ re-index on book_id change
-  pricing SSE ───────────┴──────────────────────┘ (active set re-read every 2s)
-
-  trade-action-service ── the only writer of `trades`
-       OPEN_TRADE · CLOSE_TRADE · CLOSE_ALL · REASSIGN_TRADES
-                    └─ audit row per affected trade, correlated by client_request_id
+```text
+books-service → blotter active-trade check
+  ├── active trades exist → 409
+  ├── blotter unavailable → 503
+  └── zero active trades  → deactivate
 ```
 
-books owns *which books exist*; the blotter owns *what is in them*; trade-action owns *every trade
-mutation*. books-service asks rather than reads, and refuses when it cannot ask.
+`409` means the precondition failed. `503` means the system could not verify it. An unavailable
+dependency must not be interpreted as permission for a destructive action.
 
-## Process flow: retiring a book that still holds positions
+## 3. Trade reassignment has one writer
 
-Move on the card → the target list is filtered to *active books of the same asset class* → submit
-posts `REASSIGN_TRADES` → `202 accepted`, the form closes, the page shows the acknowledgement → the
-worker validates both books, updates the ACTIVE rows and writes one `TRADE_REASSIGNED` per trade →
-pricing's 2 s refresh picks up the new `book_id` and keeps valuing without a gap → the blotter
-re-indexes off the next valuation event → the 5 s roster poll shows 0 open on the source and the
-Move button disappears → Delete → confirm → `DELETE /books/{id}` passes the guard, and the card
-becomes a `DEACTIVATED` tile behind the filter. Deleting before moving is not an error the UI
-prevents — it is a refusal the UI reports.
+`REASSIGN_TRADES` runs through trade-action-service because that service owns mutations to the
+`trades` table.
 
-## Honest gaps
+The worker validates that source and target books exist, the target is active, and both books share
+the same asset class. It moves only ACTIVE trades and writes one `TRADE_REASSIGNED` audit per trade,
+correlated by the request ID.
 
-- **A moved trade that is never valued never re-indexes.** The blotter learns about the move from
-  the valuation stream, so a position whose symbol has no live price would stay in the old book's
-  count until restart. Every symbol in the catalog ticks, so this does not occur in practice — but
-  the correction path is the stream, not the database.
-- **A rejected reassignment is audited against the book, not a trade**, so the Trade Actions feed
-  shows a book UUID in a column that otherwise holds trade ids.
-- **`GET /audits` does not project `payload`**, so `from_book_id`/`to_book_id` are queryable in the
-  database but the feed renders the book names from the message text instead.
-- **Found but not fixed here:** `realized_pnl_by_book` computes realized PnL from `close_price` and
-  skips trades where it is NULL. Bulk close (`CLOSE_ALL`) writes no `close_price` — pricing records
-  the realized number on the final valuation instead — so trades closed that way contribute 0 to a
-  book's realized PnL. Nothing in the UI reaches `CLOSE_ALL`, and the fix belongs to whatever phase
-  makes it reachable.
+Move is a separate action from Delete. Delete never silently changes meaning. The steps are not
+automatically chained because `202 Accepted` confirms only queueing; deleting immediately would
+race the reassignment worker.
 
-## Verification performed
+## 4. Denormalized caches need invalidation
 
-Against the live stack:
+Blotter caches active trades and indexes them by `book_id`. Reassignment changes that indexed field,
+so leaving the cache untouched would show the old book until restart.
 
-- **Delete guard:** `DELETE` on a book with 38 open trades → `409 {"error": "book has open trades",
-  "active_trades": 38}`. Unknown book → `404`. A book with 0 open → `200`, `is_active: false`.
-- **Bypass closed:** `PUT {"is_active": false}` on that same book → the identical `409`.
-- **Fails closed:** with `blotter-service` stopped, `DELETE` on a book with **zero** open trades →
-  `503 {"error": "open trades could not be verified"}` in 0.04 s (refused, not hung).
-- **Reassignment:** EQUITY → FX target rejected (`rejected` 0 → 1, no rows touched); EQUITY →
-  EQUITY moved 3 trades, `reassigned` 0 → 3, three `TRADE_REASSIGNED` rows correlated to the
-  request id with `{"from_book_id": …, "to_book_id": …}` confirmed in the database.
-- **Blotter follows without a restart:** source `active=3 → 0`, target `active=0 → 3`, three
-  `trade_reindexed` log lines; the closed trade stayed on the source. All three moved trades kept
-  returning `source: valuation-stream` fair values immediately after the move, and the target card's
-  unrealized went on ticking.
-- **UI, move:** Move on a book with 3 open positions listed only the active same-class book,
-  submitted, and reported *"Accepted — 3 open positions are moving to Move Check."* The roster
-  reconciled within one poll — source `3 open → 0` (its Move button disappearing), target
-  `0 → 3 open` with unrealized −575.00 — without restarting the blotter. Moving them back restored
-  the original book. On a book whose only same-class peers are deactivated the form says so instead
-  of offering them.
-- **UI, delete:** Delete on a book with 3 open positions reached the guard and rendered
-  *"Refused — this book still has 3 open positions."* in the panel. Delete on an empty book
-  confirms, reports *"… deleted."*, and the card turns into a `DEACTIVATED` tile with the filter on
-  / drops into the `deactivated hidden` count with it off.
-- **UI, drill-down from the blotter:** expanding a book renders netted per-symbol rows — 3 FUTURES
-  trades netting to `ES_FUT · NET QTY −1 · MARK 5,225.00 · UNREALIZED +875.00`, matching the card's
-  +875.00 exactly; `GOVT_5Y +165 @ 1,038.83 / mark 1,038.59 / −38.79` on a bond book. Zero console
-  errors on a clean load.
-- `npm run lint` / `build` / `deadcode` clean; no new knip findings.
+Pricing refreshes active trades from the database and publishes the corrected `book_id`. Blotter
+compares the streamed value with its cached value and atomically re-indexes on disagreement.
 
-## Concepts seen for the first time in this phase
+```text
+database reassignment
+→ pricing active-set refresh
+→ valuation with new book_id
+→ blotter detects disagreement
+→ atomic cache re-index
+```
 
-- **Fail closed.** A precondition that cannot be evaluated is not a precondition that passed. "The
-  blotter said no" and "the blotter said nothing" must reach the user as different answers.
-- **Guard the transition, not the route.** The same state change was reachable from two endpoints.
-- **Cache invalidation by disagreement.** The blotter notices that the stream and its cache disagree
-  and corrects itself — no new channel, self-healing after a missed message, but only as timely as
-  the stream carrying the truth.
-- **`202 accepted` cannot be chained.** A flow whose second step depends on the first step's *effect*
-  has to reconcile by polling, not by continuing on the acknowledgement.
+The correction reuses an existing channel, but a moved trade that never receives another valuation
+would not re-index until restart. Current catalog symbols keep ticking, so the limitation does not
+occur in normal operation.
 
-## Files for first-pass review
+## 5. Totals and breakdown must share one snapshot
 
-`shared/enums.py` → `services/books-service/app/{config,blotter_client,api}.py` (the guard) →
-`services/trade-action-service/app/{repository,trade_processor}.py` (`REASSIGN_TRADES`) →
-`services/blotter-service/app/{cache,service}.py` (the re-index and `latest_valuation`) →
-`domain/books.js` (`moveTargetsOf`, `bookPositionsOf`) → `components/books/MoveTradesDialog.jsx` →
-`views/Books/Books.jsx`.
+The book card's unrealized total and its per-symbol breakdown originally came from different
+sources/requests, so they represented different instants and could not always add up.
 
-## Known limits
+`/books/summary` now calculates both in one pass over the same cached trades and valuations. The
+card total is the sum of the returned position rows by construction.
 
-- Both dialogs are still `<dialog showModal()>` overlays; 6c replaces them with the shared
-  push-aside panel.
-- Delete is per-book; there is no multi-select.
-- A deactivated book cannot be reactivated from the UI (the `PUT` accepts it; no control calls it).
-- `/books/summary` now nets positions for **every** book on every poll, not just the expanded one.
-  The catalog has a handful of symbols per asset class so the payload stays small, but the cost is
-  paid whether or not a card is open. The alternative — a second endpoint for the open card — is
-  the inconsistency this phase removed.
-- `positionsOf` in `domain/valuations.js`, the stream-side netting the drill-down used to call, is
-  now unreferenced and back on the accepted-knip list. It was left in place rather than deleted;
-  Valuations is the screen that would use it.
-- `realized_pnl_by_book` still loads every closed trade on each 5 s poll — unchanged in shape from
-  before this phase, but the next thing to feel the generator's volume.
+This also makes missing valuations visible: they participate in net positions and make the position
+STALE rather than disappearing from a stream-only breakdown.
+
+## 6. Deactivated books preserve history
+
+Active books show by default. “Include deactivated” reveals retired books with a DEACTIVATED label
+and no write actions. They remain visible because they still own closed trades and realized PnL.
+Deactivated books are never reassignment targets.
+
+## Process flow
+
+```text
+Move → choose active same-class target → REASSIGN_TRADES (202)
+→ worker moves active trades + writes audits
+→ pricing publishes corrected book IDs
+→ blotter re-indexes
+→ Books poll shows source empty
+→ Delete → guarded soft deactivation
+```
+
+## Concepts to keep
+
+- **Fail closed:** inability to verify a destructive precondition is a refusal.
+- **Guard transitions:** protect every path to the state change.
+- **Single writer:** send mutations through the service that owns them.
+- **Cache invalidation by disagreement:** a denormalized read model must follow mutable indexed data.
+- **One number, one request:** totals and decompositions need the same snapshot.
+- **`202` cannot be chained:** observe completion before starting a dependent operation.
+
+## Current limits
+
+- Deactivated books cannot be reactivated from the UI.
+- Delete is one book at a time.
+- The summary computes positions for every book on every poll, even when cards are collapsed.
+- Global `CLOSE_ALL` remains outside the UI and has a known realized-PnL edge case.
+
+## Main files
+
+- `services/books-service/app/blotter_client.py` and API/service modules — delete guard.
+- `services/trade-action-service/app/trade_processor.py` and repository — reassignment.
+- `services/blotter-service/app/cache.py` and service modules — re-index and summary positions.
+- `frontend/src/components/books/MoveTradesPanel.jsx` and `ConfirmPanel.jsx`.
+- `frontend/src/views/Books/Books.jsx` and `domain/books.js`.

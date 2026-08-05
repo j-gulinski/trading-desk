@@ -110,17 +110,28 @@ export default function BookCard({
         </button>
         {book.isActive ? (
           <div className="book-tile__actions">
-            <button type="button" className="book-tile__action" onClick={onEdit}>
+            <button
+              type="button"
+              className="book-tile__action"
+              data-panel-trigger
+              onClick={onEdit}
+            >
               Edit
             </button>
             {book.activeTrades > 0 && (
-              <button type="button" className="book-tile__action" onClick={onMove}>
+              <button
+                type="button"
+                className="book-tile__action"
+                data-panel-trigger
+                onClick={onMove}
+              >
                 Move
               </button>
             )}
             <button
               type="button"
               className="book-tile__action book-tile__action--danger"
+              data-panel-trigger
               onClick={onDelete}
             >
               Delete

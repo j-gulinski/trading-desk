@@ -205,8 +205,8 @@ stack traces remain structured stdout logs.
   container queries for a fixed-sidebar layout.
 - **Reading order:** the screen reads one way — `instruments → rows → filter → sort → table`
   — and imports run one way: `config → domain → hooks → providers → views → components`.
-- **Notes:** `docs/phase-3-notes.md` documents the implemented data flow and review
-  findings, including the trace of one price change from the wire to a rendered row.
+- **Learning notes:** `docs/phase-3-notes.md` explains snapshot/stream reconciliation, event
+  identity, buffering, feed ownership, stable sorting, and current limits.
 - **Backend deps:** `market-data GET /stream` (named `market_tick`/`curve_tick` events) and
   `GET /snapshot` (both exist).
 - **Proxy added:** `/api/market-data` → `market-data-service:8001` (Vite streams
@@ -221,9 +221,8 @@ stack traces remain structured stdout logs.
 - **Outcome:** a second, independent feed beside the market feed with `useSseStream` unchanged.
   Seven Phase 3 units reused as-is; two shared hooks extracted while being used; one input added to
   the generic table hook. Six defects during the build, four more in review.
-- **Full detail:** `docs/phase-4-notes.md` — a focused note on the valuation performance review,
-  organised by topic with the measurements, not a full file-by-file phase audit. This section keeps
-  only what later phases need to know.
+- **Learning notes:** `docs/phase-4-notes.md` explains valuation buffering, the shared clock,
+  terminal merge rules, snapshot recovery, and the current top-100 boundary.
 
 **Built**
 
@@ -287,8 +286,8 @@ stack traces remain structured stdout logs.
 3. **Performance follow-up.** Pricing's valuation queue increased independently of Market Data;
    feed flushing and `useElapsedTime` joined one shared scheduler at 500 ms and 1,000 ms
    respectively; the shared Sparkline was memoised and clarified; and the complete snapshot →
-   stream → buffer callback → context → screen pipeline plus the 250-row performance decision were
-   recorded in `phase-4-notes.md`.
+   stream → buffer callback → context → screen pipeline was documented. The original 250-row
+   performance boundary was later tightened to the current top 100.
 
 - **Backend deps:** `pricing GET /valuation-stream` + `/valuations` (exist).
 - **Proxy added:** `/api/pricing` → `pricing-service:8002`.
@@ -312,10 +311,8 @@ stack traces remain structured stdout logs.
   trade-action-service, an existing route this screen hadn't used before), a right-side detail
   panel, and a firmer Trades/Valuations split. A final review pass replaced the `250+` closed
   label with an exact backend-supplied total and made every number on Valuations open-scoped.
-- **Full detail:** `docs/phase-5-notes.md` follows the implementation in inspection order and
-  records the merge, freshness, history-window and verification decisions. It also carries the
-  end-to-end close-trade flow across four services, the valuation-selection truth table, and the
-  measured request costs.
+- **Learning notes:** `docs/phase-5-notes.md` explains source ownership, row derivation, stable table
+  state, on-demand detail, and asynchronous close confirmation.
 
 **Built**
 
@@ -403,8 +400,8 @@ than riding along with the first write forms.
 - **Outcome:** both event feeds read the existing audit trail through `GET /audits` — no new
   per-service events endpoint, no new proxy for monitoring. The generator gained runtime config so
   the mockup's sliders are real, and startup seeding so it can close trades it did not open.
-- **Full detail:** `docs/phase-6a-notes.md` — decisions, the four build-time deviations, the config
-  and audit process flows, and the measured verification.
+- **Learning notes:** `docs/phase-6a-notes.md` explains audit reuse, runtime configuration,
+  draft/server state, refetch-after-write, and open-trade synchronization.
 
 **Built**
 
@@ -444,8 +441,8 @@ than riding along with the first write forms.
   reason — audits record when an action was written, not how long it took; feed rows omit book, side
   and quantity for the same reason. Both need `trade_processor` timing plus a wider audit payload.
 
-**Review pass (simplification sweep, 2026-08-03).** Full detail in `phase-6a-notes.md`
-(decisions 6–12). Every mid-build reversal had left the losing option's code behind; the sweep
+**Review pass (simplification sweep, 2026-08-03).** Every mid-build reversal had left the losing
+option's code behind; the sweep
 removed five dead units (`FEED_SERVICE`/`FEED_EVENT_TYPES` on generator config,
 `REJECTED_WINDOW_MS`, `queueLevelOf`/`QUEUE_DEPTH_WARN` and the unused `queueStatusOf` fields,
 `countRejected`, `intentRateOf`), unified startup seeding and the 10 s blotter sync into one
@@ -477,7 +474,7 @@ atomic 400 on mixed valid/invalid config, restart adoption of 33 blotter trades 
   exposure per symbol on drill-down from the Phase 4 `positionsOf`), and New Trade submits real
   `OPEN_TRADE` intents. No backend changes, as planned — one proxy entry and the books endpoints
   were the whole integration.
-- **Full detail:** `docs/phase-6b1-notes.md`.
+- **Learning notes:** `docs/phase-6b1-notes.md` explains the service ownership and write-path rules.
 
 **Contracts and rules later phases inherit**
 
@@ -511,7 +508,9 @@ atomic 400 on mixed valid/invalid config, restart adoption of 33 blotter trades 
 - **Connection budget is now a known constraint.** Each open tab permanently holds 2 of the
   browser's 6 per-origin HTTP/1.1 connections (one SSE stream per feed). Measured: 1 tab ~10 ms,
   2 tabs ~8 ms, **3 tabs deadlocks every request including page loads**. Applies to production
-  builds too. 6c fix: release the streams while a tab is hidden, reconnect on `visibilitychange`.
+  builds too. A visibility-based 6c workaround was removed in final review because it dropped
+  intermediate market ticks and broke continuous history. Solve this at the transport layer
+  (HTTP/2 or multiplexed SSE), not by suspending the client feeds.
 
 **Deferred (honest):** no Delete on the cards until 6b-2's backend guard exists;
 `apiDelete` stays on the accepted-knip list one more phase. `positionsOf` and `apiPut` came off it
@@ -562,7 +561,8 @@ exists. `EST. NOTIONAL` is labelled `QTY × LAST PRICE` and ignores contract mul
   positions (asking the blotter over HTTP, and refusing when it cannot ask); `REASSIGN_TRADES` joins
   the trade-action queue so a book can be emptied first; deactivated books stay reachable behind an
   **Include deactivated** filter.
-- **Full detail:** `docs/phase-6b2-notes.md`.
+- **Learning notes:** `docs/phase-6b2-notes.md` explains guarded soft deletion, reassignment,
+  cache re-indexing, and coherent summaries.
 
 **Contracts and rules later phases inherit**
 
@@ -664,32 +664,39 @@ a reassignment looks like it silently failed until the service restarts.
 ### Phase 6c — UI states, streams badge, config persistence ✅ (built and verified)
 
 - **Outcome:** all five overlays became one push-aside `SidePanel` (the trade detail gained tabs),
-  the sidebar collapses to icons with the streams badge, and a hidden tab releases its two SSE
-  connections. Built in the fixed order below, each unit verified before the next.
-- **Full detail:** `docs/phase-6c-notes.md` — including the required nine-states × views matrix.
+  the sidebar collapses to icons with the streams badge, and both parent-owned SSE feeds remain
+  continuous across routes and browser visibility changes.
+- **Learning notes:** `docs/phase-6c-notes.md` — the final behavior and concepts without the build
+  diary or exhaustive verification matrix.
 
 **Contracts and rules later phases inherit**
 
 - **One panel at a time, five callers.** Any new drawer uses `components/panel/SidePanel.jsx` and
   claims an id through `layout/panelContext.js`; `AppShell` unmounts the previous caller first. The
   push still comes from `.content:has(.side-panel)` in CSS, so layout does not need lifting into
-  shell state. A panel that omits the class gets no push.
-- **Non-modal panels own their chrome.** `usePanelChrome` supplies Escape, focus-in, focus return to
-  the trigger, and a Tab trap. Anything that opens a panel must be focusable — table rows now are.
-- **`SUSPENDED` is a real stream status.** A hidden tab closes its `EventSource` and reports
-  `SUSPENDED`; returning to visible reconnects *and re-seeds* through `useStreamSeed`. Any new view
-  branching on stream status must handle it rather than fall through to "no data".
+  shell state. A panel that omits the class gets no push. Ordinary outside clicks dismiss; controls
+  marked as panel triggers replace the content in place without replaying the entry slide.
+- **Non-modal panels own their chrome.** `usePanelChrome` supplies outside-click close, Escape,
+  focus-in and conditional focus return: Escape/Close returns to the opener, while an outside click
+  leaves focus on its destination. Tab navigation stays native because the page remains visible and
+  interactive. Anything that opens a panel must be focusable — table rows now are.
+- **Provider lifetime is stream lifetime.** Market history and live valuation state continue across
+  routes and while the browser document is hidden. `useSseStream` exposes only transport truth:
+  `CONNECTING`, `CONNECTED`, `RECONNECTING`; a real reconnect re-seeds through `useStreamSeed`.
 - **One storage-key scheme:** `STORAGE_KEYS` in `config/storage.js`, `<area>.<thing>`. Durable view
   preferences (columns, sidebar) in `localStorage`; transient session state (market snapshot, tick
   count) in `sessionStorage`. **Filters, tab selection and page size are deliberately not
   persisted** — a filter that survives a reload reads as missing data.
 - **Class names track what a thing is.** `form-dialog__*` became `panel-form__*` when the dialogs
   stopped being dialogs; `_form-dialog.scss` is gone.
+- **A form session has explicit React identity.** Books keys `BookFormPanel` by mode and book id.
+  Edit → Create and Edit A → Edit B therefore unmount the old session, reset local state, rerun the
+  panel lifecycle and avoid reusing stale form state. Direct panel switches suppress the replacement
+  shell's entry animation, so state resets without a visible close/reopen cycle.
 
-**Honest gap carried forward:** the three-tab connection fix could not be verified end to end —
-Playwright reports every page as visible, so background tabs never fire `visibilitychange`. The
-mechanism was verified by dispatching the event directly. **One manual three-tab check in Chrome is
-outstanding.**
+**Known transport limit:** three simultaneous app tabs can exhaust the six HTTP/1.1 per-origin
+connections. Continuous history is the accepted priority. Use one app tab on the current transport;
+HTTP/2 or a multiplexed SSE endpoint is the eventual multi-tab solution.
 
 #### Original plan (as approved)
 
@@ -711,20 +718,23 @@ outstanding.**
      stop-gap this item replaces, and the `showModal()` question below applies to them equally.
   2. **Sidebar collapse + streams badge** — one layout unit (the badge lives in the sidebar and
      must render in icon-only mode).
-  3. **Release SSE connections while a tab is hidden** (added after 6b-1). Each tab permanently
-     spends 2 of the browser's 6 per-origin connections on the two feeds, so a third open tab
-     deadlocks every request in every tab — polls, form submits, even page loads. Closing the
-     streams on `visibilitychange` and reseeding when visible fits `useSseStream`'s existing
-     cleanup and is the right behaviour anyway: a hidden dashboard has no reason to hold a feed.
+  3. **Review the SSE connection budget** (added after 6b-1). Each tab permanently spends 2 of the
+     browser's 6 per-origin HTTP/1.1 connections. A hidden-tab suspension was implemented, then
+     rejected in final review: snapshots restore current values but cannot reconstruct missed
+     market ticks, so the workaround contradicted the live-history requirement.
   4. **States sweep + config persistence** — the sweep's required deliverable is a
      **nine-states × views matrix in the phase notes**, every cell either "handled (how)" or
      "N/A (why)". Without the matrix, "checked every view" is unverifiable at review.
 - **Review checklist:** drawer open/close keeps the table visible and its live PnL updating;
+  ordinary outside clicks dismiss, while panel triggers switch content without a close/reopen slide;
   Escape and focus behavior survive the loss of `showModal()` (focus returns to the triggering
-  row, Escape closes, focus cannot tab behind the panel); audit tab reachable in two
+  row, Escape closes, native Tab navigation remains available); audit tab reachable in two
   interactions from a row; sidebar collapse persists across reload and the badge renders in both
   modes; the state matrix is complete; storage keys follow the one agreed scheme;
   `npm run lint/build/deadcode` clean.
+
+  The matrix was used for implementation review and removed from the teaching note after sign-off;
+  `phase-6c-notes.md` now keeps only the final behavior and concepts worth carrying forward.
 - **Accepted in review (2026-08-03) — three UI changes:**
   1. **The trade-detail drawer pushes the table aside instead of covering it.** A trader watching
      the book must not miss a P&L change on another position while inspecting one. This replaces

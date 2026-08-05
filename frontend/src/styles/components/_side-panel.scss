@@ -16,6 +16,9 @@
 .side-panel--wide {
   width: var(--panel-width-wide);
 }
+.side-panel--no-enter {
+  animation: none;
+}
 
 @keyframes side-panel-in {
   from {
@@ -138,7 +141,7 @@
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
-  &[aria-selected='true'] {
+  &--active {
     border-bottom-color: var(--accent);
     color: var(--text-primary);
   }

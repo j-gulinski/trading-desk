@@ -21,40 +21,20 @@ learning-oriented, review-gated workflow: I teach and implement, you stay in con
 
 ## Phase notes format (every phase)
 
-Each phase ends with a `docs/phase-N-notes.md`. Phase 3 used a file-by-file walkthrough that opened
-with an inspection order; from Phase 4 onward the notes became a **decision log with process flows**,
-because that is what actually gets re-read — the questions that came up during review are about *why*
-a thing works the way it does, not what each file contains. This section describes that shape, which
-is the one to follow.
+Each `docs/phase-N-notes.md` is a compact learning guide, not a build diary. It should answer only:
 
-1. **Front matter** — `phase`, `status`, `reviewed`, `tags`.
-2. **Phase outcome in one line** — what the phase actually delivers, stated once.
-3. **What was decided and why** — the forks, each with the alternative that lost and the reason.
-   This is the bulk of the document.
-4. **What changed during the build** — deviations from the approved plan, and what surfaced them.
-   Scope drift is recorded here rather than left implicit.
-5. **Mental model: what owns what** — an ASCII diagram of the ownership boundaries.
-6. **Process flows** — the two or three paths worth tracing end to end (a value from wire to screen,
-   an action from click to database).
-7. **Honest gaps** — anything the mockups show that the backend cannot answer, and what the screen
-   renders instead.
-8. **Verification performed** — with the measured numbers, not just the checklist.
-9. **Concepts seen for the first time in this phase** — each new technique named and explained in
-   a few sentences: what it is, why the naive alternative fails, and where it recurs later. This
-   is the teaching payload; as of 2026-08-03 every phase note (1 through 6a) carries this section.
-10. **Files for first-pass review** — the reading path, **at the end**. By this point the reader knows
-    why each file exists, so the list is a route rather than an introduction.
-11. **Known limits** — what belongs to a later phase.
+1. **What exists now?** One short outcome paragraph.
+2. **How is it structured?** The important ownership and data-flow boundaries.
+3. **Which concepts are worth learning?** Explain the few non-obvious mechanisms and why they exist.
+4. **What is the main process flow?** One small diagram or numbered path where it genuinely helps.
+5. **What limits remain?** Only current limitations, not already superseded work.
+6. **Where should I read the code?** A short list of the main files.
 
-Rules: concept-focused (why, not line-by-line); no code in the source (explanation lives here, code
-stays comment-free) — short snippets *in the notes* are fine when they make a flow concrete; record
-measurements when a decision rests on one. Free-form topic sections between the flows and the
-concepts are welcome when a question needs plain-terms treatment (Phase 5's value-selection rule,
-Phase 4's scheduler section). **A revision pass is folded in, never appended**: its decisions extend
-the numbered decision list, its deletions sit with the deviations that caused them, its measurements
-merge into the verification section, and the front matter gains a `revised:` date. The note must
-read as one story however many passes produced it — a trailing "review pass" log means the earlier
-sections now describe a state that no longer exists.
+Remove chronological build logs, rejected prototypes, repeated status text, exhaustive verification
+transcripts, and line-by-line file tours. Keep a historical detail only when it explains a current
+constraint or prevents the same bug from returning. Short code snippets are welcome when they make
+a concept concrete. A revision updates the existing explanation so the note always describes the
+current implementation.
 
 ## Ground rules
 
@@ -82,8 +62,7 @@ sections now describe a state that no longer exists.
 - `docs/workflow.md` — this file (how we work).
 - `docs/frontend-plan.md` — the phase-by-phase plan, backend inventory, and per-phase
   context (concepts, files, deps, review checklist).
-- `docs/phase-N-notes.md` — the review walkthrough for each completed phase (inspection
-  order + per-file concept notes).
+- `docs/phase-N-notes.md` — concise learning guides for each completed phase.
 - `docs/designs/` — the reference mockups.
 - `frontend/src/` — the app. Imports run one way, and this is the order to read them in:
   `config/` → `domain/` → `hooks/` → `providers/` → `views/` → `components/`, with

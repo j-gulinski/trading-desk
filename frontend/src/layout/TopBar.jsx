@@ -5,7 +5,12 @@ export default function TopBar({ route, onNewTrade }) {
         <h1 className="topbar__title">{route.label}</h1>
         <div className="topbar__subtitle">{route.subtitle}</div>
       </div>
-      <button type="button" className="topbar__action" onClick={onNewTrade}>
+      <button
+        type="button"
+        className="topbar__action"
+        data-panel-trigger
+        onClick={onNewTrade}
+      >
         New trade
       </button>
     </header>

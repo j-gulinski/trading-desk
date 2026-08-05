@@ -283,6 +283,5 @@ right next step when lifetime history, rather than live risk, is what grows.
 - The Blotter list is a recent working window, not a complete historical archive: active rows are
   not paginated, non-active history is bounded, and exact totals/cursors are not published.
 
-Detailed walkthroughs are in [`docs/phase-4-notes.md`](docs/phase-4-notes.md) for the valuation
-feed and performance model, and [`docs/phase-5-notes.md`](docs/phase-5-notes.md) for the operational
-Blotter and trade investigation flow.
+Concise learning guides are in [`docs/phase-4-notes.md`](docs/phase-4-notes.md) for valuation
+streaming and [`docs/phase-5-notes.md`](docs/phase-5-notes.md) for the operational Blotter.

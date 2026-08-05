@@ -1,65 +1,27 @@
-import { useEffect, useRef } from 'react'
-
-const FOCUSABLE = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
-
-function focusableWithin(container) {
-  return Array.from(container.querySelectorAll(FOCUSABLE)).filter(
-    (element) => element.offsetParent !== null || element === document.activeElement,
-  )
-}
+import { useEffect } from 'react'
 
 export function usePanelChrome(panelRef, onClose) {
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
-
   useEffect(() => {
     const panel = panelRef.current
     if (panel == null) return undefined
 
-    const trigger = document.activeElement
-    const initial = focusableWithin(panel)
-    if (initial.length > 0) initial[0].focus()
+    function handlePointerDown(event) {
+      if (panel.contains(event.target)) return
+      if (event.target instanceof Element && event.target.closest('[data-panel-trigger]')) return
+      onClose()
+    }
 
     function handleKeyDown(event) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onCloseRef.current()
-        return
-      }
-      if (event.key !== 'Tab') return
-
-      const focusable = focusableWithin(panel)
-      if (focusable.length === 0) {
-        event.preventDefault()
-        return
-      }
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      const active = document.activeElement
-
-      if (!panel.contains(active)) {
-        event.preventDefault()
-        ;(event.shiftKey ? last : first).focus()
-      } else if (event.shiftKey && active === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault()
-        first.focus()
-      }
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose()
     }
 
+    document.addEventListener('pointerdown', handlePointerDown)
     document.addEventListener('keydown', handleKeyDown)
     return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
-      if (trigger instanceof HTMLElement && document.contains(trigger)) trigger.focus()
     }
-  }, [panelRef])
+  }, [panelRef, onClose])
 }

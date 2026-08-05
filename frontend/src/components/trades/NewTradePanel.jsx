@@ -137,7 +137,6 @@ export default function NewTradePanel({ onClose }) {
       eyebrow="TRADE ACTION"
       title="New trade"
       subtitle="intent at displayed snapshot price"
-      closeLabel="Close new trade form"
       onClose={onClose}
     >
       <form className="panel-form__form" onSubmit={handleSubmit} noValidate>

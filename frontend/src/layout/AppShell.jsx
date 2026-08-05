@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Sidebar from './Sidebar.jsx'
 import TopBar from './TopBar.jsx'
 import NewTradePanel from '../components/trades/NewTradePanel.jsx'
@@ -8,15 +8,24 @@ import { PANEL_ID, PanelProvider } from './panelContext.js'
 
 export default function AppShell({ route, children }) {
   const [activePanel, setActivePanel] = useState(null)
+  const [switchingPanel, setSwitchingPanel] = useState(false)
+  const activePanelRef = useRef(activePanel)
+  activePanelRef.current = activePanel
   const [collapsed, setCollapsed] = useStoredFlag(STORAGE_KEYS.sidebarCollapsed)
-  const openPanel = useCallback((panelId) => setActivePanel(panelId), [])
+  const openPanel = useCallback((panelId) => {
+    setSwitchingPanel(activePanelRef.current != null)
+    setActivePanel(panelId)
+  }, [])
   const closePanel = useCallback(
     (panelId) => setActivePanel((current) => (current === panelId ? null : current)),
     [],
   )
+  useEffect(() => {
+    if (switchingPanel) setSwitchingPanel(false)
+  }, [switchingPanel])
   const panels = useMemo(
-    () => ({ activePanel, openPanel, closePanel }),
-    [activePanel, openPanel, closePanel],
+    () => ({ activePanel, switchingPanel, openPanel, closePanel }),
+    [activePanel, switchingPanel, openPanel, closePanel],
   )
 
   return (

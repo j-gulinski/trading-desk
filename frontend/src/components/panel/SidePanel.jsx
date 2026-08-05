@@ -1,5 +1,6 @@
-import { useId, useRef } from 'react'
+import { useRef } from 'react'
 import { usePanelChrome } from '../../hooks/usePanelChrome.js'
+import { usePanelCoordinator } from '../../layout/panelContext.js'
 
 export default function SidePanel({
   eyebrow,
@@ -10,26 +11,26 @@ export default function SidePanel({
   tabs,
   footer,
   wide = false,
-  closeLabel = 'Close panel',
   onClose,
   children,
 }) {
   const panelRef = useRef(null)
-  const titleId = useId()
+  const { switchingPanel } = usePanelCoordinator()
+  const suppressEntryAnimation = useRef(switchingPanel)
 
   usePanelChrome(panelRef, onClose)
 
   return (
     <aside
       ref={panelRef}
-      className={`side-panel${wide ? ' side-panel--wide' : ''}`}
-      role="region"
-      aria-labelledby={titleId}
+      className={`side-panel${wide ? ' side-panel--wide' : ''}${
+        suppressEntryAnimation.current ? ' side-panel--no-enter' : ''
+      }`}
     >
       <header className="side-panel__head">
         <div className="side-panel__heading">
           <span className="side-panel__eyebrow">{eyebrow}</span>
-          <h2 id={titleId}>{title}</h2>
+          <h2>{title}</h2>
           {subtitle && <p>{subtitle}</p>}
         </div>
         <div className="side-panel__head-actions">
@@ -37,7 +38,6 @@ export default function SidePanel({
           <button
             type="button"
             className="side-panel__close"
-            aria-label={closeLabel}
             onClick={onClose}
           >
             ×
