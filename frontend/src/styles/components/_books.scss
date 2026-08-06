@@ -39,18 +39,18 @@
 .books-button--accent {
   border-color: transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
 
   &:hover:not(:disabled) {
     border-color: transparent;
     background: var(--accent-strong);
-    color: #fff;
+    color: var(--text-on-accent);
   }
 }
 
 .books-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
   align-items: start;
   gap: var(--sp-4);
 }
@@ -90,17 +90,13 @@
   font-family: var(--font-mono);
   font-size: 11px;
 }
-.book-tile__badge {
+.book-tile__class {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-elevated);
   color: var(--text-secondary);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-family: var(--font-mono);
+  font-size: 11px;
   white-space: nowrap;
 }
 .book-tile__badge-dot {
@@ -120,9 +116,7 @@
 }
 .book-tile__metric-label {
   color: var(--text-muted);
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 11px;
 }
 .book-tile__metric-value {
   font-family: var(--font-mono);
@@ -163,7 +157,7 @@
   gap: var(--sp-2);
 }
 .book-tile__action {
-  min-height: 28px;
+  min-height: 32px;
   padding: 0 var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -184,11 +178,11 @@
   }
 }
 .book-tile__action--danger {
-  border-color: rgba(248, 113, 113, 0.32);
+  border-color: rgba(var(--neg-rgb), 0.32);
   color: var(--neg);
 
   &:hover {
-    border-color: rgba(248, 113, 113, 0.6);
+    border-color: rgba(var(--neg-rgb), 0.6);
     color: var(--neg);
   }
 }
@@ -256,5 +250,8 @@
   }
   .book-position__stats {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .book-tile__action {
+    min-height: 36px;
   }
 }

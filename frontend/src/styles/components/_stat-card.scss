@@ -9,16 +9,16 @@
   transition: border-color 160ms ease;
 }
 .stat-card--pos {
-  border-color: rgba(61, 220, 132, 0.35);
+  border-color: rgba(var(--pos-rgb), 0.35);
 }
 .stat-card--neg {
-  border-color: rgba(248, 113, 113, 0.35);
+  border-color: rgba(var(--neg-rgb), 0.35);
 }
 .stat-card--info {
-  border-color: rgba(96, 165, 250, 0.35);
+  border-color: rgba(var(--info-rgb), 0.35);
 }
 .stat-card--warn {
-  border-color: rgba(251, 191, 36, 0.4);
+  border-color: rgba(var(--warn-rgb), 0.4);
 }
 .stat-card--link {
   color: inherit;

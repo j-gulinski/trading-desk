@@ -22,7 +22,11 @@ function levelFor(info) {
 }
 
 function labelFor(name) {
-  return name.replace(/-service$/, '').replace(/-/g, ' ').toUpperCase()
+  return name
+    .replace(/-service$/, '')
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
 }
 
 function checkedAtFor(id, info, monitoringCheckedAtMs) {

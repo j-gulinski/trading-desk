@@ -313,9 +313,13 @@ export default function NewTradePanel({ onClose }) {
 
         {ack && (
           <div className="panel-form__ack" role="status">
-            Accepted — {ack.side} {formatNumber(ack.quantity)} × {ack.symbol}
-            {ack.tradeId != null && ` as trade ${formatShortId(ack.tradeId)}`}. It appears in
-            Trades within a few seconds.
+            <span>
+              Accepted — {ack.side} {formatNumber(ack.quantity)} × {ack.symbol}
+              {ack.tradeId != null && ` as trade ${formatShortId(ack.tradeId)}`}.
+            </span>
+            <a className="panel-form__ack-link" href="#/trades" onClick={onClose}>
+              View in Trades
+            </a>
           </div>
         )}
 

@@ -92,7 +92,7 @@
 
 @keyframes data-table-tick-pos {
   from {
-    background: rgba(61, 220, 132, 0.18);
+    background: rgba(var(--pos-rgb), 0.18);
   }
   to {
     background: transparent;
@@ -100,7 +100,7 @@
 }
 @keyframes data-table-tick-neg {
   from {
-    background: rgba(248, 113, 113, 0.18);
+    background: rgba(var(--neg-rgb), 0.18);
   }
   to {
     background: transparent;
@@ -277,11 +277,11 @@
   opacity: 0.58;
 }
 .table-columns__option--target-before {
-  background: rgba(96, 165, 250, 0.06);
+  background: rgba(var(--info-rgb), 0.06);
   box-shadow: inset 0 2px var(--info);
 }
 .table-columns__option--target-after {
-  background: rgba(96, 165, 250, 0.06);
+  background: rgba(var(--info-rgb), 0.06);
   box-shadow: inset 0 -2px var(--info);
 }
 .table-columns__toggle {
@@ -318,7 +318,7 @@
 
   &:hover:not(:disabled) {
     border-color: var(--info);
-    background: rgba(96, 165, 250, 0.1);
+    background: rgba(var(--info-rgb), 0.1);
     color: var(--info);
   }
   &:active:not(:disabled) {
@@ -326,7 +326,7 @@
   }
   &--active {
     border-color: var(--info);
-    background: rgba(96, 165, 250, 0.1);
+    background: rgba(var(--info-rgb), 0.1);
     color: var(--info);
     cursor: grabbing;
   }

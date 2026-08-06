@@ -1,6 +1,6 @@
-export default function Panel({ title, meta, children }) {
+export default function Panel({ title, meta, className = '', children }) {
   return (
-    <section className="panel">
+    <section className={`panel${className ? ` ${className}` : ''}`}>
       <header className="panel__head">
         <span className="panel__title">{title}</span>
         {meta != null && <span className="panel__meta">{meta}</span>}

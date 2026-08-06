@@ -4,12 +4,16 @@ import StreamsBadge from './StreamsBadge.jsx'
 
 export default function Sidebar({ activePath, collapsed, onToggleCollapse }) {
   return (
-    <nav className={`sidebar${collapsed ? ' sidebar--collapsed' : ''}`}>
+    <nav
+      className={`sidebar${collapsed ? ' sidebar--collapsed' : ''}`}
+      aria-label="Primary navigation"
+    >
       <div className="sidebar__brand">
         <div className="sidebar__brand-mark">
           <div className="sidebar__brand-title">TRADING</div>
           <div className="sidebar__brand-sub">Microservices</div>
         </div>
+        <span className="sidebar__brand-compact" aria-hidden="true">TM</span>
         <button
           type="button"
           className="sidebar__collapse"
@@ -32,7 +36,8 @@ export default function Sidebar({ activePath, collapsed, onToggleCollapse }) {
                 key={route.path}
                 href={`#/${route.path}`}
                 className={'sidebar__link' + (isActive ? ' sidebar__link--active' : '')}
-                title={collapsed ? route.label : undefined}
+                aria-label={route.label}
+                title={route.label}
                 aria-current={isActive ? 'page' : undefined}
               >
                 <RouteIcon path={route.path} />
@@ -44,7 +49,7 @@ export default function Sidebar({ activePath, collapsed, onToggleCollapse }) {
       ))}
 
       <div className="sidebar__spacer" />
-      <StreamsBadge collapsed={collapsed} />
+      <StreamsBadge />
     </nav>
   )
 }

@@ -1,6 +1,8 @@
 .env
 __pycache__/
 *.claude
+*.agents
+*.impeccable
 # Logs
 logs
 *.log

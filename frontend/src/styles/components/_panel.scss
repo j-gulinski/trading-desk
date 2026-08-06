@@ -12,10 +12,9 @@
   border-bottom: 1px solid var(--border);
 }
 .panel__title {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
 }
 .panel__meta {
   display: flex;
@@ -26,4 +25,17 @@
 }
 .panel__body {
   padding: var(--sp-4);
+}
+
+@container page (max-width: 620px) {
+  .panel__head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+  .panel__meta {
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }

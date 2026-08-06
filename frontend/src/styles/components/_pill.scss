@@ -31,11 +31,11 @@
 // Health tones
 .pill--healthy {
   color: var(--pos);
-  background: rgba(61, 220, 132, 0.12);
+  background: rgba(var(--pos-rgb), 0.11);
 }
 .pill--degraded {
   color: var(--warn);
-  background: rgba(251, 191, 36, 0.12);
+  background: rgba(var(--warn-rgb), 0.11);
 }
 .pill--stale {
   color: var(--text-secondary);
@@ -43,7 +43,7 @@
 }
 .pill--down {
   color: var(--neg);
-  background: rgba(248, 113, 113, 0.12);
+  background: rgba(var(--neg-rgb), 0.11);
 }
 .pill--unknown {
   color: var(--text-muted);
@@ -53,17 +53,17 @@
 // Audit severities (own names; palette overlaps health but the meaning differs).
 .pill--critical {
   color: var(--neg);
-  background: rgba(248, 113, 113, 0.18);
+  background: rgba(var(--neg-rgb), 0.17);
 }
 .pill--error {
   color: var(--neg);
-  background: rgba(248, 113, 113, 0.12);
+  background: rgba(var(--neg-rgb), 0.11);
 }
 .pill--warning {
   color: var(--warn);
-  background: rgba(251, 191, 36, 0.12);
+  background: rgba(var(--warn-rgb), 0.11);
 }
 .pill--info {
   color: var(--info);
-  background: rgba(96, 165, 250, 0.12);
+  background: rgba(var(--info-rgb), 0.11);
 }

@@ -16,7 +16,7 @@ function weakest(statuses) {
   return order.find((status) => statuses.includes(status)) ?? STREAM_STATUS.connecting
 }
 
-export default function StreamsBadge({ collapsed }) {
+export default function StreamsBadge() {
   const market = useMarketFeedContext()
   const valuations = useValuationFeedContext()
 
@@ -29,11 +29,15 @@ export default function StreamsBadge({ collapsed }) {
     <div
       className={`streams-badge streams-badge--${streamStatusLevel(overall)}`}
       role="status"
+      aria-label={summary}
       title={summary}
     >
       <span className="streams-badge__dot" aria-hidden="true" />
-      <span className="streams-badge__text">
-        {collapsed ? `${connected}/${statuses.length}` : summary}
+      <span className="streams-badge__text streams-badge__text--full" aria-hidden="true">
+        {summary}
+      </span>
+      <span className="streams-badge__text streams-badge__text--compact" aria-hidden="true">
+        {connected}/{statuses.length}
       </span>
     </div>
   )

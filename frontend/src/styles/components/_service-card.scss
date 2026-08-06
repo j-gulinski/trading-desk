@@ -1,55 +1,91 @@
-// Service-health grid + per-service card (ServiceCard) with big latency readout.
+// Service health is a matrix: one shared surface, compact comparable cells.
 .service-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--border);
 }
 
 .service-card {
+  min-width: 0;
+  min-height: 92px;
   background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
   padding: var(--sp-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: space-between;
+  align-items: start;
+  gap: var(--sp-3);
 }
 .service-card--degraded {
-  border-color: rgba(251, 191, 36, 0.4);
+  background: color-mix(in srgb, var(--warn) 3.5%, var(--bg-panel));
 }
 .service-card--stale {
-  border-color: rgba(96, 165, 250, 0.4);
+  background: color-mix(in srgb, var(--info) 3.5%, var(--bg-panel));
 }
 .service-card--down {
-  border-color: rgba(248, 113, 113, 0.4);
-}
-.service-card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  background: color-mix(in srgb, var(--neg) 3.5%, var(--bg-panel));
 }
 .service-card__name {
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-.service-card__latency-label {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-top: var(--sp-2);
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .service-card__latency {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.service-card__latency-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.service-card__latency-value {
   font-family: var(--font-mono);
-  font-size: 26px;
+  font-size: 20px;
   font-weight: 600;
   line-height: 1;
   color: var(--text-primary);
 }
-.service-card__latency .unit {
+.service-card__latency-value .unit {
   font-size: 13px;
   color: var(--text-muted);
   margin-left: 2px;
+}
+
+@container page (max-width: 620px) {
+  .service-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .service-card {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    padding: var(--sp-3);
+  }
+  .service-card__latency {
+    grid-column: auto;
+  }
+  .service-card__latency-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .service-card__latency-value {
+    min-width: 42px;
+    font-size: 15px;
+    text-align: right;
+  }
+  .service-card__latency-value .unit {
+    font-size: 11px;
+  }
 }

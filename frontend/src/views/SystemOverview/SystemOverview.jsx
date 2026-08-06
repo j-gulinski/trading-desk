@@ -72,11 +72,14 @@ export default function SystemOverview() {
   return (
     <section className="page">
       <div className="overview__section-head">
-        <span className="overview__section-title">
-          SERVICE HEALTH · {summary.total} SERVICES
-          {pollAgeMs != null && ` · POLLED ${formatElapsedTime(pollAgeMs)}`}
-          {error && ' · RETRYING'}
-        </span>
+        <div className="overview__section-copy">
+          <h2 className="overview__section-title">Service health</h2>
+          <span className="overview__section-meta">
+            {summary.total} services
+            {pollAgeMs != null && ` · polled ${formatElapsedTime(pollAgeMs)}`}
+            {error && ' · retrying'}
+          </span>
+        </div>
         <FilterChipGroup
           className="overview__summary"
           ariaLabel="Filter services by health"
@@ -91,7 +94,7 @@ export default function SystemOverview() {
       {!loading && (
         <>
           {visibleServices.length > 0 ? (
-            <div className="service-grid">
+            <div className="service-grid" role="list">
               {visibleServices.map((service) => (
                 <ServiceCard key={service.id} service={service} />
               ))}
@@ -104,7 +107,8 @@ export default function SystemOverview() {
 
       <div className="overview__panels">
         <Panel
-          title="LIVE STREAMS"
+          className="overview__streams"
+          title="Live streams"
           meta={
             <>
               <StatusPill
@@ -151,7 +155,7 @@ export default function SystemOverview() {
 
       <div className="overview__panels">
         <Panel
-          title="ERRORS & WARNINGS · LAST 5 MIN"
+          title="Errors & warnings · last 5 min"
           meta={audits.error ? 'UNAVAILABLE' : auditEvents.length || null}
         >
           {audits.loading && <EmptyState message="Loading recent events…" />}
@@ -168,7 +172,7 @@ export default function SystemOverview() {
       </div>
 
       <div className="overview__panels">
-        <Panel title="LOGS · ALL SERVICES">
+        <Panel title="Logs · all services">
           <EmptyState message="Central log stream not published by the backend yet." />
         </Panel>
       </div>

@@ -24,7 +24,7 @@
   }
 }
 .intent-feed__row--rejected {
-  background: rgba(248, 113, 113, 0.06);
+  background: rgba(var(--neg-rgb), 0.06);
 }
 .intent-feed__time {
   color: var(--text-muted);

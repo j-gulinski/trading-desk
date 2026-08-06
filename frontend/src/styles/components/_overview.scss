@@ -1,15 +1,25 @@
 // System Overview page scaffolding: section headers and the panel rows.
 .overview__section-head {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
+  gap: var(--sp-4);
   margin-bottom: var(--sp-4);
 }
+.overview__section-copy {
+  display: grid;
+  gap: 2px;
+}
 .overview__section-title {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+.overview__section-meta {
   color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 .overview__summary {
   display: flex;
@@ -30,12 +40,45 @@
 }
 .overview__stream-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
-  gap: var(--sp-4);
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  min-width: 750px;
+}
+.overview__streams .panel__body {
+  padding: 0;
+  overflow-x: auto;
+}
+.overview__stream-summary .stat-card {
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+.overview__stream-summary .stat-card:last-child {
+  border-right: 0;
 }
 
 @media (max-width: 900px) {
-  .overview__stream-summary {
-    grid-template-columns: 1fr;
+  .overview__section-head {
+    align-items: flex-start;
+  }
+  .overview__summary {
+    max-width: 50%;
+  }
+}
+
+@container page (max-width: 620px) {
+  .overview__section-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .overview__summary {
+    max-width: none;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 2px;
+  }
+  .overview__summary .filter-chip {
+    flex-shrink: 0;
   }
 }
