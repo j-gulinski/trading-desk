@@ -344,7 +344,7 @@ export default function Generator() {
             <EmptyState message="Audit feed unavailable — retrying." />
           )}
           {!feed.loading && !feed.error && rows.length === 0 && (
-            <EmptyState message="No generated intents recorded yet. Start the generator to produce some." />
+            <EmptyState message="No generated intents recorded yet." />
           )}
           {!feed.loading && !feed.error && rows.length > 0 && <IntentFeed rows={rows} />}
         </Panel>

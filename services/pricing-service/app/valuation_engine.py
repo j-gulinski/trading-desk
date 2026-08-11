@@ -5,31 +5,47 @@ from app import cache
 from app.pnl import compute_pnl, signed_quantity
 from app.valuation_publisher import publish_valuation
 from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
-from shared.functions import get_iso_timestamp
-from shared.pricing_math import bond_pv, fx_forward
+from shared.catalog import DEFAULT_CURVE, DEFAULT_VOLATILITY
+from shared.functions import first_present, get_iso_timestamp
+from shared.pricing_math import (
+    bond_pv,
+    european_option_pv,
+    fx_forward,
+    irs_pv,
+)
 from shared.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
 
 
-def _current_price_and_mult(trade):
-    asset_class = trade["asset_class"]
-    meta = trade.get("metadata") or {}
+def market_inputs(asset_class, symbol, meta):
+    inputs = {}
+    if asset_class in ("EQUITY", "COMMODITY", "FUTURES", "FX"):
+        inputs["spot"] = cache.get_spot(symbol)
+    elif asset_class == "EUROPEAN_OPTION":
+        inputs["spot"] = cache.get_spot(meta["underlying_symbol"])
+        inputs["curve"] = cache.get_curve(meta.get("curve", DEFAULT_CURVE))
+    elif asset_class in ("BOND", "IRS"):
+        inputs["curve"] = cache.get_curve(meta.get("curve", DEFAULT_CURVE))
+    return inputs
+
+
+def price_from_inputs(asset_class, meta, inputs):
+    spot = inputs.get("spot")
+    curve = inputs.get("curve")
 
     if asset_class in ("EQUITY", "COMMODITY", "FUTURES"):
-        spot = cache.get_spot(trade["symbol"])
         if not spot:
-            return None, None
-        price = spot.get("mid") or spot.get("last") or spot.get("spot")
+            return None
+        price = first_present(spot, ("mid", "last", "spot"))
         if price is None:
-            return None, None
+            return None
         multiplier = int(meta.get("multiplier", 1)) if asset_class == "FUTURES" else 1
         return Decimal(str(price)), multiplier
 
     if asset_class == "FX":
-        spot = cache.get_spot(trade["symbol"])
         if not spot or spot.get("spot") is None:
-            return None, None
+            return None
         s = Decimal(str(spot["spot"]))
         rd = Decimal(str(spot.get("domestic_rate", 0.0)))
         rf = Decimal(str(spot.get("foreign_rate", 0.0)))
@@ -37,19 +53,44 @@ def _current_price_and_mult(trade):
         return fx_forward(s, rd, rf, T), 1
 
     if asset_class == "BOND":
-        curve = cache.get_curve(meta.get("curve", "USD_GOV"))
         if not curve:
-            return None, None
+            return None
         return Decimal(str(bond_pv(meta, curve))), 1
 
-    return None, None
+    if asset_class == "EUROPEAN_OPTION":
+        if not spot or not curve:
+            return None
+        underlying = first_present(spot, ("mid", "last", "spot"))
+        if underlying is None:
+            return None
+        volatility = meta.get("volatility", DEFAULT_VOLATILITY)
+        price = european_option_pv(meta, underlying, curve, volatility)
+        return Decimal(str(price)), int(meta.get("multiplier", 1))
+
+    if asset_class == "IRS":
+        if not curve:
+            return None
+        return Decimal(str(irs_pv(meta, curve))), 1
+
+    return None
+
+
+def price_instrument(asset_class, symbol, meta):
+    return price_from_inputs(asset_class, meta, market_inputs(asset_class, symbol, meta))
+
+
+def _current_price_and_mult(trade):
+    return price_instrument(
+        trade["asset_class"], trade["symbol"], trade.get("metadata") or {}
+    )
 
 
 def value_trade(trade):
-    price, multiplier = _current_price_and_mult(trade)
-    if price is None:
+    priced = _current_price_and_mult(trade)
+    if priced is None:
         return None
-    quantity = trade["quantity"]  # Decimal
+    price, multiplier = priced
+    quantity = trade["quantity"]
     fair_value = price * quantity * multiplier
     unrealized, realized, total = compute_pnl(
         trade["side"], price, trade["trade_price"], quantity, multiplier
@@ -92,7 +133,9 @@ def value_symbol(symbol):
 
 
 def value_curve(curve_name):
-    return _value_and_store(cache.bond_trades())
+    return _value_and_store(cache.trades_for_curve(curve_name))
+
+
 
 
 def trade_refresh_loop():

@@ -2,6 +2,7 @@ import uuid
 import threading
 from decimal import Decimal
 
+from shared.catalog import CURVE_PRICED_ASSET_CLASSES, DEFAULT_CURVE
 from shared.db import session_scope
 from shared.models import Book, Trade, Valuation
 from shared.functions import utcnow, get_iso_timestamp
@@ -25,6 +26,7 @@ curves = {}
 
 active_trades = {}
 latest_valuations = {}
+book_risk_metrics = {}
 
 
 def update_spot(tick):
@@ -49,12 +51,49 @@ def get_curve(name):
 
 def trades_for_symbol(symbol):
     with data_lock:
-        return [t for t in active_trades.values() if t["symbol"] == symbol]
+        return [
+            t for t in active_trades.values()
+            if t["symbol"] == symbol
+            or (t.get("metadata") or {}).get("underlying_symbol") == symbol
+        ]
 
 
-def bond_trades():
+def _trade_curve(trade):
+    curve = (trade.get("metadata") or {}).get("curve")
+    if curve is None and trade["asset_class"] in CURVE_PRICED_ASSET_CLASSES:
+        return DEFAULT_CURVE
+    return curve
+
+
+def trades_for_curve(curve_name):
     with data_lock:
-        return [t for t in active_trades.values() if t["asset_class"] == "BOND"]
+        return [t for t in active_trades.values() if _trade_curve(t) == curve_name]
+
+
+def book_pnl_snapshot():
+    """Latest cumulative PnL per book, including terminal realized valuations."""
+    totals = {}
+    with data_lock:
+        for valuation in latest_valuations.values():
+            book_id = valuation.get("book_id")
+            if book_id is None:
+                continue
+            entry = totals.setdefault(
+                book_id,
+                {"book_id": book_id, "book_name": valuation.get("book_name"), "pnl": Decimal("0")},
+            )
+            entry["pnl"] += Decimal(str(valuation.get("total_pnl") or 0))
+    return totals
+
+
+def set_book_risk(metrics):
+    with data_lock:
+        book_risk_metrics[metrics["book_id"]] = metrics
+
+
+def all_book_risk():
+    with data_lock:
+        return list(book_risk_metrics.values())
 
 
 def _is_final(valuation):

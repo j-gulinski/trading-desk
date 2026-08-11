@@ -208,12 +208,10 @@ export default function Books() {
           subtitle={target.name}
           message={
             target.closedTrades > 0
-              ? `This book stops accepting trades and leaves the roster. Its ${formatNumber(
-                  target.closedTrades,
-                )} closed ${
-                  target.closedTrades === 1 ? 'trade keeps its' : 'trades keep their'
-                } history here.`
-              : 'This book stops accepting trades and leaves the roster.'
+              ? `Deactivates the book. ${formatNumber(target.closedTrades)} closed ${
+                  target.closedTrades === 1 ? 'trade' : 'trades'
+                } and audit history are retained.`
+              : 'Deactivates the book. No further trades can be booked to it.'
           }
           confirmLabel="Delete book"
           onConfirm={async () => {

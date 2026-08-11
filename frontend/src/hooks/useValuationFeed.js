@@ -4,19 +4,32 @@ import { endpoints } from '../services/endpoints.js'
 import { useBufferedUpdates } from './useBufferedUpdates.js'
 import { useSseStream } from './useSseStream.js'
 import { useStreamSeed } from './useStreamSeed.js'
-import { VALUATION_EVENT } from '../config/valuations.js'
-import { mergeValuations, valuationOf, valuationsFromSeed } from '../domain/valuations.js'
+import { BOOK_RISK_EVENT, VALUATION_EVENT } from '../config/valuations.js'
+import {
+  bookRiskOf,
+  bookRisksFromSeed,
+  mergeBookRisks,
+  mergeValuations,
+  valuationOf,
+  valuationsFromSeed,
+} from '../domain/valuations.js'
 
 export function useValuationFeed() {
   const [valuations, setValuations] = useState({})
+  const [bookRisk, setBookRisk] = useState({})
 
   const pushUpdate = useBufferedUpdates((pending) => {
     setValuations((previous) => mergeValuations(previous, pending))
   })
 
   const { status } = useSseStream(endpoints.pricing.stream, {
-    events: [VALUATION_EVENT],
-    onEvent: (_name, data) => {
+    events: [VALUATION_EVENT, BOOK_RISK_EVENT],
+    onEvent: (name, data) => {
+      if (name === BOOK_RISK_EVENT) {
+        const metric = bookRiskOf(data)
+        if (metric) setBookRisk((previous) => mergeBookRisks(previous, [metric]))
+        return
+      }
       const update = valuationOf(data)
       if (!update) return
 
@@ -30,13 +43,19 @@ export function useValuationFeed() {
   })
 
   const seedStatus = useStreamSeed(status, (signal) =>
-    apiGet(endpoints.pricing.valuations, { signal }).then((seed) => {
-      setValuations((previous) => mergeValuations(previous, valuationsFromSeed(seed)))
+    Promise.all([
+      apiGet(endpoints.pricing.valuations, { signal }),
+      apiGet(endpoints.pricing.bookRisk, { signal }),
+    ]).then(([valuationSeed, riskSeed]) => {
+      setValuations((previous) =>
+        mergeValuations(previous, valuationsFromSeed(valuationSeed)),
+      )
+      setBookRisk((previous) => mergeBookRisks(previous, bookRisksFromSeed(riskSeed)))
     }),
   )
 
   return useMemo(
-    () => ({ valuations, status, seedStatus }),
-    [valuations, status, seedStatus],
+    () => ({ valuations, bookRisk, status, seedStatus }),
+    [valuations, bookRisk, status, seedStatus],
   )
 }

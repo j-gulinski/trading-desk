@@ -4,10 +4,13 @@ import urllib.request
 import urllib.error
 
 from shared.audit import write_audit
+from shared.catalog import BENCHMARK_SYMBOL
+from shared.functions import first_present
 from shared.logging_config import get_logger
 from app import cache
 from app.config import MARKET_DATA_STREAM_URL, SERVICE_NAME
-from app.valuation_engine import value_symbol, value_curve
+from app.book_risk import sample_and_publish
+from app.valuation_engine import value_curve, value_symbol
 from app.valuation_publisher import publish_valuation
 
 log = get_logger(SERVICE_NAME)
@@ -38,9 +41,14 @@ def _handle(event_type, tick):
             publish_valuation(event)
         return
 
+
     cache.update_spot(tick)
     for event in value_symbol(tick["symbol"]):
         publish_valuation(event)
+    if tick["symbol"] == BENCHMARK_SYMBOL:
+        level = first_present(tick, ("last", "spot", "mid"))
+        if level is not None:
+            sample_and_publish(level)
 
 
 def market_data_stream_consumer():

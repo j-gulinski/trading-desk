@@ -182,8 +182,7 @@ export default function ColumnPicker({
           })}
         </div>
         <span className="table-columns__note">
-          Checked columns are shown. Drag a handle to reorder; focused handles also use
-          Arrow Up and Arrow Down.
+          Drag or use arrow keys to reorder.
         </span>
       </div>
     </details>

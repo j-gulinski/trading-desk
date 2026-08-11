@@ -24,13 +24,13 @@ function BookPnlRow({ book }) {
 }
 
 export default function BusinessOverview() {
-  const { valuations, status, seedStatus } = useValuationFeedContext()
+  const { valuations, bookRisk, status, seedStatus } = useValuationFeedContext()
   const { now } = useElapsedTime()
 
   const rows = valuationRowsOf(Object.values(valuations), now)
 
   const summary = summarizeValuations(rows)
-  const books = bookRisksOf(rows)
+  const books = bookRisksOf(rows, bookRisk)
   const currency = summary.currency ?? 'MIXED'
   const valued = summary.live + summary.stale
   const livePercent = valued > 0 ? (summary.live / valued) * 100 : 0
@@ -113,10 +113,10 @@ export default function BusinessOverview() {
                 role="img"
                 aria-label={`${summary.live} of ${valued} open valuations are live`}
               >
-                <span className="freshness__fill" style={{ width: `${livePercent}%` }} />
+                <span className="freshness__fill" style={{ transform: `scaleX(${livePercent / 100})` }} />
               </div>
               <p className="freshness__note">
-                {summary.closed} closed valuations are final and excluded from freshness.
+                Excludes {summary.closed} closed valuations.
               </p>
             </div>
           ) : (

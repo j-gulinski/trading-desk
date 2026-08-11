@@ -9,8 +9,8 @@ import { STREAM_EVENTS } from '../config/marketData.js'
 import {
   instrumentsForStorage,
   instrumentsFromEvent,
-  instrumentsFromSnapshot,
   mergeInstruments,
+  reconcileSnapshotInstruments,
   restoreInstruments,
 } from '../domain/marketData.js'
 
@@ -52,14 +52,6 @@ function storeInstruments(instruments) {
   }
 }
 
-function snapshotUpdates(snapshot) {
-  const receivedAtMs = Date.now()
-  return instrumentsFromSnapshot(snapshot).map((instrument) => ({
-    ...instrument,
-    receivedAtMs,
-  }))
-}
-
 export function useMarketFeed() {
   const [instruments, setInstruments] = useState(readStoredInstruments)
   const [tickCount, setTickCount] = useState(readStoredTickCount)
@@ -91,7 +83,7 @@ export function useMarketFeed() {
 
   const seedStatus = useStreamSeed(status, (signal) =>
     apiGet(endpoints.marketData.snapshot, { signal }).then((snapshot) => {
-      setInstruments((previous) => mergeInstruments(previous, snapshotUpdates(snapshot)))
+      setInstruments((previous) => reconcileSnapshotInstruments(previous, snapshot))
     }),
   )
 

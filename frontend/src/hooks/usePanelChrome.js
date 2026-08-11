@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-export function usePanelChrome(panelRef, onClose) {
+export function usePanelChrome(panelRef, onClose, { closeOnOutsideClick = true } = {}) {
   useEffect(() => {
     const panel = panelRef.current
     if (panel == null) return undefined
@@ -17,11 +17,11 @@ export function usePanelChrome(panelRef, onClose) {
       onClose()
     }
 
-    document.addEventListener('pointerdown', handlePointerDown)
+    if (closeOnOutsideClick) document.addEventListener('pointerdown', handlePointerDown)
     document.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.removeEventListener('pointerdown', handlePointerDown)
+      if (closeOnOutsideClick) document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [panelRef, onClose])
+  }, [panelRef, onClose, closeOnOutsideClick])
 }

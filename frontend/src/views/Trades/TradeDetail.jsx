@@ -43,7 +43,7 @@ export default function TradeDetail({ row, bookNames, onClose }) {
         buildCloseTradeIntent(row.trade.id, row.valuation?.price),
       )
       stallTimer.current = setTimeout(() => {
-        setCloseNote('Still waiting for confirmation — this can take a little longer under load.')
+        setCloseNote('Close pending — awaiting confirmation.')
       }, CLOSE_STALL_MS)
     } catch {
       setClosing(false)

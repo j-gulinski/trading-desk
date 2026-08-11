@@ -10,6 +10,7 @@ import {
   VALUATION_FALLBACK_SORT,
 } from '../../config/valuations.js'
 import {
+  benchmarkOf,
   bookOptionsOf,
   bookRisksOf,
   captureValuationSnapshot,
@@ -18,7 +19,13 @@ import {
   valuationRowsOf,
 } from '../../domain/valuations.js'
 import { countOptions } from '../../domain/filters.js'
-import { formatClockTime, formatNumber, formatSignedAmount } from '../../domain/formatting.js'
+import {
+  formatAmount,
+  formatClockTime,
+  formatNumber,
+  formatPercent,
+  formatSignedAmount,
+} from '../../domain/formatting.js'
 import StatCard from '../../components/cards/StatCard.jsx'
 import StreamHeader from '../../components/status/StreamHeader.jsx'
 import FilterBar from '../../components/filters/FilterBar.jsx'
@@ -37,7 +44,7 @@ function matchesSearch(row, search) {
 }
 
 export default function Valuations() {
-  const { valuations, status, seedStatus } = useValuationFeedContext()
+  const { valuations, bookRisk, status, seedStatus } = useValuationFeedContext()
   const { now } = useElapsedTime()
 
   const [activeClass, setActiveClass] = useState(null)
@@ -48,6 +55,45 @@ export default function Valuations() {
     (row) => !row.valuation.closed,
   )
   const summary = summarizeValuations(openRows)
+
+  const portfolioMetric = bookRisk.PORTFOLIO
+  const portfolioBook = portfolioMetric
+    ? {
+        name: 'PORTFOLIO',
+        assetClass: 'ALL BOOKS',
+        unrealized: summary.unrealized,
+        open: summary.open,
+        live: summary.live,
+        alpha: portfolioMetric.alpha,
+        alphaWindowReturn: portfolioMetric.alphaWindowReturn,
+        alphaWindowPnl: portfolioMetric.alphaWindowPnl,
+        bookWindowReturn: portfolioMetric.bookWindowReturn,
+        bookWindowPnl: portfolioMetric.bookWindowPnl,
+        benchmarkWindowReturn: portfolioMetric.benchmarkWindowReturn,
+        beta: portfolioMetric.beta,
+        dollarBeta: portfolioMetric.dollarBeta,
+        rSquared: portfolioMetric.rSquared,
+        capitalBase: portfolioMetric.capitalBase,
+        benchmark: portfolioMetric.benchmark,
+        riskStatus: portfolioMetric.status,
+        riskObservations: portfolioMetric.observations,
+        riskMinimumObservations: portfolioMetric.minimumObservations,
+        riskWindow: portfolioMetric.window,
+      }
+    : null
+
+  const benchmark = benchmarkOf(bookRisk)
+  const benchmarkNote = benchmark
+    ? [
+        `Benchmark: ${benchmark.symbol}`,
+        Number.isFinite(benchmark.level) ? formatAmount(benchmark.level, 2) : null,
+        Number.isFinite(benchmark.windowReturn)
+          ? `${formatPercent(benchmark.windowReturn * 100, 2)} over ${benchmark.observations} samples`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : 'Benchmark: MARKET_INDEX'
 
   const table = useTableState({
     columns: VALUATION_COLUMNS,
@@ -81,7 +127,7 @@ export default function Valuations() {
   const visibleRows = matchingRows.slice(0, MAX_RENDERED_ROWS)
   const hiddenRowCount = matchingRows.length - visibleRows.length
 
-  const books = bookRisksOf(openRows)
+  const books = bookRisksOf(openRows, bookRisk)
   const bookOptions = bookOptionsOf(openRows)
   const currency = summary.currency ?? 'MIXED'
 
@@ -135,12 +181,13 @@ export default function Valuations() {
         <div className="valuation-section__head">
           <div>
             <h2 id="book-risk-title">Alpha / beta by book</h2>
-            <p>Book risk against the MARKET_INDEX benchmark</p>
+            <p>{benchmarkNote}</p>
           </div>
           <span>{books.length} books with open valuations</span>
         </div>
         {books.length > 0 ? (
           <div className="book-grid">
+            {portfolioBook && <BookRiskCard key="portfolio" book={portfolioBook} />}
             {books.map((book) => (
               <BookRiskCard key={book.id} book={book} />
             ))}
@@ -154,7 +201,7 @@ export default function Valuations() {
         <div className="valuation-section__head">
           <div hidden={matchingRows.length === 0}>
             <h2 id="valuation-table-title">Top 100 open positions</h2>
-            <p>Ranked by return or unrealized PnL — current signal for spotting alpha</p>
+            <p>Ranked by return or unrealized PnL</p>
           </div>
           <span>
             {hiddenRowCount > 0 ? `${visibleRows.length} of ${matchingRows.length}` : visibleRows.length} rows

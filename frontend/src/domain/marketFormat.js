@@ -74,4 +74,3 @@ export function formatPercentDelta(percent) {
   const sign = rounded > 0 ? '+' : '-'
   return `${sign}${Math.abs(rounded).toFixed(decimals)}%`
 }
-

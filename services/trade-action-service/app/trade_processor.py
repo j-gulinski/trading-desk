@@ -1,15 +1,20 @@
+import math
+import re
 import uuid
 
 from sqlalchemy.exc import IntegrityError
 
 from shared.db import session_scope
 from shared.catalog import INSTRUMENT_CATALOG
+from shared.term_schemas import validate_terms
 from shared.audit import write_audit
 from shared.logging_config import get_logger
 from app import action_queue, repository
 from app.config import SERVICE_NAME
 
 log = get_logger(SERVICE_NAME)
+
+_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9_.\-]{1,31}$")
 
 
 def _audit(session, event_type, message, intent, severity="INFO"):
@@ -18,14 +23,47 @@ def _audit(session, event_type, message, intent, severity="INFO"):
                 severity=severity, session=session)
 
 
+def _resolve_terms(intent):
+    asset_class = intent.get("asset_class")
+    custom = intent.get("terms")
+    if custom is not None:
+        symbol = intent.get("symbol")
+        if not isinstance(symbol, str) or not _SYMBOL_PATTERN.match(symbol):
+            return None, "invalid custom instrument symbol"
+        return validate_terms(asset_class, custom)
+    terms = INSTRUMENT_CATALOG.get(intent.get("symbol"))
+    if terms is None or terms["asset_class"] != asset_class:
+        return None, "unknown catalog instrument for asset class"
+    return terms, None
+
+
+def _price_error(intent):
+    try:
+        price = float(intent.get("trade_price"))
+    except (TypeError, ValueError):
+        return "invalid trade price"
+    if not math.isfinite(price):
+        return "invalid trade price"
+    if price <= 0.0 and intent.get("asset_class") != "IRS":
+        return "non-positive trade price"
+    return None
+
+
 def _open(intent):
     book_id = _parse_uuid(intent.get("book_id"))
-    terms = INSTRUMENT_CATALOG.get(intent.get("symbol"))
+    terms, term_error = _resolve_terms(intent)
+    price_error = _price_error(intent)
     try:
         with session_scope() as session:
             book = repository.get_active_book(session, book_id) if book_id else None
-            if book is None or book.expected_asset_class != intent.get("asset_class"):
-                _audit(session, "ACTION_REJECTED", "Open rejected: bad book or asset class", intent, "WARNING")
+            if (
+                book is None
+                or book.expected_asset_class != intent.get("asset_class")
+                or terms is None
+                or price_error is not None
+            ):
+                message = term_error or price_error or "bad book or asset class"
+                _audit(session, "ACTION_REJECTED", f"Open rejected: {message}", intent, "WARNING")
                 return action_queue.incr("rejected")
             repository.insert_trade(session, intent, terms)
             _audit(session, "TRADE_CREATED", "Trade created", intent)

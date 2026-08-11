@@ -11,6 +11,11 @@ function toNum(value) {
   return Number.isFinite(n) ? n : null
 }
 
+function toTime(value) {
+  const parsed = Date.parse(value ?? '')
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 export function valuationOf(data) {
   if (!data || typeof data.trade_id !== 'string' || data.trade_id.length === 0) return null
   const payload = data.valuation_payload ?? {}
@@ -47,6 +52,74 @@ export function valuationOf(data) {
     closed: payload.final === true,
     valuationTimeMs: Number.isFinite(valuationTime) ? valuationTime : null,
   }
+}
+
+export function bookRiskOf(data) {
+  if (!data || typeof data.book_id !== 'string') return null
+  return {
+    id: data.book_id,
+    bookName: data.book_name ?? null,
+    benchmark: data.benchmark ?? 'MARKET_INDEX',
+    benchmarkLevel: toNum(data.benchmark_level),
+    benchmarkWindowReturn: toNum(data.benchmark_window_return),
+    alpha: toNum(data.alpha),
+    alphaWindowReturn: toNum(data.alpha_window_return),
+    alphaWindowPnl: toNum(data.alpha_window_pnl),
+    bookWindowReturn: toNum(data.book_window_return),
+    bookWindowPnl: toNum(data.book_window_pnl),
+    beta: toNum(data.beta),
+    dollarBeta: toNum(data.dollar_beta),
+    rSquared: toNum(data.r_squared),
+    capitalBase: toNum(data.capital_base),
+    observations: toNum(data.observations) ?? 0,
+    minimumObservations: toNum(data.minimum_observations) ?? 20,
+    window: toNum(data.window) ?? 100,
+    status: data.status ?? 'INSUFFICIENT_DATA',
+    calculatedAtMs: toTime(data.calculated_at),
+  }
+}
+
+export function benchmarkOf(riskMetrics) {
+  let freshest = null
+  for (const metric of Object.values(riskMetrics)) {
+    if (
+      freshest == null ||
+      (Number.isFinite(metric.calculatedAtMs) &&
+        (!Number.isFinite(freshest.calculatedAtMs) || metric.calculatedAtMs > freshest.calculatedAtMs))
+    ) {
+      freshest = metric
+    }
+  }
+  if (!freshest) return null
+  return {
+    symbol: freshest.benchmark,
+    level: freshest.benchmarkLevel,
+    windowReturn: freshest.benchmarkWindowReturn,
+    observations: freshest.observations,
+    window: freshest.window,
+  }
+}
+
+export function bookRisksFromSeed(seed) {
+  return (Array.isArray(seed) ? seed : []).map(bookRiskOf).filter(Boolean)
+}
+
+export function mergeBookRisks(previous, updates) {
+  let result = previous
+  for (const update of updates) {
+    const current = result[update.id]
+    if (
+      current &&
+      Number.isFinite(current.calculatedAtMs) &&
+      Number.isFinite(update.calculatedAtMs) &&
+      update.calculatedAtMs <= current.calculatedAtMs
+    ) {
+      continue
+    }
+    if (result === previous) result = { ...result }
+    result[update.id] = update
+  }
+  return result
 }
 
 export function valuationsFromSeed(seed) {
@@ -145,7 +218,7 @@ export function summarizeValuations(rows) {
   return { ...summary, books: summary.books.size }
 }
 
-export function bookRisksOf(rows) {
+export function bookRisksOf(rows, riskMetrics = {}) {
   const books = new Map()
 
   for (const row of rows) {
@@ -177,6 +250,26 @@ export function bookRisksOf(rows) {
     if (book.assetClass !== valuation.assetClass) book.assetClass = 'MIXED'
     if (book.currency !== valuation.currency) book.currency = null
     accumulate(book, row)
+  }
+
+  for (const [id, book] of books) {
+    const metric = riskMetrics[id]
+    if (!metric) continue
+    book.alpha = metric.alpha
+    book.alphaWindowReturn = metric.alphaWindowReturn
+    book.alphaWindowPnl = metric.alphaWindowPnl
+    book.bookWindowReturn = metric.bookWindowReturn
+    book.bookWindowPnl = metric.bookWindowPnl
+    book.benchmarkWindowReturn = metric.benchmarkWindowReturn
+    book.beta = metric.beta
+    book.dollarBeta = metric.dollarBeta
+    book.rSquared = metric.rSquared
+    book.capitalBase = metric.capitalBase
+    book.riskStatus = metric.status
+    book.riskObservations = metric.observations
+    book.riskMinimumObservations = metric.minimumObservations
+    book.riskWindow = metric.window
+    book.benchmark = metric.benchmark
   }
 
   return Array.from(books.values()).sort((a, b) => a.name.localeCompare(b.name))

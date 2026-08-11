@@ -13,6 +13,9 @@
   flex-direction: column;
   gap: 6px;
 }
+.panel-form__field--span {
+  grid-column: 1 / -1;
+}
 .panel-form__label {
   color: var(--text-muted);
   font-size: 10px;
@@ -60,13 +63,27 @@
 
 .panel-form__side {
   width: max-content;
+  max-width: 100%;
   display: inline-flex;
   padding: 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-app);
 }
+.panel-form__side--stretch {
+  display: flex;
+  width: 100%;
+
+  .panel-form__side-button {
+    flex: 1;
+    text-align: center;
+  }
+}
 .panel-form__side-button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   min-height: 28px;
   padding: 3px 14px;
   border: 0;
@@ -113,6 +130,8 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 600;
@@ -120,6 +139,7 @@
 
 .panel-form__summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
   color: var(--text-secondary);

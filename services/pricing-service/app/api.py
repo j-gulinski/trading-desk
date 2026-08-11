@@ -5,6 +5,9 @@ from bottle import request, response
 from app import cache
 from app.config import SERVICE_NAME, VALUATION_STREAM_QUEUE_SIZE
 from app.schemas import ScenarioRequest
+from app.valuation_engine import price_instrument
+from shared.catalog import INSTRUMENT_CATALOG
+from shared.term_schemas import validate_terms
 from app.scenario import run_scenario
 from shared.serialization import to_json
 from shared.logging_config import get_logger
@@ -17,6 +20,41 @@ app = bottle.Bottle()
 def get_valuations():
     response.content_type = "application/json"
     return to_json(cache.all_valuations())
+
+
+@app.route("/book-risk")
+def get_book_risk():
+    response.content_type = "application/json"
+    return to_json(cache.all_book_risk())
+
+
+@app.route("/price", method="POST")
+def price_preview():
+    response.content_type = "application/json"
+    body = request.json or {}
+    symbol = body.get("symbol")
+    if body.get("terms") is not None:
+        terms, error = validate_terms(body.get("asset_class"), body["terms"])
+        if terms is None:
+            response.status = 400
+            return to_json({"error": error, "symbol": symbol})
+    else:
+        terms = INSTRUMENT_CATALOG.get(symbol)
+        if terms is None:
+            response.status = 404
+            return to_json({"error": "instrument not found", "symbol": symbol})
+    priced = price_instrument(terms["asset_class"], symbol, terms)
+    if priced is None:
+        response.status = 503
+        return to_json({"error": "required market data is not available", "symbol": symbol})
+    price, multiplier = priced
+    return to_json({
+        "symbol": symbol,
+        "asset_class": terms["asset_class"],
+        "currency": terms.get("currency", "USD"),
+        "price": price,
+        "multiplier": multiplier,
+    })
 
 
 @app.route("/valuations/<trade_id>")
@@ -42,8 +80,8 @@ def valuation_stream():
         yield ": connected\n\n"
         try:
             while True:
-                event = client_q.get()
-                yield f"event: valuation_update\ndata: {to_json(event)}\n\n"
+                message = client_q.get()
+                yield f"event: {message['event']}\ndata: {to_json(message['data'])}\n\n"
         except Exception as exc:
             log.debug("stream_client_error", error=type(exc).__name__)
         finally:

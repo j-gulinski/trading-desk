@@ -6,6 +6,8 @@ class AssetClass(str, Enum):
     FUTURES = "FUTURES"
     FX = "FX"
     BOND = "BOND"
+    EUROPEAN_OPTION = "EUROPEAN_OPTION"
+    IRS = "IRS"
 
 class Side(str, Enum):
     BUY = "BUY"

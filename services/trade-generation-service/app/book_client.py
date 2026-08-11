@@ -2,12 +2,15 @@ import json
 import urllib.request
 
 from shared.catalog import INSTRUMENT_CATALOG
+from shared.term_schemas import TERM_SCHEMAS
 from shared.logging_config import get_logger
 from app.config import BOOKS_URL, SERVICE_NAME
 
 log = get_logger(SERVICE_NAME)
 
-ASSET_CLASSES = sorted({terms["asset_class"] for terms in INSTRUMENT_CATALOG.values()})
+ASSET_CLASSES = sorted(
+    {terms["asset_class"] for terms in INSTRUMENT_CATALOG.values()} | set(TERM_SCHEMAS)
+)
 
 
 def _request(url: str, body: dict | None = None):
@@ -20,14 +23,15 @@ def _request(url: str, body: dict | None = None):
 
 
 def ensure_books() -> dict:
-    existing = {book["expected_asset_class"]: book["book_id"] for book in _request(BOOKS_URL)}
     books = {}
+    for book in _request(BOOKS_URL):
+        if book.get("is_active") is False:
+            continue
+        books.setdefault(book["expected_asset_class"], []).append(book["book_id"])
     for asset_class in ASSET_CLASSES:
-        if asset_class in existing:
-            books[asset_class] = existing[asset_class]
-        else:
+        if asset_class not in books:
             created = _request(BOOKS_URL, {"name": f"{asset_class}_DEFAULT",
                                            "expected_asset_class": asset_class})
-            books[asset_class] = created["book_id"]
+            books[asset_class] = [created["book_id"]]
             log.info("default_book_created", book_id=created["book_id"], asset_class=asset_class)
     return books

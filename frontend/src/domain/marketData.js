@@ -171,6 +171,24 @@ export function mergeInstruments(previous, updates) {
   return accepted ? instruments : previous
 }
 
+export function reconcileSnapshotInstruments(previous, snapshot) {
+  const receivedAtMs = Date.now()
+  const updates = instrumentsFromSnapshot(snapshot).map((instrument) => ({
+    ...instrument,
+    receivedAtMs,
+  }))
+  const snapshotStreamId = snapshot?.stream_id ?? null
+  if (snapshotStreamId == null) return mergeInstruments(previous, updates)
+
+  const snapshotIds = new Set(updates.map((instrument) => instrument.id))
+  const retained = Object.fromEntries(
+    Object.entries(previous).filter(([id, instrument]) =>
+      snapshotIds.has(id) || instrument.sourceStreamId === snapshotStreamId,
+    ),
+  )
+  return mergeInstruments(retained, updates)
+}
+
 export function instrumentsForStorage(instruments) {
   return {
     version: MARKET_STATE_STORAGE_VERSION,

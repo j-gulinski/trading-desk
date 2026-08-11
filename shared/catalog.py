@@ -1,3 +1,13 @@
+import os
+
+# The symbol whose ticks drive book alpha/beta sampling. Env-overridable so a real
+# index series (e.g. SPY once external market data is wired in) is a config change,
+# not a code change.
+BENCHMARK_SYMBOL = os.environ.get("BENCHMARK_SYMBOL", "MARKET_INDEX")
+DEFAULT_CURVE = "USD_GOV"
+DEFAULT_VOLATILITY = 0.22
+CURVE_PRICED_ASSET_CLASSES = ("BOND", "IRS", "EUROPEAN_OPTION")
+
 INSTRUMENT_CATALOG = {
     "ACME": {
         "asset_class": "EQUITY",
@@ -36,3 +46,10 @@ INSTRUMENT_CATALOG = {
         "multiplier": 50
     },
 }
+
+
+def public_instrument_catalog():
+    return [
+        {"symbol": symbol, **dict(terms)}
+        for symbol, terms in sorted(INSTRUMENT_CATALOG.items())
+    ]

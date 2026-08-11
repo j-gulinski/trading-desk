@@ -1,4 +1,5 @@
 export const VALUATION_EVENT = 'valuation_update'
+export const BOOK_RISK_EVENT = 'book_risk_update'
 
 export const VALUATION_STALE_AFTER_MS = 10000
 
@@ -77,6 +78,3 @@ export const VALUATION_COLUMNS = [
 export const DEFAULT_VALUATION_SORT = { column: 'unrealized', direction: 'desc' }
 
 export const VALUATION_FALLBACK_SORT = { column: 'trade', direction: 'asc' }
-
-
-export const ALPHA_BETA_UNAVAILABLE = 'Pricing does not publish book alpha/beta yet'

@@ -1,76 +1,56 @@
 from decimal import Decimal
 
-from app import cache
 from app.schemas import ScenarioRequest
-from shared.pricing_math import bond_pv, fx_forward
+from app.valuation_engine import market_inputs, price_from_inputs
+
+SPOT_SHOCKED = ("EQUITY", "COMMODITY", "FUTURES", "FX", "EUROPEAN_OPTION")
+CURVE_SHOCKED = ("BOND", "IRS")
+SPOT_LEVEL_KEYS = ("spot", "mid", "last", "bid", "ask")
 
 
-def _shocked_bond_pv(meta: dict, curve: dict, shock_bps: float) -> float:
-    bump = shock_bps / 10000.0
-    bumped = {"tenors": curve["tenors"], "rates": [r + bump for r in curve["rates"]]}
-    return bond_pv(meta, bumped)
-
-
-def _base_price_from_cache(inst) -> Decimal | None:
-    if inst.asset_class in ("EQUITY", "COMMODITY", "FUTURES"):
-        spot = cache.get_spot(inst.symbol)
+def _shocked_inputs(inputs, asset_class, shock):
+    shocked = dict(inputs)
+    if asset_class in SPOT_SHOCKED:
+        spot = inputs.get("spot")
         if not spot:
             return None
-        raw = spot.get("spot") or spot.get("mid") or spot.get("last")
-        return Decimal(str(raw)) if raw is not None else None
-
-    if inst.asset_class == "FX":
-        spot = cache.get_spot(inst.symbol)
-        if not spot or spot.get("spot") is None:
-            return None
-        s = Decimal(str(spot["spot"]))
-        rd = Decimal(str(spot.get("domestic_rate", 0.0)))
-        rf = Decimal(str(spot.get("foreign_rate", 0.0)))
-        T = Decimal(str(inst.meta.get("tenor_years", 1.0)))
-        return fx_forward(s, rd, rf, T)
-
-    if inst.asset_class == "BOND":
-        curve = cache.get_curve(inst.meta.get("curve", "USD_GOV"))
+        factor = 1.0 + shock
+        shocked["spot"] = {
+            key: value * factor
+            if key in SPOT_LEVEL_KEYS and isinstance(value, (int, float))
+            else value
+            for key, value in spot.items()
+        }
+    if asset_class in CURVE_SHOCKED:
+        curve = inputs.get("curve")
         if not curve:
             return None
-        return Decimal(str(bond_pv(inst.meta, curve)))
-
-    return None
-
-
-def _multiplier(inst) -> int:
-    if inst.asset_class == "FUTURES":
-        return int(inst.meta.get("multiplier", 1))
-    return 1
-
-
-def _shocked_price(inst, base_price: Decimal, shock: float) -> Decimal | None:
-    if inst.asset_class in ("EQUITY", "COMMODITY", "FUTURES", "FX"):
-        return base_price * Decimal(str(1 + shock))
-
-    if inst.asset_class == "BOND":
-        curve = cache.get_curve(inst.meta.get("curve", "USD_GOV"))
-        if not curve:
-            return None
-        rate_impact = Decimal(str(_shocked_bond_pv(inst.meta, curve, shock))) - Decimal(str(bond_pv(inst.meta, curve)))
-        return base_price + rate_impact
-
-    return None
+        bump = shock / 10000.0
+        shocked["curve"] = {**curve, "rates": [r + bump for r in curve["rates"]]}
+    return shocked
 
 
 def run_scenario(req: ScenarioRequest) -> dict | None:
     inst = req.position.instrument
     pos = req.position
 
-    base_price = inst.current_price if inst.current_price is not None else _base_price_from_cache(inst)
-    if base_price is None:
+    inputs = market_inputs(inst.asset_class, inst.symbol, inst.meta)
+    base_priced = price_from_inputs(inst.asset_class, inst.meta, inputs)
+    if base_priced is None:
         return None
+    model_base, multiplier = base_priced
 
-    shocked_price = _shocked_price(inst, base_price, req.shock)
-    if shocked_price is None:
+    shocked = _shocked_inputs(inputs, inst.asset_class, req.shock)
+    if shocked is None:
         return None
+    shocked_priced = price_from_inputs(inst.asset_class, inst.meta, shocked)
+    if shocked_priced is None:
+        return None
+    model_shocked, _ = shocked_priced
 
-    multiplier = _multiplier(inst)
+    base_price = inst.current_price if inst.current_price is not None else model_base
+    shocked_price = base_price + (model_shocked - model_base)
+
     direction = Decimal(-1) if pos.side == "SELL" else Decimal(1)
 
     entry_value = pos.trade_price * pos.quantity * multiplier
@@ -90,6 +70,6 @@ def run_scenario(req: ScenarioRequest) -> dict | None:
         "base": {"price": base_price, "value": base_value, "base_pnl": base_pnl},
         "scenario": {"price": shocked_price, "value": scenario_value, "scenario_pnl": scenario_pnl},
         "base_pnl": base_pnl,
-        "scenario_pnl": scenario_pnl,        
+        "scenario_pnl": scenario_pnl,
         "current_pnl": current_pnl,
     }

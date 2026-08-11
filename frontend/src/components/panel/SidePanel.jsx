@@ -11,6 +11,7 @@ export default function SidePanel({
   tabs,
   footer,
   wide = false,
+  dismissOnOutsideClick = true,
   onClose,
   children,
 }) {
@@ -18,7 +19,7 @@ export default function SidePanel({
   const { switchingPanel } = usePanelCoordinator()
   const suppressEntryAnimation = useRef(switchingPanel)
 
-  usePanelChrome(panelRef, onClose)
+  usePanelChrome(panelRef, onClose, { closeOnOutsideClick: dismissOnOutsideClick })
 
   return (
     <aside

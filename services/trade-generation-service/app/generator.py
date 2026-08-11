@@ -7,7 +7,7 @@ from decimal import Decimal
 from shared.catalog import INSTRUMENT_CATALOG
 from shared.logging_config import get_logger
 from shared.audit import write_audit
-from app import action_client, blotter_client, market_data_client
+from app import action_client, blotter_client, book_client, market_data_client
 from app.config import (
     SERVICE_NAME,
     TARGET_OPEN_TRADES,
@@ -17,7 +17,11 @@ from app.config import (
 
 log = get_logger(SERVICE_NAME)
 
-SYMBOL_BY_CLASS = {terms["asset_class"]: symbol for symbol, terms in INSTRUMENT_CATALOG.items()}
+SYMBOL_BY_CLASS = {
+    terms["asset_class"]: symbol
+    for symbol, terms in INSTRUMENT_CATALOG.items()
+}
+GENERATED_SYMBOLS = set(SYMBOL_BY_CLASS.values())
 
 MIN_INTERVAL_MS = 100
 MAX_INTERVAL_MS = 60_000
@@ -48,23 +52,22 @@ _config = {
 }
 _config_wait = threading.Event()
 _last_open_sync_ms = 0
+_last_books_sync_ms = 0
 _ACTIVE_OPEN_TRADES_SYNC_MS = 10_000
+_BOOKS_SYNC_MS = 10_000
 
 
 def set_books(books: dict) -> None:
+    global _books
     with _lock:
-        _books.update(books)
+        _books = dict(books)
 
 
 def sync_open_trades() -> int:
     global _open_trades, _last_open_sync_ms
     active_trades = blotter_client.active_trades()
     with _lock:
-        _open_trades = {
-            trade_id: symbol
-            for trade_id, symbol in active_trades.items()
-            if symbol in INSTRUMENT_CATALOG
-        }
+        _open_trades = dict(active_trades)
         tracked = len(_open_trades)
     _last_open_sync_ms = int(time.time() * 1000)
     return tracked
@@ -77,6 +80,17 @@ def _sync_open_trades_if_due() -> None:
         sync_open_trades()
     except Exception:
         log.exception("open_trades_sync_failed")
+
+
+def _sync_books_if_due() -> None:
+    global _last_books_sync_ms
+    if int(time.time() * 1000) - _last_books_sync_ms < _BOOKS_SYNC_MS:
+        return
+    _last_books_sync_ms = int(time.time() * 1000)
+    try:
+        set_books(book_client.ensure_books())
+    except Exception:
+        log.exception("books_sync_failed")
 
 
 def get_config() -> dict:
@@ -113,9 +127,15 @@ def _incr(key: str) -> None:
 
 def _build_open(snapshot: dict) -> dict | None:
     with _lock:
-        if not _books:
-            return None
-        asset_class, book_id = random.choice(list(_books.items()))
+        supported_books = [
+            (asset_class, book_id)
+            for asset_class, book_ids in _books.items()
+            if asset_class in SYMBOL_BY_CLASS
+            for book_id in book_ids
+        ]
+    if not supported_books:
+        return None
+    asset_class, book_id = random.choice(supported_books)
     symbol = SYMBOL_BY_CLASS[asset_class]
     terms = INSTRUMENT_CATALOG[symbol]
     price = market_data_client.current_price(snapshot, symbol, terms)
@@ -142,9 +162,14 @@ def _size_quantity(price: Decimal, multiplier: int) -> int:
 
 def _build_close(snapshot: dict) -> dict | None:
     with _lock:
-        if not _open_trades:
-            return None
-        trade_id, symbol = random.choice(list(_open_trades.items()))
+        closeable = [
+            (trade_id, symbol)
+            for trade_id, symbol in _open_trades.items()
+            if symbol in GENERATED_SYMBOLS
+        ]
+    if not closeable:
+        return None
+    trade_id, symbol = random.choice(closeable)
     price = market_data_client.current_price(snapshot, symbol, INSTRUMENT_CATALOG[symbol])
     if price is None:
         return None
@@ -200,6 +225,7 @@ def run_loop() -> None:
         _running.wait()
         while _running.is_set():
             try:
+                _sync_books_if_due()
                 _sync_open_trades_if_due()
                 generate_once()
             except Exception:

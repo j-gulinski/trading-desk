@@ -5,6 +5,8 @@ from bottle import request, response
 
 from app import action_queue
 from app.config import SERVICE_NAME
+from shared.catalog import public_instrument_catalog
+from shared.term_schemas import public_term_schemas
 
 app = bottle.Bottle()
 
@@ -31,6 +33,16 @@ def _accept(intent):
 @app.route("/health")
 def health():
     return _json({"service": SERVICE_NAME, "status": "UP"})
+
+
+@app.route("/instruments")
+def instruments():
+    return _json(public_instrument_catalog())
+
+
+@app.route("/instruments/term-schemas")
+def term_schemas():
+    return _json(public_term_schemas())
 
 
 @app.route("/trade-actions", method="POST")

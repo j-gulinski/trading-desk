@@ -20,6 +20,8 @@ export const endpoints = {
   pricing: {
     stream: '/api/pricing/valuation-stream',
     valuations: '/api/pricing/valuations',
+    bookRisk: '/api/pricing/book-risk',
+    price: '/api/pricing/price',
   },
   books: {
     list: '/api/books/books',
@@ -36,6 +38,8 @@ export const endpoints = {
   tradeAction: {
     submit: '/api/trade-action/trade-actions',
     queueStatus: '/api/trade-action/queue/status',
+    instruments: '/api/trade-action/instruments',
+    termSchemas: '/api/trade-action/instruments/term-schemas',
   },
   tradeGeneration: {
     status: '/api/trade-generation/status',
