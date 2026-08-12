@@ -78,7 +78,7 @@ The project deliberately uses one small, explainable model per new product. Pric
   pay-fixed NPV   = floating leg PV − fixed leg PV
   ```
 
-  The projection curve defaults to the discount curve (only `USD_GOV` is published today), under which the floating leg **telescopes exactly** to the textbook closed form `N × [1 − DF(maturity)]` — verified numerically to `1e-10`. So the code shows the standard two-curve model, produces the simple formula's number, and pricing off a real projection curve later is a one-argument change. Proof and discussion in [`docs/phase-7-notes.md`](docs/phase-7-notes.md) §5.
+  The projection curve defaults to the discount curve (only `USD_GOV` is published today), under which the floating leg **telescopes exactly** to the textbook closed form `N × [1 − DF(maturity)]` — verified numerically to `1e-10`. So the code shows the standard two-curve model, produces the simple formula's number, and pricing off a real projection curve later is a one-argument change. Proof and discussion in [`docs/pricing.md`](docs/pricing.md#5-irs--the-float-leg-teaches-the-two-curve-model).
 
 - **Alpha/beta per book:** a rolling regression of book returns against benchmark returns, computed inside Pricing and published per book over the valuation SSE stream (plus a `GET /book-risk` seed). Full write-up — concepts, the capital-base convention, data flow, configuration — in [`docs/alpha-beta.md`](docs/alpha-beta.md).
 
@@ -105,7 +105,7 @@ The project deliberately uses one small, explainable model per new product. Pric
 
 The instrument universe is split the way a desk splits it. `shared/catalog.py` holds only **listed, quoted instruments** (equity, FX, commodity, futures, government bonds) — you trade them by picking one, and their terms are copied at open. **OTC classes** (European options, IRS) have no catalog entries: every option and swap is defined by its terms at open. `shared/term_schemas.py` declares per OTC class which fields define a product, with bounds and server-side defaults (curve, multiplier, volatility); Trade Action validates client-supplied terms against that schema, and the New Trade form renders its input fields *from* the same schema — a listed book shows an instrument picker, an OTC book shows term fields, with no mode switch. A defined product exists only as the trade's frozen terms — publishing it to a shared instrument list (a normalized `instruments` table) is deferred to the generic-catalog phase.
 
-The remaining plan (generic instrument catalog) is in [`docs/implementation-plan.md`](docs/implementation-plan.md).
+The full data-model reasoning — including why no migration was required — is in [`docs/architecture.md`](docs/architecture.md#6-data-model).
 
 ## Frontend views
 
@@ -199,7 +199,7 @@ allowed — `409` means the book still has positions, `503` means we could not t
 | 8 | Browser consumes SSE | Every delivered message is parsed and normalized immediately |
 | 9 | Browser applies ordering | Final valuations apply immediately; live updates coalesce latest-per-trade |
 | 10 | Shared 500 ms scheduler flushes | Live state can publish twice per second; freshness advances on every second scheduler tick |
-| 11 | Valuation screen derives its view | Full context → status → filter → sort → first 250 matching rows |
+| 11 | Valuation screen derives its view | Full context → status → filter → sort → first 100 matching rows |
 
 The expensive backend path finishes before queue publication. Increasing queue capacity can absorb
 a burst, but it cannot make calculation or database persistence faster.
@@ -220,7 +220,7 @@ into React. Repeated live updates for the same trade collapse into a latest-valu
 flushes to state at most every 500 ms; final valuations, snapshots, and connection status bypass
 the buffer because terminal and structural facts should never wait. The feed hooks stay mounted
 above routing, so switching screens never reconnects a stream, and only the active route runs its
-screen-specific derivations. Live tables render at most 250 rows — a DOM boundary, not data
+screen-specific derivations. Live tables render a bounded window — a DOM boundary, not data
 eviction: summaries and filters still see everything. Scheduler mechanics and the per-screen
 derivation pipelines are in [`docs/performance.md`](docs/performance.md).
 
@@ -261,7 +261,7 @@ merely writing `/var/log/trading/<name>.log`; the sweeper discovers files, not s
 Mechanics: rotation is size-based (`LOG_FILE_MAX_BYTES`, default 5 MB × 3 backups) — every line
 carries an ISO timestamp, so dating lives in the line, not the filename. The sweeper tracks
 `(inode, offset)` per file and survives rotation without gaps or replays; on a monitoring
-restart it warm-starts from the last ~64 KB of each file. Buffers are one `deque(maxlen=1000)`
+restart it warm-starts from the last ~64 KB of each file. Buffers are one `deque(maxlen=10_000)`
 *per service*, so one chatty service cannot evict another's history. SSE client queues are
 bounded and drop-on-full, like every other stream in the app. If `LOG_DIR` is unwritable the
 service logs one warning and continues stdout-only — logging never takes a service down.
@@ -288,8 +288,8 @@ multi-line/stack-trace folding beyond what `log.exception` renders into a single
 
 ## Performance and scaling
 
-The system is bounded, not optimized: client queues, latest-value coalescing, and the 250-row
-render cap protect it from bursts without pretending to raise throughput. The limits were
+The system is bounded, not optimized: client queues, latest-value coalescing, and the bounded
+render window protect it from bursts without pretending to raise throughput. The limits were
 measured, not guessed, and they arrive in a specific order — Pricing's per-valuation database
 transactions first (at ~2,100 open trades it had to persist ~1,000 valuations per second and rows
 went stale), browser DOM work for many simultaneously changing rows second, lifetime-history
@@ -326,17 +326,20 @@ bottleneck ordering, and the symptom → next-option table — is in
 - Custom-defined instruments are not published to a shared catalog: another trader cannot pick
   up a product you defined; it exists only in the trade that carries its terms.
 - Application logs are retained only as the rotating files (~5 MB × 3 per service) and the
-  collector's in-memory buffers (last 1,000 lines per service): no database table, no search
-  index, no cross-restart search. The Logs view shows the recent window, not an archive.
+  collector's in-memory buffers (last 10,000 lines per service): no database table, no search
+  index, and no cross-restart search beyond the 64 KB warm-start tail. The Logs view shows the
+  recent window, not an archive.
 
 ## Where to read more
 
+Start at [`docs/README.md`](docs/README.md) — it is the index and the reading order.
+
 | Document | What it holds |
 | --- | --- |
+| [`docs/architecture.md`](docs/architecture.md) | Service ownership, the three system rules, one trade end to end, the data model |
+| [`docs/pricing.md`](docs/pricing.md) | Frozen terms, discount factors, Black–Scholes, IRS, the scenario engine |
 | [`docs/alpha-beta.md`](docs/alpha-beta.md) | The full alpha/beta walkthrough with a worked example |
+| [`docs/logging.md`](docs/logging.md) | File sink, the sweeper, the Logs view, correlation and trade stories |
+| [`docs/frontend/`](docs/frontend/) | The frontend set: React model, data & streams, screens, styling |
 | [`docs/performance.md`](docs/performance.md) | Optimizations and tradeoffs, measured bottlenecks, growth playbook |
-| [`docs/phase-7-notes.md`](docs/phase-7-notes.md) | Options, IRS, and the implementation decisions behind them |
-| [`docs/phase-8-notes.md`](docs/phase-8-notes.md) | Logging: file sink, sweeper, Logs view, correlation story |
-| [`docs/phase-4-notes.md`](docs/phase-4-notes.md) | Valuation streaming machinery |
-| [`docs/phase-5-notes.md`](docs/phase-5-notes.md) | The operational Blotter |
-| [`docs/implementation-plan.md`](docs/implementation-plan.md) | Remaining plan: generic catalog, logging |
+| [`docs/decisions.md`](docs/decisions.md) | Every decision, what was rejected, and why — the fastest way back into context |

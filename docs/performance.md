@@ -1,8 +1,14 @@
-# Performance notes
+# Performance — what was measured, and what breaks first
 
 The measured behavior behind the README's performance summary: how frontend ingestion is
 throttled, which optimizations exist and what they trade away, where the bottlenecks were
 observed, and which optimization is planned for each growth symptom.
+
+The mechanisms these numbers describe are explained in
+[frontend/data.md](frontend/data.md#6-steps-56--ingest-continuously-publish-on-a-clock); the
+log collector's own cost table lives in [logging.md](logging.md#step-7--what-it-costs). The rule
+this document exists to enforce: **choose the next optimization from the observed bottleneck,
+not from the list.**
 
 ## Frontend scheduling details
 
@@ -18,12 +24,14 @@ all valuations in context
 -> add LIVE / STALE / CLOSED status
 -> class, book, state, and text filters
 -> captured-value sort
--> render matchingRows.slice(0, 250)
+-> render matchingRows.slice(0, MAX_RENDERED_ROWS)
 ```
 
-The 250 limit is a DOM boundary, not data eviction. PnL summaries and filters still use the complete
-collection, and searching can bring an older closed trade into the visible window. Market
-sparklines are memoized so unchanged instruments do not rebuild their SVG geometry.
+`MAX_RENDERED_ROWS` is **100** today; the measurements below were taken at 250, which is where
+the row-count effect was characterized. Either way the limit is a DOM boundary, not data
+eviction: PnL summaries and filters still use the complete collection, and searching can bring
+an older closed trade into the visible window. Market sparklines are memoized so unchanged
+instruments do not rebuild their SVG geometry.
 
 The Trades & PnL screen uses a different ownership split:
 
@@ -33,7 +41,7 @@ five-second Blotter snapshot
 -> overlay newest Pricing-context valuation by trade ID
 -> Open/Closed, book, class and text filters
 -> captured sort
--> render at most 250 matching rows
+-> render one page of TRADE_PAGE_SIZE (50) matching rows
 -> load valuation history and audits only for the selected trade
 ```
 
@@ -42,7 +50,7 @@ to the persisted Blotter valuation, so it does not depend on Pricing's process-l
 
 Captured sorting retains each trade's comparison value, not the previous sorted array. A feed flush
 creates a fresh filtered array, so sorting must run again to reconstruct the selected order before
-the 250-row cap. A sorted-ID cache would need reconciliation for new trades, closures, snapshots,
+the row cap. A sorted-ID cache would need reconciliation for new trades, closures, snapshots,
 reconnects, filter changes, and sort recaptures. Five complete 1,197-row sorts took about 0.8 ms in
 the domain measurement, so that extra ordering state is not currently justified.
 
@@ -56,13 +64,36 @@ the domain measurement, so that extra ordering state is not currently justified.
 | Latest-per-identity browser `Map` with a 500 ms flush | Collapses repeated live updates and limits React publication to twice per second | Every delivered event is still parsed and normalized; intermediate display states are intentionally skipped |
 | One shared scheduler for feed flushes and the one-second freshness clock | Avoids independent timers and lets React batch coincident work | A live update can wait up to one half-second before publication |
 | Filter all rows, then sort all matches on each render | Keeps one simple, deterministic pipeline for flushes and user interactions | Costs O(n) filtering plus O(m log m) sorting instead of maintaining incremental indexes |
-| Sort before taking the first 250 matches | Guarantees that the visible window is the correct top 250 for the selected order | Sorting still sees every matching row even though only 250 reach the table |
-| Render only the first 250 matching valuations | Bounds React element, DOM-cell, and paint work without discarding data | Full context, summaries, filters, and sorting still scale with all retained valuations |
+| Sort before slicing the visible window | Guarantees the window is the correct top N for the selected order | Sorting still sees every matching row even though only N reach the table |
+| Render only the first N matching valuations (N = 100) | Bounds React element, DOM-cell, and paint work without discarding data | Full context, summaries, filters, and sorting still scale with all retained valuations |
 | Poll Blotter membership and overlay the shared valuation feed | Keeps durable trade facts separate from changing values without another live cache | A new trade can wait up to five seconds to enter the table |
 | Load trade valuation/audit history only in the selected-trade dialog | Keeps history out of every live table render | Investigation data refreshes on a slower poll and currently returns bounded recent history |
 | Memoized sparklines and bounded instrument history | Avoids rebuilding unchanged SVG geometry and bounds history memory | Market events still have to update the affected instrument and its bounded history |
 
 These bounds are protection, not throughput optimization.
+
+## Measuring the right thing
+
+Two metrics were built and then **removed**, and the reasons generalize past this project:
+
+- **Queue depth as a headline signal.** A queue that drains as fast as it fills reads zero
+  whether the system is idle or saturated — so the number is reassuring exactly when it is
+  useless. It was replaced by throughput counters and processing latency (dequeue→commit,
+  last-50 window), which do change under load.
+- **A client-derived rate tile** ("trades per minute", computed from the visible intent feed).
+  The feed is count-limited, so the rate was inferred from a truncated population: it reported
+  the same number whether the system did 50 or 5,000 actions a minute. **Never infer a
+  time-window rate from a count-limited list.**
+
+What survives is the rule behind both: **a metric must state which population it describes.**
+Labels in the UI now say whether a number covers the bounded visible feed or the whole process,
+and a total and a loaded window are never presented as the same figure.
+
+One thing deliberately *not* measured yet: SSE client queues drop events when a client cannot
+keep up, and those drops are bounded but **not exposed as an operational metric**. Today the
+evidence is indirect (a client that fell behind repairs itself on the next snapshot). A drop
+counter per stream is the first thing to add if backpressure ever becomes a real question rather
+than a theoretical one.
 
 ## Current bottleneck order
 
@@ -132,6 +163,6 @@ GET /valuations?state=closed&cursor=...&limit=...
 + per-trade valuation history on demand
 ```
 
-At the current 300-open-trade demonstration target, the existing half-second coalescing and 250-row
+At the current 300-open-trade demonstration target, the existing half-second coalescing and bounded row
 window remain intentionally simpler. Server pagination or on-demand closed valuations become the
 right next step when lifetime history, rather than live risk, is what grows.

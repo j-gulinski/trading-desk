@@ -5,8 +5,8 @@ Serves the monitoring /audits feed for the System Overview "Errors & Warnings"
 panel (filter by severity, order by created_at desc). Partial so it stays tiny:
 it indexes only the rare non-INFO rows, not the ~5/s TRADE_CREATED/CLOSED traffic.
 
-Deliberate exception to the end-of-project Alembic deferral (see docs/frontend-plan.md):
-this is the one index the errors slice needs.
+Deliberate exception to the end-of-project Alembic deferral: this is the one
+index the errors slice needs.
 
 Revision ID: b7e2f1a9c3d4
 Revises: d19af2df2449

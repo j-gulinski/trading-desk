@@ -3,6 +3,10 @@
 What the ALPHA / BETA cards mean, how the numbers are computed tick by tick, how to
 read them, and what changes when real market data arrives.
 
+Prerequisites: [architecture.md](architecture.md) for where pricing sits, and
+[pricing.md](pricing.md) for how the PnL these statistics consume is produced. The decisions
+behind the estimator are summarized in [decisions.md](decisions.md#risk-alpha--beta).
+
 ## 1. The idea in 60 seconds
 
 Every book is compared against one benchmark (`MARKET_INDEX`). Two questions:
@@ -285,6 +289,15 @@ books' PnL — through the same steps, published with `is_portfolio: true`.
 | `BOOK_RISK_MINIMUM_OBSERVATIONS` | `20` | Samples required before publishing numbers |
 | `BOOK_CAPITAL_BASE` | `1000000` | Assumed capital per book (USD) |
 | `PORTFOLIO_CAPITAL_BASE` | unset | Portfolio capital; unset = base × book count |
+
+**Each of these has exactly one owner, and the minimum is the instructive case.** The default
+`20` lives beside `alpha_beta` in `shared/pricing_math.py`; the engine passes its configured value
+through rather than restating the number, and — the part that matters — the engine does **not**
+pre-check the sample count before calling. The estimator owns its own guard, so there is exactly
+one place in the system where "not enough data" is decided, and `INSUFFICIENT_DATA` cannot mean
+one thing to the caller and another to the maths. `BENCHMARK_SYMBOL` and `DEFAULT_CURVE` follow
+the same rule from `shared/catalog.py`. **A threshold checked in two places is a threshold that
+will eventually disagree with itself.**
 
 ## 7. Event reference (`book_risk_update` / `GET /book-risk`)
 

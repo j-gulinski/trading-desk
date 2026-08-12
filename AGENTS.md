@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-The repository is a small trading platform composed of Python services and a React frontend. Service code lives in `services/<service>/app/`; each service has its own `requirements.txt` and `Dockerfile`. Shared database, domain, logging, serialization, and pricing utilities are in `shared/`. Alembic configuration and migrations live in `db/` and `alembic.ini`. The browser UI is in `frontend/src/`, organized into `views/`, reusable `components/`, `domain/` helpers, hooks, and API services. HTTP workflow examples are under `scenarios/`; architecture and phase notes are in `docs/`.
+The repository is a small trading platform composed of Python services and a React frontend. Service code lives in `services/<service>/app/`; each service has its own `requirements.txt` and `Dockerfile`. Shared database, domain, logging, serialization, and pricing utilities are in `shared/`. Alembic configuration and migrations live in `db/` and `alembic.ini`. The browser UI is in `frontend/src/`, organized into `views/`, reusable `components/`, `domain/` helpers, hooks, and API services. HTTP workflow examples are under `scenarios/`; documentation is in `docs/`, organized by topic (architecture, pricing, alpha/beta, logging, performance, decisions, and a `frontend/` set) with `docs/README.md` as the index.
 
 ## Build, Test, and Development Commands
 
