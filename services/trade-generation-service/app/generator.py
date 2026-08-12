@@ -60,7 +60,12 @@ _BOOKS_SYNC_MS = 10_000
 def set_books(books: dict) -> None:
     global _books
     with _lock:
+        changed = books != _books
         _books = dict(books)
+    if changed:
+        log.info("books_synced",
+                 books=sum(len(ids) for ids in books.values()),
+                 asset_classes=sorted(books.keys()))
 
 
 def sync_open_trades() -> int:
@@ -216,7 +221,9 @@ def generate_once() -> dict | None:
         with _lock:
             _open_trades.pop(intent["trade_id"], None)
         _incr("closed")
-    log.info("generated", action=intent["action_type"], crid=intent["client_request_id"])
+    log.info("generated", action=intent["action_type"], symbol=intent.get("symbol"),
+             trade_id=intent.get("trade_id") or ack.get("trade_id"),
+             correlation_id=intent["client_request_id"])
     return intent
 
 

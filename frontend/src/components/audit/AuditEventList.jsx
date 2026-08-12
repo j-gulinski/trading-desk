@@ -1,7 +1,7 @@
 import StatusPill from '../status/StatusPill.jsx'
 import { formatClockTime } from '../../domain/formatting.js'
 
-export default function AuditEventList({ events }) {
+export default function AuditEventList({ events, onCorrelationClick }) {
   return (
     <ul className="audit-list">
       {events.map((event) => (
@@ -34,7 +34,19 @@ export default function AuditEventList({ events }) {
                 {event.correlationId && (
                   <div>
                     <dt>Correlation</dt>
-                    <dd>{event.correlationId}</dd>
+                    <dd>
+                      {onCorrelationClick ? (
+                        <button
+                          type="button"
+                          className="log-row__link log-row__link--action"
+                          onClick={() => onCorrelationClick(event.correlationId)}
+                        >
+                          {event.correlationId}
+                        </button>
+                      ) : (
+                        event.correlationId
+                      )}
+                    </dd>
                   </div>
                 )}
               </dl>

@@ -25,7 +25,7 @@ def snapshot_writer():
         persistence.save_snapshot()
 
 if __name__ == "__main__":
-    configure_logging()
+    configure_logging(SERVICE_NAME)
     get_logger(SERVICE_NAME).info("starting")
     start_generators()
     threading.Thread(target=snapshot_writer, daemon=True).start()

@@ -33,6 +33,8 @@ services:
       dockerfile: services/market-data-service/Dockerfile
     container_name: market-data-service
     env_file: .env
+    volumes:
+      - ./logs:/var/log/trading
     ports:
       - "8001:8001"
     restart: unless-stopped
@@ -46,6 +48,8 @@ services:
       dockerfile: services/pricing-service/Dockerfile
     container_name: pricing-service
     env_file: .env
+    volumes:
+      - ./logs:/var/log/trading
     ports:
       - "8002:8002"
     restart: unless-stopped
@@ -61,6 +65,8 @@ services:
       dockerfile: services/monitoring-service/Dockerfile
     container_name: monitoring-service
     env_file: .env
+    volumes:
+      - ./logs:/var/log/trading
     ports:
       - "8003:8003"
     restart: unless-stopped
@@ -74,6 +80,8 @@ services:
       dockerfile: services/books-service/Dockerfile
     container_name: books-service
     env_file: .env
+    volumes:
+      - ./logs:/var/log/trading
     ports:
       - "8004:8004"
     restart: unless-stopped
@@ -87,6 +95,8 @@ services:
       dockerfile: services/trade-action-service/Dockerfile
     container_name: trade-action-service
     env_file: .env
+    volumes:
+      - ./logs:/var/log/trading
     ports:
       - "8008:8008"
     restart: unless-stopped
@@ -100,6 +110,8 @@ services:
       dockerfile: services/trade-generation-service/Dockerfile
     container_name: trade-generation-service
     env_file: .env
+    volumes:
+      - ./logs:/var/log/trading
     ports:
       - "8007:8007"
     restart: unless-stopped
@@ -119,6 +131,8 @@ services:
       dockerfile: services/blotter-service/Dockerfile
     container_name: blotter-service
     env_file: .env
+    volumes:
+      - ./logs:/var/log/trading
     ports:
       - "8006:8006"
     restart: unless-stopped

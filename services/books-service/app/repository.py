@@ -4,8 +4,11 @@ from shared.db import session_scope
 from shared.models import Book
 from shared.functions import utcnow
 from shared.audit import write_audit
+from shared.logging_config import get_logger
 from app.schemas import book_to_dict
 from app.config import SERVICE_NAME
+
+log = get_logger(SERVICE_NAME)
 
 
 def _audit(session, event_type, book, message):
@@ -39,6 +42,8 @@ def create_book(body):
         session.add(book)
         session.flush()
         _audit(session, "BOOK_CREATED", book, f"Book {book.name} created")
+        log.info("book_created", book_id=str(book.book_id), name=book.name,
+                 asset_class=book.expected_asset_class)
         return book_to_dict(book)
 
 
@@ -54,6 +59,8 @@ def update_book(book_id, body):
         session.flush()
         event = "BOOK_DELETED" if body.get("is_active") is False else "BOOK_UPDATED"
         _audit(session, event, book, f"Book {book.name} updated")
+        log.info("book_deactivated" if event == "BOOK_DELETED" else "book_updated",
+                 book_id=str(book.book_id), name=book.name)
         return book_to_dict(book)
 
 

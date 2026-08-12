@@ -5,7 +5,7 @@ const SEVERITY_TONE = {
   INFO: 'info',
 }
 
-function labelForService(name) {
+export function labelForService(name) {
   if (!name) return 'UNKNOWN'
   return name.replace(/-service$/, '').replace(/-/g, ' ').toUpperCase()
 }

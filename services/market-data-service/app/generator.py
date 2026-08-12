@@ -174,6 +174,7 @@ def _run_generator(event_type, kind, key, build):
 
         persistence.persist(kind, tick)
         publish_tick(event_type, tick)
+        log.debug("tick_generated", symbol=key, event_id=tick["event_id"])
 
         time.sleep(TICK_INTERVAL_MS / 1000.0 * random.uniform(0.8, 1.2))
 

@@ -3,6 +3,9 @@ import uuid
 from shared.db import session_scope
 from shared.models import AuditLog
 from shared.functions import utcnow
+from shared.logging_config import get_logger
+
+log = get_logger("audit")
 
 
 def write_audit(service_name, event_type, message, *, entity_type=None, entity_id=None,
@@ -22,5 +25,9 @@ def write_audit(service_name, event_type, message, *, entity_type=None, entity_i
     if session is not None:
         session.add(row)
     else:
-        with session_scope() as own:
-            own.add(row)
+        try:
+            with session_scope() as own:
+                own.add(row)
+        except Exception as exc:
+            log.error("audit_write_failed", event_type=event_type,
+                      service=service_name, error=type(exc).__name__)

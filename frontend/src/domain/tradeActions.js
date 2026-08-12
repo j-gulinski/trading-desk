@@ -165,6 +165,11 @@ function count(value) {
   return Number.isFinite(n) ? n : 0
 }
 
+function countOrNull(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
 export function queueStatusOf(raw) {
   if (raw == null) {
     return {
@@ -174,6 +179,8 @@ export function queueStatusOf(raw) {
       created: 0,
       closed: 0,
       rejected: 0,
+      avgProcessingMs: null,
+      lastProcessingMs: null,
     }
   }
 
@@ -184,6 +191,8 @@ export function queueStatusOf(raw) {
     created: count(raw.created),
     closed: count(raw.closed),
     rejected: count(raw.rejected),
+    avgProcessingMs: countOrNull(raw.avg_processing_ms),
+    lastProcessingMs: countOrNull(raw.last_processing_ms),
   }
 }
 

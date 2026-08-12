@@ -105,7 +105,7 @@ The project deliberately uses one small, explainable model per new product. Pric
 
 The instrument universe is split the way a desk splits it. `shared/catalog.py` holds only **listed, quoted instruments** (equity, FX, commodity, futures, government bonds) — you trade them by picking one, and their terms are copied at open. **OTC classes** (European options, IRS) have no catalog entries: every option and swap is defined by its terms at open. `shared/term_schemas.py` declares per OTC class which fields define a product, with bounds and server-side defaults (curve, multiplier, volatility); Trade Action validates client-supplied terms against that schema, and the New Trade form renders its input fields *from* the same schema — a listed book shows an instrument picker, an OTC book shows term fields, with no mode switch. A defined product exists only as the trade's frozen terms — publishing it to a shared instrument list (a normalized `instruments` table) is deferred to the generic-catalog phase.
 
-The remaining plan (generic instrument catalog, logging) is in [`docs/implementation-plan.md`](docs/implementation-plan.md).
+The remaining plan (generic instrument catalog) is in [`docs/implementation-plan.md`](docs/implementation-plan.md).
 
 ## Frontend views
 
@@ -120,6 +120,7 @@ purpose.
 | View | Purpose |
 | --- | --- |
 | System Overview | Service health, stream status, error feed (includes Monitoring) |
+| Logs | Central log stream: live tail, service/level filters, correlation story panel |
 | Generator / Trade Actions | Generator control and config; queue, throughput, rejections |
 | Business Overview | Top-level PnL, book risk, valuation freshness |
 | Market Data | Live ticks, curve, sparklines, LIVE/STALE marking |
@@ -153,7 +154,8 @@ the owning poll refetches server truth out of cycle (`usePolling().refetch()`).
 | Trades & PnL | valuation SSE overlays live fair value / PnL by trade ID | Blotter `/trades/overview` every 5 s (membership, terms, closed history); detail drawer polls `/trades/{id}` only while open | close intent → Trade Action |
 | Trade Actions | — | `/queue/status` every 2 s; monitoring audits every 3 s | trade intents → Trade Action |
 | Generator | — | generator `/status` every 2 s; monitoring audits (generated intents) every 3 s; books summary every 30 s | start / stop / generate-once / config → Trade Generator |
-| System Overview | none of its own — stream health is read from both shared feed contexts | monitoring `/status` every 5 s; monitoring audits (errors) every 5 s | — |
+| System Overview | none of its own — stream health is read from both shared feed contexts | monitoring `/status` every 5 s; monitoring audits (errors) every 5 s; monitoring `/logs` (warning+, recent errors strip) every 5 s | — |
+| Logs | monitoring `/logs/stream` SSE (per-view, opened on entry, closed on leave) + `/logs` seed | `/logs` meta every 10 s (service chips, sparklines, warn pulse) | — |
 | Books | — | `/blotter/books/summary` every 5 s (totals and netted per-symbol positions in one response) | create / edit / delete book → Books; `REASSIGN_TRADES` → Trade Action |
 | New Trade (top bar, every route) | market feed remains visible elsewhere; the form uses backend pricing truth and survives route changes | books summary + Trade Action `/instruments` and `/instruments/term-schemas`; Pricing `/price` on selection or on each valid change of custom terms | `OPEN_TRADE` intent (catalog symbol, or custom symbol + validated terms) with the displayed entry value → Trade Action |
 
@@ -222,6 +224,68 @@ screen-specific derivations. Live tables render at most 250 rows — a DOM bound
 eviction: summaries and filters still see everything. Scheduler mechanics and the per-screen
 derivation pipelines are in [`docs/performance.md`](docs/performance.md).
 
+## Logging and observability
+
+The system keeps two separate trails that meet only through `correlation_id`. The
+**audit trail** (`audit_logs` in Postgres) is the *business* record — trade created, action
+rejected, worker started — written deliberately at business moments and queryable forever. The
+**application logs** are the *technical* record — connections, retries, rejections with reasons,
+per-tick computation at DEBUG — high-volume, structured JSON, and deliberately not stored in the
+database.
+
+```text
+service (structlog JSON) ──► stdout                      (docker compose logs — unchanged)
+                        └──► ./logs/<service>.log        (RotatingFileHandler, shared bind mount)
+                                        │
+monitoring-service sweeper thread ───── tails all files each second, parses JSON lines
+                                        │
+                    per-service ring buffers (deque, bounded, in-memory)
+                                        │
+              GET /logs (snapshot+filters+meta)   GET /logs/stream (SSE live tail)
+                                        │
+frontend  Logs view (filters, search, live tail, pause)
+        └► System Overview "Recent errors" strip
+        └► correlation story panel (logs + audits merged per id)
+```
+
+Why files and a sweeper, not a logs table: high-volume technical logs would bloat Postgres for no
+query benefit, and there is a bootstrap problem — a database-connection failure cannot be logged
+to the database (stop postgres and watch `audit_write_failed` ERROR lines land in the files; the
+file trail captures exactly what the DB cannot). Services never push logs anywhere: writing the
+local file is their only obligation, so a service never blocks, fails, or slows down because the
+observer is down. The pattern is the minimal version of real log shipping — Filebeat/Fluentd
+tailing files a process wrote locally — with transport (files), aggregation (sweeper), and
+storage policy (bounded buffers) as separate concerns. A future service joins the Logs view by
+merely writing `/var/log/trading/<name>.log`; the sweeper discovers files, not services.
+
+Mechanics: rotation is size-based (`LOG_FILE_MAX_BYTES`, default 5 MB × 3 backups) — every line
+carries an ISO timestamp, so dating lives in the line, not the filename. The sweeper tracks
+`(inode, offset)` per file and survives rotation without gaps or replays; on a monitoring
+restart it warm-starts from the last ~64 KB of each file. Buffers are one `deque(maxlen=1000)`
+*per service*, so one chatty service cannot evict another's history. SSE client queues are
+bounded and drop-on-full, like every other stream in the app. If `LOG_DIR` is unwritable the
+service logs one warning and continues stdout-only — logging never takes a service down.
+
+Correlation flow: the trade-action worker binds `correlation_id` (the intent's
+`client_request_id`) into structlog contextvars for each dequeued intent, so every log line of
+that action's processing carries the same id as its audit rows. Clicking a correlation id
+anywhere opens the story panel: every log line (from the sweeper buffers) and every audit row
+(from Postgres) with that id, merged chronologically — one intent traced across services and
+across both trails.
+
+**Failure-cascade demo** (watch a failure narrate itself): open the Logs view, then
+
+1. `docker compose stop market-data-service` — pricing logs `stream_failed` WARNINGs on each
+   ~5 s retry, monitoring writes one `DEPENDENCY_DOWN` transition audit (not one per poll), the
+   Overview error pulse rises, and the `WARNING+` level chip isolates the cascade.
+2. `docker compose start market-data-service` — one reconnect line per consumer,
+   `STREAM_CONNECTED` and `DEPENDENCY_RECOVERED` audits, and the pulse decays.
+
+What is deliberately *not* promised: no log persistence beyond the rotating files (no table, no
+search index), no cross-restart search (buffers are memory), no external log stack (ELK/Loki are
+over-scope), no runtime log-level switching from the UI (config is env-owned), and no
+multi-line/stack-trace folding beyond what `log.exception` renders into a single JSON line.
+
 ## Performance and scaling
 
 The system is bounded, not optimized: client queues, latest-value coalescing, and the 250-row
@@ -261,6 +325,9 @@ bottleneck ordering, and the symptom → next-option table — is in
   discounting and projection.
 - Custom-defined instruments are not published to a shared catalog: another trader cannot pick
   up a product you defined; it exists only in the trade that carries its terms.
+- Application logs are retained only as the rotating files (~5 MB × 3 per service) and the
+  collector's in-memory buffers (last 1,000 lines per service): no database table, no search
+  index, no cross-restart search. The Logs view shows the recent window, not an archive.
 
 ## Where to read more
 
@@ -269,6 +336,7 @@ bottleneck ordering, and the symptom → next-option table — is in
 | [`docs/alpha-beta.md`](docs/alpha-beta.md) | The full alpha/beta walkthrough with a worked example |
 | [`docs/performance.md`](docs/performance.md) | Optimizations and tradeoffs, measured bottlenecks, growth playbook |
 | [`docs/phase-7-notes.md`](docs/phase-7-notes.md) | Options, IRS, and the implementation decisions behind them |
+| [`docs/phase-8-notes.md`](docs/phase-8-notes.md) | Logging: file sink, sweeper, Logs view, correlation story |
 | [`docs/phase-4-notes.md`](docs/phase-4-notes.md) | Valuation streaming machinery |
 | [`docs/phase-5-notes.md`](docs/phase-5-notes.md) | The operational Blotter |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Remaining plan: generic catalog, logging |

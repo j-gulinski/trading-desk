@@ -19,7 +19,7 @@ class ThreadedServer(ServerAdapter):
 
 
 if __name__ == "__main__":
-    configure_logging()
+    configure_logging(SERVICE_NAME)
     get_logger(SERVICE_NAME).info("starting")
     threading.Thread(target=worker_loop, daemon=True).start()
     app.run(host=HOST, port=PORT, server=ThreadedServer)

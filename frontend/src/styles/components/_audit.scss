@@ -24,9 +24,15 @@
   &::-webkit-details-marker {
     display: none;
   }
-  &:hover .audit-row__message {
+  &:not(.audit-row__summary--static):hover .audit-row__message {
     color: var(--text-primary);
   }
+}
+.audit-row__summary--static {
+  cursor: default;
+}
+.audit-row__caret--empty {
+  border-left-color: transparent;
 }
 .audit-row__caret {
   flex-shrink: 0;

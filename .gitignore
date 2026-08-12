@@ -3,8 +3,9 @@ __pycache__/
 *.claude
 *.agents
 *.impeccable
+*.playwright-mcp
 # Logs
-logs
+/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*

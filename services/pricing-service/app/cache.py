@@ -27,6 +27,7 @@ curves = {}
 active_trades = {}
 latest_valuations = {}
 book_risk_metrics = {}
+_active_set_seeded = False
 
 
 def update_spot(tick):
@@ -126,6 +127,7 @@ def _trades_with_book(session):
 
 
 def refresh_active_trades():
+    global _active_set_seeded
     fresh = {}
     with session_scope() as session:
         rows = _trades_with_book(session).filter(Trade.status == "ACTIVE").all()
@@ -144,7 +146,16 @@ def refresh_active_trades():
             }
     global active_trades
     with data_lock:
+        entered = fresh.keys() - active_trades.keys()
         active_trades = fresh
+    if not _active_set_seeded:
+        _active_set_seeded = True
+        log.info("active_set_bootstrapped", trades=len(fresh))
+    else:
+        for trade_id in entered:
+            trade = fresh[trade_id]
+            log.info("trade_entered_active_set", trade_id=trade_id,
+                     symbol=trade["symbol"], book_id=trade["book_id"])
     return len(fresh)
 
 
@@ -243,6 +254,9 @@ def finalize_closed_trades():
                 created_at=utcnow(),
             ))
             t.valuation_finalized = True
+            log.info("trade_finalized", trade_id=str(t.trade_id), symbol=t.symbol,
+                     realized_pnl=str(realized),
+                     close_price=str(t.close_price) if t.close_price is not None else None)
             finals.append(valuation)
 
     with data_lock:

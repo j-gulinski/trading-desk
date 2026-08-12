@@ -36,18 +36,25 @@ def price_preview():
     if body.get("terms") is not None:
         terms, error = validate_terms(body.get("asset_class"), body["terms"])
         if terms is None:
+            log.warning("price_preview_rejected", symbol=symbol,
+                        asset_class=body.get("asset_class"), reason=error)
             response.status = 400
             return to_json({"error": error, "symbol": symbol})
     else:
         terms = INSTRUMENT_CATALOG.get(symbol)
         if terms is None:
+            log.warning("price_preview_rejected", symbol=symbol, reason="instrument not found")
             response.status = 404
             return to_json({"error": "instrument not found", "symbol": symbol})
     priced = price_instrument(terms["asset_class"], symbol, terms)
     if priced is None:
+        log.warning("price_preview_unavailable", symbol=symbol,
+                    asset_class=terms["asset_class"])
         response.status = 503
         return to_json({"error": "required market data is not available", "symbol": symbol})
     price, multiplier = priced
+    log.info("price_preview", symbol=symbol, asset_class=terms["asset_class"],
+             price=str(price))
     return to_json({
         "symbol": symbol,
         "asset_class": terms["asset_class"],

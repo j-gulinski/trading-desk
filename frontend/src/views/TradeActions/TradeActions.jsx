@@ -66,6 +66,19 @@ export default function TradeActions() {
           tone={rejected > 0 ? 'warn' : 'default'}
         />
         <StatCard
+          label="AVG PROCESSING"
+          value={
+            !unreachable && status.avgProcessingMs != null
+              ? `${formatNumber(status.avgProcessingMs)} ms`
+              : 'n/a'
+          }
+          sub={
+            status.lastProcessingMs != null
+              ? `last ${formatNumber(status.lastProcessingMs)} ms · dequeue → commit`
+              : 'dequeue → commit'
+          }
+        />
+        <StatCard
           label="LAST ACTION"
           value={lastActionMs != null ? formatClockTime(lastActionMs, { millis: true }) : '—'}
           sub="newest audited action"

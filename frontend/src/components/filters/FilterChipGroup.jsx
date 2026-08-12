@@ -26,6 +26,7 @@ export default function FilterChipGroup({
             )}
             {option.count != null && <span>{option.count}</span>}
             {option.label}
+            {option.trailing ?? null}
           </button>
         )
       })}

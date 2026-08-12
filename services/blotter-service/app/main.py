@@ -20,7 +20,7 @@ class ThreadedServer(ServerAdapter):
 
 
 if __name__ == "__main__":
-    configure_logging()
+    configure_logging(SERVICE_NAME)
     get_logger(SERVICE_NAME).info("starting")
     bootstrap_trades()
     threading.Thread(target=valuation_stream_consumer, daemon=True).start()

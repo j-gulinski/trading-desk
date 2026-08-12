@@ -121,8 +121,10 @@ def _value_and_store(trades):
         if valuation is None:
             continue
         if not cache.record_valuation(valuation):
-            log.info("valuation_after_final_dropped", trade_id=valuation["trade_id"])
+            log.debug("valuation_after_final_dropped", trade_id=valuation["trade_id"])
             continue
+        log.debug("valuation_computed", trade_id=valuation["trade_id"],
+                  symbol=valuation["symbol"])
         cache.save_valuation(valuation)
         events.append(valuation)
     return events

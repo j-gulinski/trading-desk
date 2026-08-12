@@ -10,11 +10,12 @@ export function formatElapsedTime(ms) {
 
 const pad = (n, width = 2) => String(n).padStart(width, '0')
 
-export function formatClockTime(ms, { millis = false } = {}) {
+export function formatClockTime(ms, { millis = false, day = false } = {}) {
   if (!Number.isFinite(ms)) return '—'
   const d = new Date(ms)
   const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-  return millis ? `${clock}.${pad(d.getMilliseconds(), 3)}` : clock
+  const stamped = millis ? `${clock}.${pad(d.getMilliseconds(), 3)}` : clock
+  return day ? `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${stamped}` : stamped
 }
 
 export function formatDateTime(ms, { millis = false } = {}) {

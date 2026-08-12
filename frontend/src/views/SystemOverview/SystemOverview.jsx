@@ -9,6 +9,7 @@ import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { normalizeServiceStatus, summarize } from '../../domain/serviceStatus.js'
 import { normalizeAuditEvents } from '../../domain/auditEvents.js'
+import { normalizeLogLines, warnPulseOf } from '../../domain/logLines.js'
 import { formatClockTime, formatElapsedTime, formatNumber } from '../../domain/formatting.js'
 import { summarizeFeed } from '../../domain/marketData.js'
 import { summarizeValuations, valuationRowsOf } from '../../domain/valuations.js'
@@ -19,7 +20,10 @@ import EmptyState from '../../components/EmptyState.jsx'
 import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
 import AuditEventList from '../../components/audit/AuditEventList.jsx'
 import StatusPill from '../../components/status/StatusPill.jsx'
+import LogLineList from '../../components/logs/LogLineList.jsx'
+import StoryPanel from '../../components/logs/StoryPanel.jsx'
 import { ERROR_WINDOW_MS } from '../../config/monitoring.js'
+import { RECENT_ERRORS_LIMIT, WARN_LEVELS } from '../../config/logs.js'
 import { streamStatusLevel } from '../../config/stream.js'
 
 const FILTER_LEVELS = ['healthy', 'degraded', 'stale', 'down', 'unknown']
@@ -28,6 +32,7 @@ const ERROR_SEVERITIES = ['WARNING', 'ERROR', 'CRITICAL']
 
 export default function SystemOverview() {
   const [activeLevel, setActiveLevel] = useState(null)
+  const [story, setStory] = useState(null)
   const marketFeed = useMarketFeedContext()
   const valuationFeed = useValuationFeedContext()
   const { data, error, loading, lastPolled, lastUpdated } = usePolling(
@@ -47,6 +52,15 @@ export default function SystemOverview() {
     ),
   )
   const auditEvents = normalizeAuditEvents(audits.data)
+
+  const logsFeed = usePolling(({ signal }) =>
+    apiGet(
+      endpoints.monitoring.logs({ level: WARN_LEVELS, limit: RECENT_ERRORS_LIMIT }),
+      { signal },
+    ),
+  )
+  const recentLogLines = normalizeLogLines(logsFeed.data?.lines)
+  const logPulse = warnPulseOf(logsFeed.data?.meta, Date.now())
 
   const services = normalizeServiceStatus(data, {
     now,
@@ -166,16 +180,48 @@ export default function SystemOverview() {
             <EmptyState message="No warnings or errors in the last 5 minutes." />
           )}
           {!audits.loading && !audits.error && auditEvents.length > 0 && (
-            <AuditEventList events={auditEvents} />
+            <AuditEventList events={auditEvents} onCorrelationClick={setStoryId} />
           )}
         </Panel>
       </div>
 
       <div className="overview__panels">
-        <Panel title="Logs · all services">
-          <EmptyState message="Central log stream not published by the backend yet." />
+        <Panel
+          title="Recent errors · technical log trail"
+          meta={
+            <>
+              {logsFeed.error ? 'UNAVAILABLE' : `${logPulse} warn+ · last 5 min`}
+              <a className="overview__logs-link" href="#/logs">
+                Open Logs →
+              </a>
+            </>
+          }
+        >
+          {logsFeed.loading && <EmptyState message="Loading recent log lines…" />}
+          {!logsFeed.loading && logsFeed.error && (
+            <EmptyState message="Log feed unavailable — retrying." />
+          )}
+          {!logsFeed.loading && !logsFeed.error && recentLogLines.length === 0 && (
+            <EmptyState message="No warnings or errors in the log buffers." />
+          )}
+          {!logsFeed.loading && !logsFeed.error && recentLogLines.length > 0 && (
+            <LogLineList
+              lines={recentLogLines}
+              onCorrelationClick={(id) => setStory({ kind: 'correlation', id })}
+              onTradeClick={(id) => setStory({ kind: 'trade', id })}
+            />
+          )}
         </Panel>
       </div>
+
+      {story && (
+        <StoryPanel
+          key={`${story.kind}:${story.id}`}
+          story={story}
+          onOpenStory={setStory}
+          onClose={() => setStory(null)}
+        />
+      )}
     </section>
   )
 }

@@ -24,3 +24,6 @@ TARGET_OPEN_TRADES = int(os.environ.get("TARGET_OPEN_TRADES", "300"))
 TARGET_NOTIONAL = float(os.environ.get("TARGET_NOTIONAL", "100000"))
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL")
+LOG_DIR = os.environ.get("LOG_DIR")
+LOG_FILE_MAX_BYTES = int(os.environ.get("LOG_FILE_MAX_BYTES", "5000000"))
+LOG_FILE_BACKUP_COUNT = int(os.environ.get("LOG_FILE_BACKUP_COUNT", "3"))

@@ -1,0 +1,169 @@
+// Logs view: live tail list, payload detail block, pause control, and the
+// story panel timeline (one correlation id or one trade, both trails).
+.log-list--tail {
+  max-height: 65vh;
+}
+
+.log-row__link {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  word-break: break-all;
+  text-align: left;
+
+  &:hover {
+    color: var(--accent-strong);
+    text-decoration: underline;
+  }
+}
+
+.log-payload {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px var(--sp-3);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.log-payload__key {
+  color: var(--text-muted);
+}
+.log-payload__value {
+  margin: 0;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.log-payload__action {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+
+  &:hover {
+    color: var(--accent-strong);
+    text-decoration: underline;
+  }
+}
+
+.logs__pause {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-1) var(--sp-3);
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+  }
+}
+.logs__pause--active {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.filter-chip__spark {
+  width: 44px;
+  height: 14px;
+  margin-left: var(--sp-1);
+  color: var(--warn);
+}
+
+.overview__logs-link {
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+
+  &:hover {
+    color: var(--accent-strong);
+    text-decoration: underline;
+  }
+}
+
+// Correlation story panel: one intent, both trails, oldest first.
+.story {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.story__item {
+  padding: var(--sp-2) 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+
+  & + & {
+    border-top: 1px solid var(--border);
+  }
+}
+.story__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.story__row--toggle {
+  cursor: pointer;
+  list-style: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+  &:hover .story__text {
+    color: var(--accent-strong);
+  }
+}
+.story__text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.story__time {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.story__trail {
+  flex-shrink: 0;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.story__trail--audit {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.story__service {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+.story__item .log-payload {
+  margin-top: var(--sp-2);
+}

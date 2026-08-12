@@ -19,8 +19,8 @@ def _to_dict(row: AuditLog) -> dict:
     }
 
 
-def recent_audits(*, limit=DEFAULT_LIMIT, since=None, severities=None,
-                  services=None, event_types=None) -> list[dict]:
+def recent_audits(*, limit=DEFAULT_LIMIT, since=None, severities=None, services=None,
+                  event_types=None, correlation_id=None, entity_id=None) -> list[dict]:
     limit = max(1, min(int(limit), MAX_LIMIT))
     with session_scope() as session:
         q = session.query(AuditLog)
@@ -32,5 +32,9 @@ def recent_audits(*, limit=DEFAULT_LIMIT, since=None, severities=None,
             q = q.filter(AuditLog.service_name.in_(services))
         if event_types:
             q = q.filter(AuditLog.event_type.in_(event_types))
+        if correlation_id:
+            q = q.filter(AuditLog.correlation_id == correlation_id)
+        if entity_id:
+            q = q.filter(AuditLog.entity_id == entity_id)
         rows = q.order_by(AuditLog.created_at.desc()).limit(limit).all()
         return [_to_dict(r) for r in rows]

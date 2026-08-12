@@ -51,7 +51,7 @@ def _worker():
 
 
 if __name__ == "__main__":
-    configure_logging()
+    configure_logging(SERVICE_NAME)
     log.info("starting")
     threading.Thread(target=_worker, daemon=True).start()
     app.run(host=HOST, port=PORT, server=ThreadedServer)

@@ -1,7 +1,9 @@
 import math
 import re
+import time
 import uuid
 
+import structlog
 from sqlalchemy.exc import IntegrityError
 
 from shared.db import session_scope
@@ -63,12 +65,18 @@ def _open(intent):
                 or price_error is not None
             ):
                 message = term_error or price_error or "bad book or asset class"
+                log.warning("open_rejected", reason=message, book_id=intent.get("book_id"),
+                            symbol=intent.get("symbol"), trade_id=intent.get("trade_id"))
                 _audit(session, "ACTION_REJECTED", f"Open rejected: {message}", intent, "WARNING")
                 return action_queue.incr("rejected")
             repository.insert_trade(session, intent, terms)
             _audit(session, "TRADE_CREATED", "Trade created", intent)
+        log.info("trade_created", trade_id=intent.get("trade_id"), symbol=intent.get("symbol"),
+                 book_id=intent.get("book_id"), side=intent.get("side"),
+                 quantity=intent.get("quantity"))
         action_queue.incr("created")
     except IntegrityError:
+        log.warning("duplicate_intent", trade_id=intent.get("trade_id"))
         action_queue.incr("duplicates")
 
 
@@ -80,6 +88,11 @@ def _close(intent):
             _audit(session, "TRADE_CLOSED", "Trade closed", intent)
         else:
             _audit(session, "ACTION_REJECTED", "Close rejected: not ACTIVE", intent, "WARNING")
+    if closed:
+        log.info("trade_closed", trade_id=intent.get("trade_id"),
+                 close_reason=intent.get("close_reason"))
+    else:
+        log.warning("close_rejected", trade_id=intent.get("trade_id"), reason="not ACTIVE")
     action_queue.incr("closed" if closed else "rejected")
 
 
@@ -91,6 +104,7 @@ def _close_all(intent):
             write_audit(SERVICE_NAME, "TRADE_CLOSED", "Trade closed",
                         entity_type="TRADE", entity_id=trade_id,
                         payload={"close_reason": reason}, session=session)
+    log.info("close_all_processed", closed=len(trade_ids), close_reason=reason)
     action_queue.incr("closed", len(trade_ids))
 
 
@@ -99,6 +113,9 @@ def _reassign(intent):
     target_id = _parse_uuid(intent.get("target_book_id"))
 
     def reject(session, message):
+        log.warning("reassign_rejected", reason=message,
+                    book_id=str(source_id) if source_id else None,
+                    target_book_id=str(target_id) if target_id else None)
         write_audit(SERVICE_NAME, "ACTION_REJECTED", message, entity_type="BOOK",
                     entity_id=str(source_id) if source_id else None,
                     correlation_id=intent.get("client_request_id"),
@@ -119,6 +136,8 @@ def _reassign(intent):
                         entity_type="TRADE", entity_id=trade_id,
                         payload={"from_book_id": str(source_id), "to_book_id": str(target_id)},
                         correlation_id=intent.get("client_request_id"), session=session)
+    log.info("trades_reassigned", count=len(trade_ids),
+             from_book_id=str(source_id), to_book_id=str(target_id))
     action_queue.incr("reassigned", len(trade_ids))
 
 
@@ -144,11 +163,31 @@ def _parse_uuid(value):
 def worker_loop():
     log.info("worker_started")
     write_audit(SERVICE_NAME, "WORKER_STARTED", "Trade-action worker started")
+    failing = False
     while True:
         intent = action_queue.intents.get()
+        started = time.perf_counter()
+        correlation_id = intent.get("client_request_id")
+        if correlation_id:
+            structlog.contextvars.bind_contextvars(correlation_id=correlation_id)
+        log.info("intent_dequeued", action=intent.get("action_type"),
+                 trade_id=intent.get("trade_id"))
         try:
             _process(intent)
-        except Exception:
-            log.exception("process_failed")
+            if failing:
+                failing = False
+                log.info("worker_recovered")
+                write_audit(SERVICE_NAME, "WORKER_RECOVERED",
+                            "Trade-action worker processing again",
+                            correlation_id=correlation_id)
+        except Exception as exc:
+            log.exception("process_failed", action=intent.get("action_type"),
+                          trade_id=intent.get("trade_id"))
+            if not failing:
+                failing = True
+                write_audit(SERVICE_NAME, "WORKER_FAILED",
+                            f"Trade-action processing failed: {type(exc).__name__}",
+                            correlation_id=correlation_id, severity="ERROR")
         finally:
-            action_queue.incr("processed")
+            structlog.contextvars.unbind_contextvars("correlation_id")
+            action_queue.record_processed(int((time.perf_counter() - started) * 1000))

@@ -12,6 +12,8 @@ export const endpoints = {
   monitoring: {
     status: '/api/monitoring/status',
     audits: (params) => withQuery('/api/monitoring/audits', params),
+    logs: (params) => withQuery('/api/monitoring/logs', params),
+    logsStream: '/api/monitoring/logs/stream',
   },
   marketData: {
     stream: '/api/market-data/stream',
