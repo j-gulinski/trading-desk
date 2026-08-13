@@ -167,7 +167,7 @@ def snapshot(*, services=None, levels=None, since_id=None, q=None, limit=200):
             taken += 1
             if taken == limit:
                 break
-    lines.sort(key=lambda record: record["id"], reverse=True)
+    lines.sort(key=lambda record: (record.get("timestamp") or "", record["id"]), reverse=True)
     return lines[:limit]
 
 

@@ -44,7 +44,9 @@ export function mergeLogLines(existing, incoming, cap = LOG_FEED_CAP) {
   const byId = new Map()
   for (const line of existing) byId.set(line.id, line)
   for (const line of incoming) byId.set(line.id, line)
-  return [...byId.values()].sort((a, b) => b.id - a.id).slice(0, cap)
+  return [...byId.values()]
+    .sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0) || b.id - a.id)
+    .slice(0, cap)
 }
 
 export function levelAtLeast(level, minLevel) {
