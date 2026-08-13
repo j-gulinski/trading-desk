@@ -1,6 +1,7 @@
 .env
 __pycache__/
 *.claude
+*.codex
 *.agents
 *.impeccable
 *.playwright-mcp
