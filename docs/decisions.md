@@ -51,6 +51,7 @@ than defaulted into.
 | PnL series | Cumulative total (realized + unrealized) | Open positions only | Differences neutralize closed trades automatically; open-only would drop a trade's lifetime PnL in one sample — a fake, market-unrelated jump | [alpha-beta](alpha-beta.md#2-step-by-step-what-happens-on-every-benchmark-tick) |
 | Not enough data | Publish `INSUFFICIENT_DATA` / `ZERO_BENCHMARK_VARIANCE` as values | Publish 0.0, or nothing | A status is information; a fabricated zero is a lie that renders identically to a real one | [alpha-beta](alpha-beta.md#3-reading-the-numbers) |
 | PORTFOLIO card | A synthetic book through the identical engine | A special aggregation path | Dollar betas add, so the desk view is one summed series — and the additivity check doubles as an engine self-test | [alpha-beta](alpha-beta.md#5-the-portfolio-card) |
+| Benchmark move in the attribution row | Σ of that book's own sampled returns | The compounded level move (`last / first − 1`) over a globally tracked history | The OLS identity sums per-sample returns, so only that sum makes the three rows add up. The compounded figure is a different quantity *and* spanned a different window — books start sampling late and reset when they leave the snapshot — so the row could disagree with the total in sign, not just in rounding | [alpha-beta](alpha-beta.md#the-breakdown-on-every-card) |
 
 ## Logging and observability
 

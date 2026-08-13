@@ -210,13 +210,13 @@ section header (global fact, stated once, not repeated per card).
 Each card carries a collapsed `▸ RETURN DETAILS` row. Opening it shows the identity
 `return ≈ β × index + α` computed with the live numbers — what a desk would call
 *return attribution*: splitting a result into its market part and its alpha part —
-as a three-row ledger in both units (a real capture, equity book):
+as a three-row ledger in both units (engine capture, equity-style book, R² 0.88):
 
 | | % of capital | dollars |
 | --- | --- | --- |
-| β −1.59 × index +0.19% | −0.31% | −3,054.81 |
-| + α beyond the market | −0.33% | −3,319.21 |
-| **≈ return this window** | **−0.64%** | **−6,380.64** |
+| β 1.57 × index +0.32% | +0.51% | +5,052.60 |
+| + α beyond the market | −0.08% | −766.66 |
+| **≈ return this window** | **+0.43%** | **+4,285.94** |
 
 How to read it, and why it is built this way:
 
@@ -224,11 +224,16 @@ How to read it, and why it is built this way:
   the $ column is the capital-free truth (`dollar_beta × index move`,
   `dollar_alpha × samples`, summed window PnL) and would survive any change of the
   base. Showing both keeps the assumption visible instead of hidden.
-- **Why "≈", not "="?** The regression identity is exact for the *sum* of per-sample
-  returns; the index move shown is the *compounded* level change over the window.
-  Over minutes of tiny returns the gap is a rounding-sized residual — in the capture
-  above the two upper rows sum to −$6,374 against an actual −$6,381.
-- **The meta line** ("each +1% index move ≈ −$15,942 PnL") is `dollar_beta / 100`:
+- **The two upper rows sum to the third, exactly.** `benchmark_window_return` is the
+  arithmetic *sum of the sampled per-sample returns* — the same series the regression
+  consumed — so the OLS identity closes to floating-point dust (the capture above:
+  0.00e+00). The "≈" that remains is display rounding to two decimals, nothing more.
+  It has to be the sampled sum: a *compounded* level move (`last / first − 1`) is a
+  different quantity, and one tracked over a *separate* history is not even the same
+  window, because a book's samples start late and reset when it leaves the snapshot.
+  `tests/test_book_risk.py` asserts this identity, including for a book that joined
+  after warm-up — the case where the two windows used to diverge most.
+- **The meta line** ("each +1% index move ≈ +$15,735 PnL") is `dollar_beta / 100`:
   the sensitivity a risk desk would actually quote, no capital assumption attached.
 - The rows are exactly the misreading-proof from §1 made permanent: alpha is always
   displayed *next to* the `β × index` term it is measured against, so "alpha =
@@ -307,7 +312,7 @@ will eventually disagree with itself.**
   "is_portfolio": false,
   "benchmark": "MARKET_INDEX",
   "benchmark_level": 5012.34,            // current level
-  "benchmark_window_return": 0.0021,     // benchmark's own move over the window
+  "benchmark_window_return": 0.0021,     // Σ of this book's sampled benchmark returns
   "capital_base": 1000000.0,
   "book_window_return": 0.0011,          // the book's own raw move over the window
   "book_window_pnl": 1100.0,             // …in dollars (sum of ΔPnL in the window)

@@ -80,23 +80,25 @@ export function bookRiskOf(data) {
 }
 
 export function benchmarkOf(riskMetrics) {
-  let freshest = null
-  for (const metric of Object.values(riskMetrics)) {
-    if (
-      freshest == null ||
-      (Number.isFinite(metric.calculatedAtMs) &&
-        (!Number.isFinite(freshest.calculatedAtMs) || metric.calculatedAtMs > freshest.calculatedAtMs))
-    ) {
-      freshest = metric
+  let chosen = riskMetrics?.PORTFOLIO ?? null
+  if (chosen == null) {
+    for (const metric of Object.values(riskMetrics)) {
+      if (
+        chosen == null ||
+        (Number.isFinite(metric.calculatedAtMs) &&
+          (!Number.isFinite(chosen.calculatedAtMs) || metric.calculatedAtMs > chosen.calculatedAtMs))
+      ) {
+        chosen = metric
+      }
     }
   }
-  if (!freshest) return null
+  if (!chosen) return null
   return {
-    symbol: freshest.benchmark,
-    level: freshest.benchmarkLevel,
-    windowReturn: freshest.benchmarkWindowReturn,
-    observations: freshest.observations,
-    window: freshest.window,
+    symbol: chosen.benchmark,
+    level: chosen.benchmarkLevel,
+    windowReturn: chosen.benchmarkWindowReturn,
+    observations: chosen.observations,
+    window: chosen.window,
   }
 }
 

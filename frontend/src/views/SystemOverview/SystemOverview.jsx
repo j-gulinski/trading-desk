@@ -180,7 +180,10 @@ export default function SystemOverview() {
             <EmptyState message="No warnings or errors in the last 5 minutes." />
           )}
           {!audits.loading && !audits.error && auditEvents.length > 0 && (
-            <AuditEventList events={auditEvents} onCorrelationClick={setStoryId} />
+            <AuditEventList
+              events={auditEvents}
+              onCorrelationClick={(id) => setStory({ kind: 'correlation', id })}
+            />
           )}
         </Panel>
       </div>

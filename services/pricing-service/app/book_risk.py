@@ -40,8 +40,6 @@ class BookRiskEngine:
         self.previous_benchmark = None
         self.previous_pnl = {}
         self.samples = defaultdict(lambda: deque(maxlen=window))
-        # window+1 levels span exactly the window's return pairs
-        self.benchmark_history = deque(maxlen=window + 1)
 
     def update(self, benchmark_level, books):
         benchmark_level = float(benchmark_level)
@@ -52,7 +50,6 @@ class BookRiskEngine:
         if self.previous_benchmark is not None and self.previous_benchmark > 0:
             benchmark_return = benchmark_level / self.previous_benchmark - 1.0
         self.previous_benchmark = benchmark_level
-        self.benchmark_history.append(benchmark_level)
 
         books = dict(books)
         book_count = len(books)
@@ -87,15 +84,12 @@ class BookRiskEngine:
             return self.portfolio_capital_base
         return self.capital_base * max(1, book_count)
 
-    def _benchmark_context(self):
-        if not self.benchmark_history:
-            return {"benchmark_level": None, "benchmark_window_return": None}
-        first_level = self.benchmark_history[0]
-        last_level = self.benchmark_history[-1]
-        window_return = None
-        if len(self.benchmark_history) >= 2 and first_level > 0:
-            window_return = last_level / first_level - 1.0
-        return {"benchmark_level": last_level, "benchmark_window_return": window_return}
+    def _benchmark_context(self, benchmark_returns):
+        # Must be the sum the regression consumed; a compounded move would not close the identity.
+        return {
+            "benchmark_level": self.previous_benchmark,
+            "benchmark_window_return": sum(benchmark_returns) if benchmark_returns else None,
+        }
 
     def _metric(self, book_id, book_name, book_count):
         pairs = self.samples[book_id]
@@ -114,7 +108,7 @@ class BookRiskEngine:
             "book_name": book_name,
             "is_portfolio": book_id == PORTFOLIO_ID,
             "benchmark": BENCHMARK_SYMBOL,
-            **self._benchmark_context(),
+            **self._benchmark_context(benchmark_returns),
             "capital_base": capital,
             "observations": observations,
             "window": self.window,
