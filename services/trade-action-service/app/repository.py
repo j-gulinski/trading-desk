@@ -33,7 +33,7 @@ def insert_trade(session, intent, terms):
         trade_date=now,
         status="ACTIVE",
         opened_at=now,
-        source=intent.get("source") or "GENERATED",
+        source=intent.get("source") or "MANUAL",
         client_request_id=intent.get("client_request_id"),
         trade_metadata=terms,
         created_at=now,

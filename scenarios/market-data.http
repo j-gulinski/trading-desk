@@ -3,5 +3,5 @@
 ### health
 GET {{marketData}}/health
 
-### snapshot - current spots (ACME/XAUUSD/ES_FUT/EURUSD) + USD_GOV curve
+### snapshot - current spots + curves (empty until the first provider client lands)
 GET {{marketData}}/snapshot

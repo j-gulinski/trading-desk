@@ -93,7 +93,7 @@ export default function Valuations() {
       ]
         .filter(Boolean)
         .join(' · ')
-    : 'Benchmark: MARKET_INDEX'
+    : 'Benchmark: —'
 
   const table = useTableState({
     columns: VALUATION_COLUMNS,

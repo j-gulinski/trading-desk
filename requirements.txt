@@ -1,4 +1,5 @@
 bottle
 SQLAlchemy
-psycopg
+psycopg[binary]
 structlog
+alembic

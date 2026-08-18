@@ -59,7 +59,7 @@ export function bookRiskOf(data) {
   return {
     id: data.book_id,
     bookName: data.book_name ?? null,
-    benchmark: data.benchmark ?? 'MARKET_INDEX',
+    benchmark: data.benchmark ?? null,
     benchmarkLevel: toNum(data.benchmark_level),
     benchmarkWindowReturn: toNum(data.benchmark_window_return),
     alpha: toNum(data.alpha),

@@ -27,9 +27,6 @@ import EmptyState from '../../components/EmptyState.jsx'
 import ColumnPicker from '../../components/tables/ColumnPicker.jsx'
 import SortCaptureStatus from '../../components/tables/SortCaptureStatus.jsx'
 import MarketTable from '../../components/marketdata/MarketTable.jsx'
-import MarketIndexCard from '../../components/marketdata/MarketIndexCard.jsx'
-
-const BENCHMARK_ID = 'MARKET_INDEX'
 
 const marketColumnById = new Map(MARKET_COLUMNS.map((column) => [column.id, column]))
 
@@ -49,9 +46,7 @@ export default function MarketData() {
   const [query, setQuery] = useState('')
 
   const rows = marketRowsOf(Object.values(instruments), now)
-  const marketRows = rows.filter(
-    (row) => row.instrument.assetClass !== 'RATE' && row.instrument.id !== BENCHMARK_ID,
-  )
+  const marketRows = rows.filter((row) => row.instrument.assetClass !== 'RATE')
   const curveRows = rows.filter((row) => row.instrument.assetClass === 'RATE')
 
   function sortDisabledReason(column) {
@@ -101,7 +96,6 @@ export default function MarketData() {
   )
 
   const summary = summarizeFeed(Object.values(instruments), now)
-  const benchmark = instruments[BENCHMARK_ID]
 
   let content
   if (rows.length === 0) {
@@ -187,7 +181,6 @@ export default function MarketData() {
       />
 
       <div className="market-summary">
-        <MarketIndexCard instrument={benchmark} now={now} />
         <StatCard label="LIVE" value={summary.live} sub="feeding now" tone="info" />
         <StatCard
           label="STALE"

@@ -3,14 +3,13 @@ import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { normalizeAuditEvents } from '../../domain/auditEvents.js'
-import { intentRowsOf, summarizeIntents } from '../../domain/generator.js'
-import { lastActionAtOf, queueStatusOf } from '../../domain/tradeActions.js'
+import { intentRowsOf, lastActionAtOf, queueStatusOf, summarizeIntents } from '../../domain/tradeActions.js'
 import { formatClockTime, formatElapsedTime, formatNumber } from '../../domain/formatting.js'
 import Panel from '../../components/Panel.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
 import StatCard from '../../components/cards/StatCard.jsx'
 import StatusPill from '../../components/status/StatusPill.jsx'
-import IntentFeed from '../../components/generator/IntentFeed.jsx'
+import IntentFeed from '../../components/tradeactions/IntentFeed.jsx'
 import {
   FEED_EVENT_TYPES,
   FEED_LIMIT,
@@ -107,7 +106,7 @@ export default function TradeActions() {
           <EmptyState message="No trade actions recorded yet." />
         )}
         {!feed.loading && !feed.error && rows.length > 0 && (
-          <IntentFeed rows={rows} showSource />
+          <IntentFeed rows={rows} />
         )}
       </Panel>
     </section>

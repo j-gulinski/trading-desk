@@ -1,5 +1,4 @@
-// Shared row feed for generated intents (Generator) and processed actions
-// (Trade Actions). One row per audit event.
+// Row feed of processed trade actions (Trade Actions view). One row per audit event.
 .intent-feed {
   list-style: none;
   margin: 0;
@@ -34,11 +33,6 @@
 .intent-feed__trade {
   color: var(--accent);
   font-family: var(--font-mono);
-}
-.intent-feed__source {
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.06em;
 }
 .intent-feed__message {
   flex: 1 1 auto;

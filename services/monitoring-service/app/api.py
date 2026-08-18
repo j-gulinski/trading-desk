@@ -41,11 +41,6 @@ def _parse_severities(value):
     return [v.upper() for v in wanted if v.upper() in VALID_SEVERITIES] or None
 
 
-@app.route("/health")
-def health():
-    return {"service": SERVICE_NAME, "status": "UP"}
-
-
 @app.route("/status")
 def status():
     response.content_type = "application/json"

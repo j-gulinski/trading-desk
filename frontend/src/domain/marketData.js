@@ -85,7 +85,7 @@ export function instrumentsFromEvent(name, data) {
   return []
 }
 
-export function instrumentsFromSnapshot(snapshot) {
+function instrumentsFromSnapshot(snapshot) {
   const streamId = snapshot?.stream_id ?? null
   const spots = Object.values(snapshot?.spots ?? {})
     .map((spot) => spotInstrument(spot, streamId))
@@ -276,7 +276,7 @@ export function restoreInstruments(payload) {
   return Object.fromEntries(restored.map((instrument) => [instrument.id, instrument]))
 }
 
-export function observedChangeOf(instrument) {
+function observedChangeOf(instrument) {
   const history = instrument.history ?? []
   const observations = instrument.observationCount ?? history.length
   const first = Number.isFinite(instrument.observedOpen)
@@ -296,7 +296,7 @@ export function observedChangeOf(instrument) {
   return { delta, percent, observations }
 }
 
-export function lastTickChangeOf(instrument) {
+function lastTickChangeOf(instrument) {
   const previous = instrument.previousValue
   const latest = instrument.value
   if (!Number.isFinite(previous) || !Number.isFinite(latest)) {
@@ -308,7 +308,7 @@ export function lastTickChangeOf(instrument) {
   return { delta, percent }
 }
 
-export function isStale(instrument, now) {
+function isStale(instrument, now) {
   if (instrument.receivedAtMs == null) return true
   return now - instrument.receivedAtMs > MARKET_STALE_AFTER_MS
 }

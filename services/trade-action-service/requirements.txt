@@ -1,4 +1,0 @@
-bottle
-SQLAlchemy
-psycopg
-structlog

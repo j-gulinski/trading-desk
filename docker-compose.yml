@@ -19,9 +19,13 @@ services:
   db-migrations:
     build:
       context: .
-      dockerfile: Dockerfile.migrate
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE_DIR: services/market-data-service
     container_name: db-migrations
+    command: ["alembic", "upgrade", "head"]
     environment:
+      - DATABASE_URL=${DATABASE_URL}
       - DATABASE_MIGRATION_URL=${DATABASE_URL}
     depends_on:
       postgres:
@@ -30,7 +34,9 @@ services:
   market-data-service:
     build:
       context: .
-      dockerfile: services/market-data-service/Dockerfile
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE_DIR: services/market-data-service
     container_name: market-data-service
     env_file: .env
     volumes:
@@ -45,7 +51,9 @@ services:
   pricing-service:
     build:
       context: .
-      dockerfile: services/pricing-service/Dockerfile
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE_DIR: services/pricing-service
     container_name: pricing-service
     env_file: .env
     volumes:
@@ -62,7 +70,9 @@ services:
   monitoring-service:
     build:
       context: .
-      dockerfile: services/monitoring-service/Dockerfile
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE_DIR: services/monitoring-service
     container_name: monitoring-service
     env_file: .env
     volumes:
@@ -77,7 +87,9 @@ services:
   books-service:
     build:
       context: .
-      dockerfile: services/books-service/Dockerfile
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE_DIR: services/books-service
     container_name: books-service
     env_file: .env
     volumes:
@@ -92,7 +104,9 @@ services:
   trade-action-service:
     build:
       context: .
-      dockerfile: services/trade-action-service/Dockerfile
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE_DIR: services/trade-action-service
     container_name: trade-action-service
     env_file: .env
     volumes:
@@ -104,31 +118,12 @@ services:
       db-migrations:
         condition: service_completed_successfully
 
-  trade-generation-service:
-    build:
-      context: .
-      dockerfile: services/trade-generation-service/Dockerfile
-    container_name: trade-generation-service
-    env_file: .env
-    volumes:
-      - ./logs:/var/log/trading
-    ports:
-      - "8007:8007"
-    restart: unless-stopped
-    depends_on:
-      db-migrations:
-        condition: service_completed_successfully
-      books-service:
-        condition: service_started
-      trade-action-service:
-        condition: service_started
-      market-data-service:
-        condition: service_started
-
   blotter-service:
     build:
       context: .
-      dockerfile: services/blotter-service/Dockerfile
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE_DIR: services/blotter-service
     container_name: blotter-service
     env_file: .env
     volumes:
@@ -141,6 +136,7 @@ services:
         condition: service_completed_successfully
       pricing-service:
         condition: service_started
+
   frontend:
     build:
       context: ./frontend

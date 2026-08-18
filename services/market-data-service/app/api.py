@@ -4,7 +4,6 @@ from bottle import response
 
 from app import persistence
 from app.publisher import clients_lock, client_event_queues
-from app.health import get_health
 from app.config import SERVICE_NAME
 from shared.serialization import to_json
 from shared.logging_config import get_logger
@@ -23,6 +22,7 @@ def stream():
     log.info("stream_client_connected")
 
     def generate_events():
+        yield ": connected\n\n"
         try:
             while True:
                 message = client_q.get()
@@ -41,8 +41,3 @@ def stream():
 def get_snapshot():
     response.content_type = "application/json"
     return to_json(persistence.current_snapshot())
-
-
-@app.route("/health")
-def health():
-    return get_health()

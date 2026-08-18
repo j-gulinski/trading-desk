@@ -1,5 +1,4 @@
 import SystemOverview from '../views/SystemOverview/SystemOverview.jsx'
-import Generator from '../views/Generator/Generator.jsx'
 import TradeActions from '../views/TradeActions/TradeActions.jsx'
 import Logs from '../views/Logs/Logs.jsx'
 import BusinessOverview from '../views/BusinessOverview/BusinessOverview.jsx'
@@ -10,7 +9,6 @@ import Trades from '../views/Trades/Trades.jsx'
 
 export const ROUTES = [
   { path: '', label: 'System Overview', subtitle: 'service health, streams & errors', group: 'SYSTEM', component: SystemOverview },
-  { path: 'generator', label: 'Generator', subtitle: 'trade generation control & events', group: 'SYSTEM', component: Generator },
   { path: 'trade-actions', label: 'Trade Actions', subtitle: 'order processing & throughput', group: 'SYSTEM', component: TradeActions },
   { path: 'logs', label: 'Logs', subtitle: 'central log stream — live tail across services', group: 'SYSTEM', component: Logs },
 

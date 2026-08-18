@@ -160,6 +160,43 @@ export function buildCloseTradeIntent(tradeId, closePrice) {
   }
 }
 
+const DIRECTION_BY_EVENT = {
+  TRADE_CREATED: { direction: 'IN', label: 'TRADE_IN', tone: 'healthy' },
+  TRADE_CLOSED: { direction: 'OUT', label: 'TRADE_OUT', tone: 'stale' },
+  TRADE_REASSIGNED: { direction: 'MOVED', label: 'REASSIGNED', tone: 'info' },
+  ACTION_REJECTED: { direction: 'REJECTED', label: 'REJECTED', tone: 'down' },
+}
+
+export function intentRowsOf(events) {
+  if (!Array.isArray(events)) return []
+  const rows = []
+  for (const event of events) {
+    const mapped = DIRECTION_BY_EVENT[event.eventType]
+    if (!mapped) continue
+    rows.push({
+      id: event.id,
+      atMs: event.createdAtMs,
+      direction: mapped.direction,
+      label: mapped.label,
+      tone: mapped.tone,
+      tradeId: event.entityId,
+      correlationId: event.correlationId,
+      message: event.message,
+    })
+  }
+  return rows
+}
+
+export function summarizeIntents(rows) {
+  const summary = { total: rows.length, opened: 0, closed: 0, rejected: 0 }
+  for (const row of rows) {
+    if (row.direction === 'IN') summary.opened += 1
+    else if (row.direction === 'OUT') summary.closed += 1
+    else summary.rejected += 1
+  }
+  return summary
+}
+
 function count(value) {
   const n = Number(value)
   return Number.isFinite(n) ? n : 0

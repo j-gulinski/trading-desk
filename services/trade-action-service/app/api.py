@@ -30,11 +30,6 @@ def _accept(intent):
     return ack
 
 
-@app.route("/health")
-def health():
-    return _json({"service": SERVICE_NAME, "status": "UP"})
-
-
 @app.route("/instruments")
 def instruments():
     return _json(public_instrument_catalog())

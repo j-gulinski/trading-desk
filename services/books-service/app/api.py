@@ -32,11 +32,6 @@ def _deactivation_refusal(book_id):
     return None
 
 
-@app.route("/health")
-def health():
-    return _json({"service": SERVICE_NAME, "status": "UP"})
-
-
 @app.route("/books", method="GET")
 def list_books():
     return _json(repository.list_books())

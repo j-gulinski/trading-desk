@@ -1,17 +1,6 @@
-from shared.config import (
-    LOG_DIR,
-    LOG_LEVEL,
-    MARKET_DATA_SERVICE_HEALTHCHECK_URL,
-    PRICING_SERVICE_HEALTHCHECK_URL,
-    MONITORING_SERVICE_HEALTHCHECK_URL,
-    BOOKS_SERVICE_HEALTHCHECK_URL,
-    TRADE_ACTION_SERVICE_HEALTHCHECK_URL,
-    TRADE_GENERATION_SERVICE_HEALTHCHECK_URL,
-    BLOTTER_SERVICE_HEALTHCHECK_URL,
-)
+from shared.config import LOG_DIR, env_str
 
 SERVICE_NAME = "monitoring-service"
-HOST = "0.0.0.0"
 PORT = 8003
 
 POLL_INTERVAL_SECONDS = 5
@@ -24,13 +13,12 @@ LOG_WARM_START_TAIL_BYTES = 64_000
 TARGETS = {
     name: url
     for name, url in {
-        "monitoring-service": MONITORING_SERVICE_HEALTHCHECK_URL,
-        "market-data-service": MARKET_DATA_SERVICE_HEALTHCHECK_URL,
-        "pricing-service": PRICING_SERVICE_HEALTHCHECK_URL,
-        "books-service": BOOKS_SERVICE_HEALTHCHECK_URL,
-        "trade-action-service": TRADE_ACTION_SERVICE_HEALTHCHECK_URL,
-        "trade-generation-service": TRADE_GENERATION_SERVICE_HEALTHCHECK_URL,
-        "blotter-service": BLOTTER_SERVICE_HEALTHCHECK_URL,
+        "monitoring-service": env_str("MONITORING_SERVICE_HEALTHCHECK_URL"),
+        "market-data-service": env_str("MARKET_DATA_SERVICE_HEALTHCHECK_URL"),
+        "pricing-service": env_str("PRICING_SERVICE_HEALTHCHECK_URL"),
+        "books-service": env_str("BOOKS_SERVICE_HEALTHCHECK_URL"),
+        "trade-action-service": env_str("TRADE_ACTION_SERVICE_HEALTHCHECK_URL"),
+        "blotter-service": env_str("BLOTTER_SERVICE_HEALTHCHECK_URL"),
     }.items()
     if url
 }

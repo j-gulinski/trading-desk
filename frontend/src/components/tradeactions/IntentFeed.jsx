@@ -1,7 +1,7 @@
 import StatusPill from '../status/StatusPill.jsx'
 import { formatClockTime, formatShortId } from '../../domain/formatting.js'
 
-export default function IntentFeed({ rows, showSource = false }) {
+export default function IntentFeed({ rows }) {
   return (
     <ul className="intent-feed">
       {rows.map((row) => (
@@ -14,7 +14,6 @@ export default function IntentFeed({ rows, showSource = false }) {
           <span className="intent-feed__trade">
             {row.tradeId ? formatShortId(row.tradeId) : '—'}
           </span>
-          {showSource && <span className="intent-feed__source">{row.source}</span>}
           <span className="intent-feed__message">{row.message}</span>
         </li>
       ))}

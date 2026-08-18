@@ -49,7 +49,7 @@ export function mergeLogLines(existing, incoming, cap = LOG_FEED_CAP) {
     .slice(0, cap)
 }
 
-export function levelAtLeast(level, minLevel) {
+function levelAtLeast(level, minLevel) {
   return LOG_LEVELS.indexOf(level) >= LOG_LEVELS.indexOf(minLevel)
 }
 
@@ -75,7 +75,7 @@ function warnCountOf(bucket) {
   )
 }
 
-export function minuteSeriesOf(minutes, nowMs, span = PULSE_SPAN_MINUTES) {
+function minuteSeriesOf(minutes, nowMs, span = PULSE_SPAN_MINUTES) {
   const byMinute = new Map()
   for (const bucket of minutes ?? []) {
     const ms = Date.parse(bucket?.t ?? '')

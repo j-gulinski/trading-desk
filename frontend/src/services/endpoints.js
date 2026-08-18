@@ -30,8 +30,8 @@ export const endpoints = {
     book: (bookId) => `/api/books/books/${encodeURIComponent(bookId)}`,
   },
   blotter: {
-    // Books without the trade payload. Trades uses the heavier `tradesOverview`
-    // aggregate because it needs both; Generator only needs the book list.
+    // Books without the trade payload; Trades uses the heavier `tradesOverview`
+    // aggregate because it needs both.
     booksSummary: '/api/blotter/books/summary',
     trades: (params) => withQuery('/api/blotter/trades', params),
     trade: (tradeId) => `/api/blotter/trades/${encodeURIComponent(tradeId)}`,
@@ -42,12 +42,5 @@ export const endpoints = {
     queueStatus: '/api/trade-action/queue/status',
     instruments: '/api/trade-action/instruments',
     termSchemas: '/api/trade-action/instruments/term-schemas',
-  },
-  tradeGeneration: {
-    status: '/api/trade-generation/status',
-    start: '/api/trade-generation/start',
-    stop: '/api/trade-generation/stop',
-    generateOnce: '/api/trade-generation/generate-once',
-    config: '/api/trade-generation/config',
   },
 }

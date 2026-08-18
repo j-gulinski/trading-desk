@@ -35,11 +35,6 @@ export default defineConfig({
         target: 'http://trade-action-service:8008',
         changeOrigin: true,
         rewrite: p => p.replace('/api/trade-action', '')
-      },
-      '/api/trade-generation': {
-        target: 'http://trade-generation-service:8007',
-        changeOrigin: true,
-        rewrite: p => p.replace('/api/trade-generation', '')
       }
     }
   }

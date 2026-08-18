@@ -9,7 +9,6 @@ const DISPLAY_ORDER = [
   'pricing-service',
   'books-service',
   'blotter-service',
-  'trade-generation-service',
   'trade-action-service',
 ]
 

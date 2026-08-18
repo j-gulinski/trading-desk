@@ -1,29 +1,31 @@
 import os
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
 
-MARKET_DATA_STREAM_URL = os.environ.get("MARKET_DATA_STREAM_URL")
-MARKET_DATA_SNAPSHOT_URL = os.environ.get("MARKET_DATA_SNAPSHOT_URL")
-VALUATION_STREAM_URL = os.environ.get("VALUATION_STREAM_URL")
-TRADE_ACTION_SERVICE_URL = os.environ.get("TRADE_ACTION_SERVICE_URL")
-BOOKS_SERVICE_URL = os.environ.get("BOOKS_SERVICE_URL")
-BLOTTER_SERVICE_URL = os.environ.get("BLOTTER_SERVICE_URL")
+def env_str(name, default=None):
+    value = os.environ.get(name)
+    return value if value not in (None, "") else default
 
-MARKET_DATA_SERVICE_HEALTHCHECK_URL = os.environ.get("MARKET_DATA_SERVICE_HEALTHCHECK_URL")
-PRICING_SERVICE_HEALTHCHECK_URL = os.environ.get("PRICING_SERVICE_HEALTHCHECK_URL")
-MONITORING_SERVICE_HEALTHCHECK_URL = os.environ.get("MONITORING_SERVICE_HEALTHCHECK_URL")
-BOOKS_SERVICE_HEALTHCHECK_URL = os.environ.get("BOOKS_SERVICE_HEALTHCHECK_URL")
-TRADE_ACTION_SERVICE_HEALTHCHECK_URL = os.environ.get("TRADE_ACTION_SERVICE_HEALTHCHECK_URL")
-TRADE_GENERATION_SERVICE_HEALTHCHECK_URL = os.environ.get("TRADE_GENERATION_SERVICE_HEALTHCHECK_URL")
-BLOTTER_SERVICE_HEALTHCHECK_URL = os.environ.get("BLOTTER_SERVICE_HEALTHCHECK_URL")
 
-TICK_INTERVAL_MS = int(os.environ.get("TICK_INTERVAL_MS"))
-SNAPSHOT_INTERVAL_MS = int(os.environ.get("SNAPSHOT_INTERVAL_MS"))
-TRADE_GENERATION_INTERVAL_MS = int(os.environ.get("TRADE_GENERATION_INTERVAL_MS"))
-TARGET_OPEN_TRADES = int(os.environ.get("TARGET_OPEN_TRADES", "300"))
-TARGET_NOTIONAL = float(os.environ.get("TARGET_NOTIONAL", "100000"))
+def env_int(name, default=None):
+    raw = os.environ.get(name)
+    return int(raw) if raw not in (None, "") else default
 
-LOG_LEVEL = os.environ.get("LOG_LEVEL")
-LOG_DIR = os.environ.get("LOG_DIR")
-LOG_FILE_MAX_BYTES = int(os.environ.get("LOG_FILE_MAX_BYTES", "5000000"))
-LOG_FILE_BACKUP_COUNT = int(os.environ.get("LOG_FILE_BACKUP_COUNT", "3"))
+
+def env_float(name, default=None):
+    raw = os.environ.get(name)
+    return float(raw) if raw not in (None, "") else default
+
+
+def env_required(name):
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        raise RuntimeError(f"{name} is not set")
+    return raw
+
+
+DATABASE_URL = env_required("DATABASE_URL")
+
+LOG_LEVEL = env_str("LOG_LEVEL", "INFO")
+LOG_DIR = env_str("LOG_DIR")
+LOG_FILE_MAX_BYTES = env_int("LOG_FILE_MAX_BYTES", 5_000_000)
+LOG_FILE_BACKUP_COUNT = env_int("LOG_FILE_BACKUP_COUNT", 3)
