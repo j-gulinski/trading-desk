@@ -5,7 +5,6 @@ export const BOOK_ASSET_CLASSES = [
   'COMMODITY',
   'EQUITY',
   'EUROPEAN_OPTION',
-  'FUTURES',
   'FX',
   'IRS',
 ]

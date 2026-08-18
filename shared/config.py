@@ -25,6 +25,8 @@ def env_required(name):
 
 DATABASE_URL = env_required("DATABASE_URL")
 
+BENCHMARK_SYMBOL = env_str("BENCHMARK_SYMBOL", "SPY")
+
 LOG_LEVEL = env_str("LOG_LEVEL", "INFO")
 LOG_DIR = env_str("LOG_DIR")
 LOG_FILE_MAX_BYTES = env_int("LOG_FILE_MAX_BYTES", 5_000_000)

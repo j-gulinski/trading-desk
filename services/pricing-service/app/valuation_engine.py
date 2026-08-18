@@ -5,7 +5,7 @@ from app import cache
 from app.pnl import compute_pnl, signed_quantity
 from app.valuation_publisher import publish_valuation
 from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
-from shared.catalog import DEFAULT_CURVE, DEFAULT_VOLATILITY
+from shared.term_schemas import DEFAULT_CURVE, DEFAULT_VOLATILITY
 from shared.functions import first_present, get_iso_timestamp
 from shared.pricing_math import (
     bond_pv,
@@ -20,7 +20,7 @@ log = get_logger(SERVICE_NAME)
 
 def market_inputs(asset_class, symbol, meta):
     inputs = {}
-    if asset_class in ("EQUITY", "COMMODITY", "FUTURES", "FX"):
+    if asset_class in ("EQUITY", "COMMODITY", "FX"):
         inputs["spot"] = cache.get_spot(symbol)
     elif asset_class == "EUROPEAN_OPTION":
         inputs["spot"] = cache.get_spot(meta["underlying_symbol"])
@@ -34,14 +34,13 @@ def price_from_inputs(asset_class, meta, inputs):
     spot = inputs.get("spot")
     curve = inputs.get("curve")
 
-    if asset_class in ("EQUITY", "COMMODITY", "FUTURES"):
+    if asset_class in ("EQUITY", "COMMODITY"):
         if not spot:
             return None
         price = first_present(spot, ("mid", "last", "spot"))
         if price is None:
             return None
-        multiplier = int(meta.get("multiplier", 1)) if asset_class == "FUTURES" else 1
-        return Decimal(str(price)), multiplier
+        return Decimal(str(price)), 1
 
     if asset_class == "FX":
         if not spot or spot.get("spot") is None:

@@ -2,8 +2,9 @@ import uuid
 import threading
 from decimal import Decimal
 
-from shared.catalog import CURVE_PRICED_ASSET_CLASSES, DEFAULT_CURVE
 from shared.db import session_scope
+from shared.symbols import CURVE_PRICED_ASSET_CLASSES
+from shared.term_schemas import DEFAULT_CURVE
 from shared.models import Book, Trade, Valuation
 from shared.functions import utcnow, get_iso_timestamp
 from shared.logging_config import get_logger
@@ -174,7 +175,6 @@ def save_valuation(valuation):
                 realized_pnl=valuation["realized_pnl"],
                 total_pnl=valuation["total_pnl"],
                 currency=valuation["currency"],
-                market_data_reference=valuation.get("market_data_reference"),
                 valuation_payload=valuation.get("valuation_payload"),
                 created_at=utcnow(),
             ))

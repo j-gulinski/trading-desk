@@ -1,4 +1,15 @@
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Numeric, Text, text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase
 
@@ -48,6 +59,13 @@ class Trade(Base):
     source = Column(Text, nullable=False)
     client_request_id = Column(Text, nullable=True, unique=True)
     valuation_finalized = Column(Boolean, nullable=False, server_default="FALSE")
+    market_data_provider = Column(Text, nullable=True)
+    entry_price_timestamp = Column(DateTime(timezone=True), nullable=True)
+    entry_snapshot_id = Column(
+        UUID(as_uuid=True), ForeignKey("market_data_snapshots.snapshot_id"), nullable=True
+    )
+    client_seen_price = Column(Numeric, nullable=True)
+    created_by_service = Column(Text, nullable=True)
     trade_metadata = Column("metadata", JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
@@ -70,54 +88,113 @@ class Valuation(Base):
     realized_pnl = Column(Numeric, nullable=False, server_default="0")
     total_pnl = Column(Numeric, nullable=False, server_default="0")
     currency = Column(Text, nullable=False)
-    market_data_reference = Column(Text, nullable=True)
+    market_data_provider = Column(Text, nullable=True)
+    market_data_timestamp = Column(DateTime(timezone=True), nullable=True)
     valuation_payload = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class MarketDataSpotPrice(Base):
+    __tablename__ = "market_data_spot_prices"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "symbol", name="uq_market_data_spot_prices_provider_symbol"
+        ),
+    )
+
+    market_data_id = Column(UUID(as_uuid=True), primary_key=True)
+    provider = Column(Text, nullable=False)
+    symbol = Column(Text, nullable=False)
+    asset_class = Column(Text, nullable=False)
+    currency = Column(Text, nullable=True)
+    bid = Column(Numeric, nullable=True)
+    ask = Column(Numeric, nullable=True)
+    last = Column(Numeric, nullable=True)
+    mid = Column(Numeric, nullable=False)
+    price_basis = Column(Text, nullable=False)
+    quote_grade = Column(Text, nullable=False)
+    provider_timestamp = Column(DateTime(timezone=True), nullable=True)
+    received_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 
 class MarketDataSnapshot(Base):
     __tablename__ = "market_data_snapshots"
+    __table_args__ = (
+        Index(
+            "ix_market_data_snapshots_provider_symbol_received_at",
+            "provider",
+            "symbol",
+            "received_at",
+        ),
+    )
 
     snapshot_id = Column(UUID(as_uuid=True), primary_key=True)
-    event_id = Column(BigInteger, nullable=True)
-    snapshot_type = Column(Text, nullable=False)
-    snapshot_time = Column(DateTime(timezone=True), nullable=False)
+    provider = Column(Text, nullable=False)
+    symbol = Column(Text, nullable=False)
+    asset_class = Column(Text, nullable=False)
+    currency = Column(Text, nullable=True)
+    bid = Column(Numeric, nullable=True)
+    ask = Column(Numeric, nullable=True)
+    last = Column(Numeric, nullable=True)
+    mid = Column(Numeric, nullable=False)
+    price_basis = Column(Text, nullable=False)
+    quote_grade = Column(Text, nullable=False)
+    provider_timestamp = Column(DateTime(timezone=True), nullable=True)
+    received_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
-    payload = Column(JSONB, nullable=False)
+    raw_payload = Column(JSONB, nullable=False)
 
 
 class MarketDataCurve(Base):
     __tablename__ = "market_data_curves"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "curve_name", "as_of_date",
+            name="uq_market_data_curves_provider_curve_as_of",
+        ),
+    )
 
     curve_id = Column(UUID(as_uuid=True), primary_key=True)
-    event_id = Column(BigInteger, nullable=True)
+    provider = Column(Text, nullable=False)
     curve_name = Column(Text, nullable=False)
-    curve_type = Column(Text, nullable=False)
-    currency = Column(Text, nullable=True)
-    tenors = Column(JSONB, nullable=False)
-    rates = Column(JSONB, nullable=False)
-    event_time = Column(DateTime(timezone=True), nullable=False)
+    currency = Column(Text, nullable=False)
+    index_tenor = Column(Text, nullable=True)
+    as_of_date = Column(Date, nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
-    raw_payload = Column(JSONB, nullable=False)
 
 
-class MarketDataSpotPrice(Base):
-    __tablename__ = "market_data_spot_prices"
+class MarketDataCurvePoint(Base):
+    __tablename__ = "market_data_curve_points"
+    __table_args__ = (
+        UniqueConstraint(
+            "curve_id", "tenor_label", name="uq_market_data_curve_points_curve_tenor"
+        ),
+    )
 
-    market_data_id = Column(UUID(as_uuid=True), primary_key=True)
-    event_id = Column(BigInteger, nullable=True)
-    symbol = Column(Text, nullable=False)
+    curve_point_id = Column(UUID(as_uuid=True), primary_key=True)
+    curve_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("market_data_curves.curve_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tenor_label = Column(Text, nullable=False)
+    tenor_years = Column(Numeric, nullable=False)
+    rate = Column(Numeric, nullable=False)
+    source_series = Column(Text, nullable=True)
+    source_as_of = Column(Date, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class WatchlistItem(Base):
+    __tablename__ = "watchlist_items"
+
+    symbol = Column(Text, primary_key=True)
     asset_class = Column(Text, nullable=False)
-    bid = Column(Numeric, nullable=True)
-    ask = Column(Numeric, nullable=True)
-    mid = Column(Numeric, nullable=True)
-    last = Column(Numeric, nullable=True)
-    spot = Column(Numeric, nullable=True)
-    currency = Column(Text, nullable=True)
-    source = Column(Text, nullable=False, server_default="'SIMULATED'")
-    event_time = Column(DateTime(timezone=True), nullable=False)
+    currency = Column(Text, nullable=False)
+    capabilities = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
-    raw_payload = Column(JSONB, nullable=False)
 
 
 class AuditLog(Base):

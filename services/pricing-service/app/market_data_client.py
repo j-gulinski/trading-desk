@@ -4,7 +4,7 @@ import urllib.request
 import urllib.error
 
 from shared.audit import write_audit
-from shared.catalog import BENCHMARK_SYMBOL
+from shared.config import BENCHMARK_SYMBOL
 from shared.functions import first_present
 from shared.logging_config import get_logger
 from app import cache

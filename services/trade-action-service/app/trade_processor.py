@@ -1,5 +1,4 @@
 import math
-import re
 import time
 import uuid
 
@@ -7,7 +6,7 @@ import structlog
 from sqlalchemy.exc import IntegrityError
 
 from shared.db import session_scope
-from shared.catalog import INSTRUMENT_CATALOG
+from shared.symbols import is_valid_symbol, watchlist_item, watchlist_spot_symbols
 from shared.term_schemas import validate_terms
 from shared.audit import write_audit
 from shared.logging_config import get_logger
@@ -16,8 +15,6 @@ from app.config import SERVICE_NAME
 
 log = get_logger(SERVICE_NAME)
 
-_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9_.\-]{1,31}$")
-
 
 def _audit(session, event_type, message, intent, severity="INFO"):
     write_audit(SERVICE_NAME, event_type, message, entity_type="TRADE",
@@ -25,18 +22,17 @@ def _audit(session, event_type, message, intent, severity="INFO"):
                 severity=severity, session=session)
 
 
-def _resolve_terms(intent):
+def _resolve_terms(session, intent):
     asset_class = intent.get("asset_class")
     custom = intent.get("terms")
     if custom is not None:
-        symbol = intent.get("symbol")
-        if not isinstance(symbol, str) or not _SYMBOL_PATTERN.match(symbol):
+        if not is_valid_symbol(intent.get("symbol")):
             return None, "invalid custom instrument symbol"
-        return validate_terms(asset_class, custom)
-    terms = INSTRUMENT_CATALOG.get(intent.get("symbol"))
-    if terms is None or terms["asset_class"] != asset_class:
-        return None, "unknown catalog instrument for asset class"
-    return terms, None
+        return validate_terms(asset_class, custom, watchlist_spot_symbols(session))
+    item = watchlist_item(session, intent.get("symbol"))
+    if item is None or item.asset_class != asset_class:
+        return None, "symbol is not on the watchlist for this asset class"
+    return {"asset_class": item.asset_class, "currency": item.currency}, None
 
 
 def _price_error(intent):
@@ -53,10 +49,10 @@ def _price_error(intent):
 
 def _open(intent):
     book_id = _parse_uuid(intent.get("book_id"))
-    terms, term_error = _resolve_terms(intent)
     price_error = _price_error(intent)
     try:
         with session_scope() as session:
+            terms, term_error = _resolve_terms(session, intent)
             book = repository.get_active_book(session, book_id) if book_id else None
             if (
                 book is None

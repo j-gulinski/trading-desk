@@ -8,7 +8,7 @@ from app.config import (
     PORTFOLIO_CAPITAL_BASE,
 )
 from app.valuation_publisher import publish_book_risk
-from shared.catalog import BENCHMARK_SYMBOL
+from shared.config import BENCHMARK_SYMBOL
 from shared.functions import get_iso_timestamp
 from shared.pricing_math import alpha_beta
 

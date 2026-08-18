@@ -30,7 +30,6 @@ export function formatValueUnit(instrument) {
   if (instrument.assetClass === 'COMMODITY' && pair?.base === 'XAU') {
     return `${pair.quote}/oz`
   }
-  if (instrument.assetClass === 'FUTURES') return 'pts'
   if (instrument.unit === 'rate') return 'yield'
   return instrument.currency ?? ''
 }

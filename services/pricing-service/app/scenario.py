@@ -3,7 +3,7 @@ from decimal import Decimal
 from app.schemas import ScenarioRequest
 from app.valuation_engine import market_inputs, price_from_inputs
 
-SPOT_SHOCKED = ("EQUITY", "COMMODITY", "FUTURES", "FX", "EUROPEAN_OPTION")
+SPOT_SHOCKED = ("EQUITY", "COMMODITY", "FX", "EUROPEAN_OPTION")
 CURVE_SHOCKED = ("BOND", "IRS")
 SPOT_LEVEL_KEYS = ("spot", "mid", "last", "bid", "ask")
 

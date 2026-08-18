@@ -52,7 +52,7 @@ NBP and ECB require no key — the four above are the complete registration list
 
 | Variable | Default | Read by | Why |
 | --- | --- | --- | --- |
-| `BENCHMARK_SYMBOL` | `MARKET_INDEX` (code) / `SPY` (env) | pricing-service | Symbol whose ticks drive alpha/beta sampling; SPY is the free real-time S&P 500 proxy — sampling stays inert until the Finnhub feed lands. |
+| `BENCHMARK_SYMBOL` | `SPY` | pricing-service | Symbol whose ticks drive alpha/beta sampling; SPY is the free real-time S&P 500 proxy (D14) — sampling stays inert until the Finnhub feed lands. |
 | `BOOK_RISK_WINDOW` | `100` | pricing-service | Rolling regression window: stable cov/var, still tracks regime shifts. |
 | `BOOK_RISK_MINIMUM_OBSERVATIONS` | `20` | pricing-service | Below this the card reads INSUFFICIENT_DATA instead of noise-fit alpha/beta. |
 | `BOOK_CAPITAL_BASE` | `1000000` | pricing-service | Assumed capital turning a book's PnL stream into returns; alpha/beta scale as 1/base. |

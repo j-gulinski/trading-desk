@@ -56,13 +56,21 @@ deployment-independent.
 - **`books`** — `book_id`, name, expected asset class, `is_active` (retirement is a soft
   delete).
 - **`trades`** — identity, book, side, quantity, prices, lifecycle status, and `metadata JSONB`
-  holding the frozen terms; `asset_class` is `TEXT`, not a database enum.
-- **`valuations`** — one row per repricing, plus the terminal row written at close.
+  holding the frozen terms; `asset_class` is `TEXT`, not a database enum. Phase 1 added the
+  provenance columns (D2): `market_data_provider`, `entry_price_timestamp`,
+  `entry_snapshot_id` (FK to the quote-history row used at execution), `client_seen_price`,
+  `created_by_service` — written from Phase 4 on.
+- **`valuations`** — one row per repricing, plus the terminal row written at close; stamped
+  with `market_data_provider` + `market_data_timestamp` from Phase 2 on.
 - **`audit_logs`** — service, event type, severity, message, entity, `correlation_id`,
   timestamp. The audit trail is the business record; rotating log files plus monitoring's
   bounded in-memory buffers are the technical one.
-- **`market_data_spot_prices` / `market_data_curves` / `market_data_snapshots`** — the market
-  store; reshaped for the provider world by the Phase 1 migration.
+- **The market store** (reshaped by the Phase 1 migration; details in
+  [market-data.md](market-data.md)): `market_data_spot_prices` — the latest quote board,
+  unique (provider, symbol), upserted; `market_data_snapshots` — change-only quote history
+  with raw payloads; `market_data_curves` / `market_data_curve_points` — curve sets with
+  per-point provenance; `watchlist_items` — the symbol master that replaced the static
+  instrument catalog.
 
 Migrations live in `db/versions/` (Alembic) and run as the one-shot `db-migrations` container
 before any service starts.

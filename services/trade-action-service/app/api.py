@@ -5,7 +5,8 @@ from bottle import request, response
 
 from app import action_queue
 from app.config import SERVICE_NAME
-from shared.catalog import public_instrument_catalog
+from shared.db import session_scope
+from shared.symbols import watchlist_items, watchlist_spot_symbols
 from shared.term_schemas import public_term_schemas
 
 app = bottle.Bottle()
@@ -32,12 +33,20 @@ def _accept(intent):
 
 @app.route("/instruments")
 def instruments():
-    return _json(public_instrument_catalog())
+    with session_scope() as session:
+        items = [
+            {"symbol": item.symbol, "asset_class": item.asset_class,
+             "currency": item.currency}
+            for item in watchlist_items(session)
+        ]
+    return _json(items)
 
 
 @app.route("/instruments/term-schemas")
 def term_schemas():
-    return _json(public_term_schemas())
+    with session_scope() as session:
+        underlying_choices = watchlist_spot_symbols(session)
+    return _json(public_term_schemas(underlying_choices))
 
 
 @app.route("/trade-actions", method="POST")

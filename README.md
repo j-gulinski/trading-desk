@@ -8,8 +8,9 @@ Forked from [trading-microservices](https://github.com/j-gulinski/trading-micros
 which stays archived as the runnable synthetic demo. This repository removes every synthetic
 flow and rebuilds market data around six real providers — Finnhub, Twelve Data, Alpha Vantage
 (quotes), NBP, ECB, FRED (official rates and curves) — landing phase by phase per
-[docs/hw5-plan-v2.md](docs/hw5-plan-v2.md). Current state: the deep clean is done; the market
-data board is honestly empty until the first provider client lands.
+[docs/hw5-plan-v2.md](docs/hw5-plan-v2.md). Current state: the provider-world contracts and
+schema are in place ([docs/market-data.md](docs/market-data.md)); the market data board is
+honestly empty until the first provider client lands (Phase 2).
 
 ## Running
 

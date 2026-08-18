@@ -6,7 +6,8 @@ from app import cache
 from app.config import SERVICE_NAME, VALUATION_STREAM_QUEUE_SIZE
 from app.schemas import ScenarioRequest
 from app.valuation_engine import price_instrument
-from shared.catalog import INSTRUMENT_CATALOG
+from shared.db import session_scope
+from shared.symbols import watchlist_item, watchlist_spot_symbols
 from shared.term_schemas import validate_terms
 from app.scenario import run_scenario
 from shared.serialization import to_json
@@ -34,14 +35,22 @@ def price_preview():
     body = request.json or {}
     symbol = body.get("symbol")
     if body.get("terms") is not None:
-        terms, error = validate_terms(body.get("asset_class"), body["terms"])
+        with session_scope() as session:
+            underlying_choices = watchlist_spot_symbols(session)
+        terms, error = validate_terms(body.get("asset_class"), body["terms"],
+                                      underlying_choices)
         if terms is None:
             log.warning("price_preview_rejected", symbol=symbol,
                         asset_class=body.get("asset_class"), reason=error)
             response.status = 400
             return to_json({"error": error, "symbol": symbol})
     else:
-        terms = INSTRUMENT_CATALOG.get(symbol)
+        with session_scope() as session:
+            item = watchlist_item(session, symbol)
+            terms = (
+                {"asset_class": item.asset_class, "currency": item.currency}
+                if item is not None else None
+            )
         if terms is None:
             log.warning("price_preview_rejected", symbol=symbol, reason="instrument not found")
             response.status = 404

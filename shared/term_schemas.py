@@ -1,12 +1,5 @@
-from shared.catalog import DEFAULT_CURVE, DEFAULT_VOLATILITY, INSTRUMENT_CATALOG
-
-SPOT_ASSET_CLASSES = ("EQUITY", "COMMODITY", "FUTURES", "FX")
-
-UNDERLYING_CHOICES = sorted(
-    symbol
-    for symbol, terms in INSTRUMENT_CATALOG.items()
-    if terms["asset_class"] in SPOT_ASSET_CLASSES
-)
+DEFAULT_CURVE = "USD_GOV"
+DEFAULT_VOLATILITY = 0.22
 
 TERM_SCHEMAS = {
     "EUROPEAN_OPTION": {
@@ -14,7 +7,7 @@ TERM_SCHEMAS = {
         "defaults": {"multiplier": 1, "curve": DEFAULT_CURVE, "volatility": DEFAULT_VOLATILITY},
         "fields": [
             {"name": "underlying_symbol", "label": "UNDERLYING", "type": "choice",
-             "choices": UNDERLYING_CHOICES},
+             "choices_source": "WATCHLIST_SPOT"},
             {"name": "option_type", "label": "TYPE", "type": "choice",
              "choices": ["CALL", "PUT"], "labels": {"CALL": "Call", "PUT": "Put"}},
             {"name": "strike", "label": "STRIKE", "type": "number", "gt": 0},
@@ -42,11 +35,30 @@ TERM_SCHEMAS = {
 }
 
 
-def public_term_schemas():
-    return TERM_SCHEMAS
+def _field_choices(field, underlying_choices):
+    if field.get("choices_source") == "WATCHLIST_SPOT":
+        return list(underlying_choices)
+    return field["choices"]
 
 
-def validate_terms(asset_class, raw):
+def public_term_schemas(underlying_choices):
+    schemas = {}
+    for asset_class, schema in TERM_SCHEMAS.items():
+        fields = []
+        for field in schema["fields"]:
+            if field["type"] != "choice":
+                fields.append(field)
+                continue
+            public_field = {
+                key: value for key, value in field.items() if key != "choices_source"
+            }
+            public_field["choices"] = _field_choices(field, underlying_choices)
+            fields.append(public_field)
+        schemas[asset_class] = {**schema, "fields": fields}
+    return schemas
+
+
+def validate_terms(asset_class, raw, underlying_choices=()):
     schema = TERM_SCHEMAS.get(asset_class)
     if schema is None or not schema.get("customizable"):
         return None, f"{asset_class} does not accept custom terms"
@@ -60,7 +72,7 @@ def validate_terms(asset_class, raw):
         if value is None or value == "":
             return None, f"missing term: {name}"
         if field["type"] == "choice":
-            if value not in field["choices"]:
+            if value not in _field_choices(field, underlying_choices):
                 return None, f"invalid {name}"
             terms[name] = value
             continue
