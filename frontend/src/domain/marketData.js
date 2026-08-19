@@ -8,7 +8,7 @@ import { formatTenor } from './marketFormat.js'
 import { directionOf } from './formatting.js'
 import { sortRows } from './tableSort.js'
 
-const MARKET_STATE_STORAGE_VERSION = 1
+const MARKET_STATE_STORAGE_VERSION = 2
 const MAX_STORED_INSTRUMENTS = 100
 
 function toNum(value) {
@@ -34,14 +34,21 @@ function eventTimeOf(tick) {
 
 function spotInstrument(tick, snapshotStreamId = null) {
   if (!tick || typeof tick.symbol !== 'string' || tick.symbol.length === 0) return null
+  const provider = typeof tick.provider === 'string' ? tick.provider : null
+  const providerTimestampMs = Date.parse(tick.provider_timestamp ?? '')
+  const staleAfterSeconds = toNum(tick.stale_after_seconds)
   return {
-    id: tick.symbol,
+    id: provider ? `${provider}:${tick.symbol}` : tick.symbol,
     symbol: tick.symbol,
+    provider,
     assetClass: tick.asset_class ?? 'UNKNOWN',
     currency: tick.currency ?? null,
     value: pickSpotValue(tick),
     bid: toNum(tick.bid),
     ask: toNum(tick.ask),
+    grade: tick.quote_grade ?? null,
+    providerTimestampMs: Number.isFinite(providerTimestampMs) ? providerTimestampMs : null,
+    staleAfterMs: staleAfterSeconds != null ? staleAfterSeconds * 1000 : null,
     unit: 'price',
     tenor: null,
     sourceStreamId: tick.stream_id ?? snapshotStreamId,
@@ -236,11 +243,17 @@ function restoreInstrument(candidate) {
   return {
     id: candidate.id,
     symbol: candidate.symbol,
+    provider: typeof candidate.provider === 'string' ? candidate.provider : null,
     assetClass: candidate.assetClass,
     currency: typeof candidate.currency === 'string' ? candidate.currency : null,
     value,
     bid: toNum(candidate.bid),
     ask: toNum(candidate.ask),
+    grade: typeof candidate.grade === 'string' ? candidate.grade : null,
+    providerTimestampMs: Number.isFinite(candidate.providerTimestampMs)
+      ? candidate.providerTimestampMs
+      : null,
+    staleAfterMs: Number.isFinite(candidate.staleAfterMs) ? candidate.staleAfterMs : null,
     unit: candidate.unit === 'rate' ? 'rate' : 'price',
     tenor: Number.isFinite(tenor) ? tenor : null,
     sourceStreamId:
@@ -308,7 +321,16 @@ function lastTickChangeOf(instrument) {
   return { delta, percent }
 }
 
+function providerAgeMs(instrument, now) {
+  if (!Number.isFinite(instrument.providerTimestampMs)) return null
+  return Math.max(0, now - instrument.providerTimestampMs)
+}
+
 function isStale(instrument, now) {
+  const age = providerAgeMs(instrument, now)
+  if (age != null && Number.isFinite(instrument.staleAfterMs)) {
+    return age > instrument.staleAfterMs
+  }
   if (instrument.receivedAtMs == null) return true
   return now - instrument.receivedAtMs > MARKET_STALE_AFTER_MS
 }
@@ -323,6 +345,7 @@ export function marketRowsOf(instruments, now) {
       lastTickChange,
       observedDirection: directionOf(observedChange.delta),
       lastTickDirection: directionOf(lastTickChange.delta),
+      providerAgeMs: providerAgeMs(instrument, now),
       live: !isStale(instrument, now),
     }
   })
@@ -345,6 +368,7 @@ export function summarizeFeed(instruments, now) {
 
 function structuralValueOf(instrument, column) {
   if (column === 'symbol') return instrument.symbol
+  if (column === 'provider') return instrument.provider
   if (column === 'assetClass') return instrument.assetClass
   if (column === 'tenor') return instrument.tenor
   return undefined
@@ -374,6 +398,7 @@ function snapshotValueOf(instrument, column, now) {
     }
     return ((instrument.ask - instrument.bid) / Math.abs(instrument.value)) * 10000
   }
+  if (column === 'age') return providerAgeMs(instrument, now)
   if (column === 'feed') return isStale(instrument, now) ? 0 : 1
   if (column === 'updated') return instrument.eventTimeMs ?? null
   return null

@@ -185,7 +185,7 @@ export default function MarketData() {
         <StatCard
           label="STALE"
           value={summary.stale}
-          sub="> 5s threshold"
+          sub="past feed threshold"
           tone={summary.stale > 0 ? 'warn' : 'default'}
         />
         <StatCard

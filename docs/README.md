@@ -13,9 +13,8 @@ system as it is now, or it does not exist. The pre-fork docs live in the archive
 | [hw5-plan-v2.md](hw5-plan-v2.md) | The plan of record: providers, decisions D1–D25, phases |
 | [phase-reports/](phase-reports/) | One report per phase — what was needed, what was chosen, what landed |
 
-Expected to appear as their phases land: the freshness thresholds and execution/price-basis
-behavior (Phases 2–4), curve documentation and the PLN investigation (Phase 5), and
-performance/load-test results (Phase 7).
+Further documents appear as their phases land; [hw5-plan-v2.md](hw5-plan-v2.md) says what
+and when.
 
 The root [README.md](../README.md) is the operational entry point: what the system is and how
 to run and test it.

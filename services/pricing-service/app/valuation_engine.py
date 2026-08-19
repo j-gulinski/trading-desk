@@ -4,7 +4,7 @@ from decimal import Decimal
 from app import cache
 from app.pnl import compute_pnl, signed_quantity
 from app.valuation_publisher import publish_valuation
-from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
+from app.config import DEFAULT_QUOTE_PROVIDER, TRADE_REFRESH_SECONDS, SERVICE_NAME
 from shared.term_schemas import DEFAULT_CURVE, DEFAULT_VOLATILITY
 from shared.functions import first_present, get_iso_timestamp
 from shared.pricing_math import (
@@ -18,12 +18,13 @@ from shared.logging_config import get_logger
 log = get_logger(SERVICE_NAME)
 
 
-def market_inputs(asset_class, symbol, meta):
+def market_inputs(asset_class, symbol, meta, provider=None):
+    provider = provider or DEFAULT_QUOTE_PROVIDER
     inputs = {}
     if asset_class in ("EQUITY", "COMMODITY", "FX"):
-        inputs["spot"] = cache.get_spot(symbol)
+        inputs["spot"] = cache.get_spot(provider, symbol)
     elif asset_class == "EUROPEAN_OPTION":
-        inputs["spot"] = cache.get_spot(meta["underlying_symbol"])
+        inputs["spot"] = cache.get_spot(provider, meta["underlying_symbol"])
         inputs["curve"] = cache.get_curve(meta.get("curve", DEFAULT_CURVE))
     elif asset_class in ("BOND", "IRS"):
         inputs["curve"] = cache.get_curve(meta.get("curve", DEFAULT_CURVE))
@@ -74,21 +75,22 @@ def price_from_inputs(asset_class, meta, inputs):
     return None
 
 
-def price_instrument(asset_class, symbol, meta):
-    return price_from_inputs(asset_class, meta, market_inputs(asset_class, symbol, meta))
-
-
-def _current_price_and_mult(trade):
-    return price_instrument(
-        trade["asset_class"], trade["symbol"], trade.get("metadata") or {}
+def price_instrument(asset_class, symbol, meta, provider=None):
+    return price_from_inputs(
+        asset_class, meta, market_inputs(asset_class, symbol, meta, provider)
     )
 
 
 def value_trade(trade):
-    priced = _current_price_and_mult(trade)
+    meta = trade.get("metadata") or {}
+    inputs = market_inputs(
+        trade["asset_class"], trade["symbol"], meta, cache.trade_provider(trade)
+    )
+    priced = price_from_inputs(trade["asset_class"], meta, inputs)
     if priced is None:
         return None
     price, multiplier = priced
+    spot = inputs.get("spot") or {}
     quantity = trade["quantity"]
     fair_value = price * quantity * multiplier
     unrealized, realized, total = compute_pnl(
@@ -108,6 +110,8 @@ def value_trade(trade):
         "unrealized_pnl": unrealized,
         "realized_pnl": realized,
         "total_pnl": total,
+        "market_data_provider": spot.get("provider"),
+        "market_data_timestamp": spot.get("provider_timestamp"),
         "valuation_time": get_iso_timestamp(),
         "valuation_payload": {"current_price": str(price), "multiplier": multiplier},
     }
@@ -129,8 +133,8 @@ def _value_and_store(trades):
     return events
 
 
-def value_symbol(symbol):
-    return _value_and_store(cache.trades_for_symbol(symbol))
+def value_quote(provider, symbol):
+    return _value_and_store(cache.trades_for_quote(provider, symbol))
 
 
 def value_curve(curve_name):
@@ -140,11 +144,10 @@ def value_curve(curve_name):
 
 
 def trade_refresh_loop():
-    """Periodically re-query the active-trade set and finalize realized PnL for
-    trades that have just been CLOSED"""
     while True:
         try:
-            cache.refresh_active_trades()
+            for event in _value_and_store(cache.refresh_active_trades()):
+                publish_valuation(event)
             for valuation in cache.finalize_closed_trades():
                 cache.record_valuation(valuation)
                 publish_valuation(valuation)

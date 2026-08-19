@@ -26,6 +26,7 @@ def env_required(name):
 DATABASE_URL = env_required("DATABASE_URL")
 
 BENCHMARK_SYMBOL = env_str("BENCHMARK_SYMBOL", "SPY")
+BENCHMARK_PROVIDER = env_str("BENCHMARK_PROVIDER", "FINNHUB")
 
 LOG_LEVEL = env_str("LOG_LEVEL", "INFO")
 LOG_DIR = env_str("LOG_DIR")

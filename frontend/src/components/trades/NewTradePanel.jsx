@@ -229,7 +229,10 @@ export default function NewTradePanel({ onClose }) {
   const activeUnderlying = customMode
     ? termValues.underlying_symbol ?? ''
     : instrument?.underlying_symbol ?? symbol
-  const spotRevision = instruments[activeUnderlying]?.sourceEventId ?? ''
+  const spotRevision = Object.values(instruments).find(
+    (marketInstrument) =>
+      marketInstrument.symbol === activeUnderlying && marketInstrument.assetClass !== 'RATE',
+  )?.sourceEventId ?? ''
   const quoteRevision = assetClass === 'IRS' || assetClass === 'BOND'
     ? curveRevision
     : assetClass === 'EUROPEAN_OPTION'
@@ -390,10 +393,10 @@ export default function NewTradePanel({ onClose }) {
                 aria-invalid={errors.instrument != null}
                 aria-describedby={errors.instrument ? 'new-trade-instrument-error' : undefined}
                 onChange={(event) => {
+                  if (event.target.value !== symbol) setPreview(null)
                   setSymbol(event.target.value)
                   clearError('instrument')
                   clearError('price')
-                  setPreview(null)
                 }}
               >
                 <option value="">{options.length === 0 ? 'No instrument' : 'Select instrument…'}</option>

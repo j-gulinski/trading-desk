@@ -1,10 +1,12 @@
 import queue
 import bottle
-from bottle import response
+from bottle import request, response
 
-from app import persistence
-from app.publisher import clients_lock, client_event_queues
+from app import persistence, scheduler
+from app.publisher import client_event_queues, clients_lock, last_event_id, stream_id
 from app.config import SERVICE_NAME
+from shared.freshness import classify
+from shared.functions import utcnow
 from shared.serialization import to_json
 from shared.logging_config import get_logger
 
@@ -37,7 +39,67 @@ def stream():
     return generate_events()
 
 
+def _board_payload():
+    rows = persistence.board_rows()
+    for row in rows:
+        row["stale_after_seconds"] = scheduler.stale_after_seconds(
+            row["provider"], row["symbol"]
+        )
+        row["event_time"] = row["received_at"]
+    return rows
+
+
 @app.route("/snapshot")
 def get_snapshot():
     response.content_type = "application/json"
-    return to_json(persistence.current_snapshot())
+    rows = _board_payload()
+    return to_json({
+        "stream_id": stream_id,
+        "event_id": last_event_id() or None,
+        "spots": {f"{row['provider']}:{row['symbol']}": row for row in rows},
+        "curves": {},
+    })
+
+
+@app.route("/quotes")
+def get_quotes():
+    response.content_type = "application/json"
+    now = utcnow()
+    rows = _board_payload()
+    for row in rows:
+        row["freshness"] = classify(
+            True, row["provider_timestamp"], now, row["stale_after_seconds"]
+        )
+    return to_json(rows)
+
+
+@app.route("/providers")
+def get_providers():
+    response.content_type = "application/json"
+    return to_json(scheduler.providers_overview())
+
+
+@app.route("/providers/<name>/health")
+def get_provider_health(name):
+    response.content_type = "application/json"
+    detail = scheduler.provider_health(name.upper())
+    if detail is None:
+        response.status = 404
+        return to_json({"error": f"unknown provider: {name}"})
+    return to_json(detail)
+
+
+@app.route("/refresh", method="POST")
+def refresh():
+    response.content_type = "application/json"
+    symbol = (request.query.symbol or "").strip().upper()
+    if not symbol:
+        response.status = 400
+        return to_json({"error": "symbol query parameter is required"})
+    tick, error, status = scheduler.refresh_symbol(symbol)
+    if error is not None:
+        response.status = status
+        log.warning("manual_refresh_rejected", symbol=symbol, reason=error)
+        return to_json({"error": error, "symbol": symbol})
+    log.info("manual_refresh", symbol=symbol)
+    return to_json(tick)

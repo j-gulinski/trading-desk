@@ -37,6 +37,15 @@ const TRAILING_COLUMNS = [
     cellClass: 'market-cell--spark',
   },
   {
+    id: 'age',
+    label: 'Age',
+    sortable: true,
+    snapshot: true,
+    defaultDirection: 'asc',
+    numeric: true,
+    headerNote: 'provider clock',
+  },
+  {
     id: 'feed',
     label: 'Feed',
     sortable: true,
@@ -64,6 +73,7 @@ export const MARKET_COLUMNS = [
     defaultDirection: 'asc',
     cellClass: 'data-table__cell--key',
   },
+  { id: 'provider', label: 'Provider', sortable: true, defaultDirection: 'asc' },
   { id: 'assetClass', label: 'Class', sortable: true, defaultDirection: 'asc' },
   {
     id: 'marketLevel',

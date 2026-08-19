@@ -16,6 +16,30 @@ Two standing decisions recorded here:
   with its why, extended in place (mechanism, evidence, convention, honest limits) only where
   the topic is hard.
 
+## The decisions this phase locked in
+
+The engineering rules Phase 0 set for everything that follows — the policy layer; the
+steps carry the mechanics. (The README's "Operating decisions" table digests the business
+rules of all phases.)
+
+1. **Nothing invents data, and empty is served honestly** — `/snapshot` answers with
+   empty maps, cards read their true empty states, and an intent without a source is
+   `MANUAL`, never `GENERATED`. *(Steps 1, 6)*
+2. **One service runtime** — `run_service(name, app, port, startup, background)`; a
+   `main.py` is a declaration of what the service is, not a boot script. *(Step 2)*
+3. **`os.environ` is read in exactly one place** — typed helpers in `shared/config.py`;
+   a missing required variable fails at boot with its name. *(Step 3)*
+4. **Knobs live with their consumer** — only genuinely cross-service values stay shared.
+   *(Step 3)*
+5. **One Dockerfile template, still one image and one container per service** —
+   dependencies build once as a shared layer, before the source copy, so a code edit
+   never re-runs pip. *(Step 4)*
+6. **Any service image can run migrations** — `alembic.ini` + `db/` ship in every image;
+   there is no separate migration image. *(Step 4)*
+7. **A knob without a written why doesn't exist** — `.env.example` stays lean; every
+   rationale lives in `docs/configuration.md`. *(Step 5)*
+8. **Docs are produced per phase, and the README is the minimal runbook.** *(Step 5)*
+
 ## Step 1 — clear the synthetic flows
 
 **Needed:** everything that invented data had to go — the trade-generation service (random
@@ -32,8 +56,8 @@ and the synthetic MARKET_INDEX benchmark wiring.
   modules — `IntentFeed` moved to `components/tradeactions/` and its row helpers into
   `domain/tradeActions.js`, both stripped of generated-vs-manual discrimination (no `gen-`
   correlation ids exist anymore). And `INSTRUMENT_CATALOG` stays: trade-action validation,
-  term schemas, and the ticket depend on it — Phase 1 *replaces* it with the symbol master
-  rather than Phase 0 deleting it.
+  term schemas, and the ticket depend on it — replacing it with the symbol master is schema
+  work, not cleanup, so deleting it here would only break its consumers.
 - **A default that would now lie, fixed.** An intent arriving without `source` was recorded as
   `GENERATED`; with the generator gone, every UI-opened trade would have been mislabeled — the
   default is now `MANUAL`.
@@ -57,8 +81,8 @@ pricing starts two background threads, monitoring hid its startup inside the ser
   `{service, status: UP}` handler dropped it; pricing and blotter keep their richer payloads.
 - **Deliberately left out (owner direction during review): hosting portability.** The IPv6
   dual-stack bind Railway's private network would need and the `PORT`/`BIND_HOST` environment
-  contract. No future-phase enablement lives in the code — that work ships with Phase 8, and
-  the research stays recorded in the plan (§8.1, §11.3).
+  contract. No future-phase enablement lives in the code — the research
+  stays recorded in the plan (§8.1, §11.3).
 - **Result — a `main.py` is now a declaration of what the service is.** Blotter's, complete:
 
   ```python
@@ -170,8 +194,7 @@ and a separate `Dockerfile.migrate`.
   identical layer once, so total unique backend image content is ~300 MB, not 7 × 299 (a
   storage effect; running containers stay fully separate). Full 8-image rebuild: ~13 s warm.
   Root and frontend `.dockerignore` files keep build contexts small; `.gitignore` gained
-  `/tmp/` and `*.py[cod]`. The frontend image stays a Vite dev server (the HMR workflow)
-  until Phase 8.2.
+  `/tmp/` and `*.py[cod]`. The frontend image stays a Vite dev server (the HMR workflow).
 
 ## Step 5 — env & docs reset
 
@@ -192,8 +215,7 @@ during review.
   change.
 - **`README.md` reset to the minimal runbook** (what the system is, fork context, run steps,
   key signup links, service table, testing policy, docs index). The PDF-mandated sections
-  (per-provider endpoints, price basis, freshness) land in Phase 7 when they describe running
-  code. `AGENTS.md` aligned with the unified image/runtime/docs reality.
+  (per-provider endpoints, price basis, freshness) land when they describe running code. `AGENTS.md` aligned with the unified image/runtime/docs reality.
 
 ## Step 6 — verification
 
@@ -219,21 +241,25 @@ during review.
 - **UI (Playwright):** every view renders with zero console errors; no Generator in the nav;
   Trade Actions works through the relocated feed; the page title finally says *Trading Desk*.
 
-## Carried forward, deliberately
+## What Phase 0 did not do
+
+The state at phase end, stated as facts; how each gap closes is scoped in the plan.
 
 - `INSTRUMENT_CATALOG` still lists the synthetic symbols — the ticket can open trades against
-  them but nothing values them (no prices exist). Phase 1's symbol master replaces it.
-- `market_data_spot_prices.source` keeps its `'SIMULATED'` server default — schema is Phase 1
-  migration territory.
-- Alpha/beta sampling is inert until SPY ticks arrive (Phase 2+); the cards read
-  INSUFFICIENT_DATA, which is the honest state.
-- Pricing's `market_data_connection` flips CONNECTED on stream attach now, but
-  `received_events` stays 0 until Phase 2 — also honest.
+  them but nothing values them; no prices exist. Replacing it with the symbol master is
+  schema work.
+- `market_data_spot_prices.source` keeps its `'SIMULATED'` server default — schema change is
+  migration territory, not cleanup.
+- Alpha/beta sampling is inert — no SPY ticks exist; the cards read INSUFFICIENT_DATA, which
+  is the honest state.
+- Pricing's `market_data_connection` flips CONNECTED on stream attach, but `received_events`
+  stays 0 — nothing publishes yet.
 
-## Still open (user actions)
+## Still open at phase end (user actions)
 
 - **Register the four API keys** (finnhub.io, twelvedata.com, alphavantage.co,
-  fred.stlouisfed.org) into `.env` — blocks Phase 2 and the metals check.
-- **Metals check** (Phase 0 item, key-gated): one Twelve Data + one Alpha Vantage XAU/USD probe
-  with real keys decides whether XAUUSD stays a tradeable symbol or NBP gold remains the only
-  metals reference (review outcome #5).
+  fred.stlouisfed.org) into `.env` — the provider build and the metals check are blocked
+  without them.
+- **Metals check** (key-gated): one Twelve Data + one Alpha Vantage XAU/USD probe with real
+  keys decides whether XAUUSD stays a tradeable symbol or NBP gold remains the only metals
+  reference (review outcome #5).

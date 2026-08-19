@@ -14,10 +14,10 @@ def _shocked_inputs(inputs, asset_class, shock):
         spot = inputs.get("spot")
         if not spot:
             return None
-        factor = 1.0 + shock
+        factor = Decimal(str(1.0 + shock))
         shocked["spot"] = {
             key: value * factor
-            if key in SPOT_LEVEL_KEYS and isinstance(value, (int, float))
+            if key in SPOT_LEVEL_KEYS and isinstance(value, Decimal)
             else value
             for key, value in spot.items()
         }

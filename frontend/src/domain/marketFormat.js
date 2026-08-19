@@ -9,6 +9,16 @@ export function formatTenor(years) {
   return years < 1 ? `${Math.round(years * 12)}M` : `${years}Y`
 }
 
+export function formatAge(ms) {
+  if (!Number.isFinite(ms)) return '—'
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+  const h = Math.floor(m / 60)
+  return `${h}h ${m % 60}m`
+}
+
 export function formatValue(instrument) {
   if (!Number.isFinite(instrument.value)) return '—'
   if (instrument.unit === 'rate') return `${(instrument.value * 100).toFixed(4)}%`

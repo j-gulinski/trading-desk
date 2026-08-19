@@ -1,6 +1,7 @@
 import StatusPill from '../status/StatusPill.jsx'
 import Sparkline from '../charts/Sparkline.jsx'
 import {
+  formatAge,
   formatBidAsk,
   formatDelta,
   formatMarketSymbol,
@@ -32,6 +33,8 @@ export default function MarketCell({ column, row }) {
   switch (column.id) {
     case 'symbol':
       return formatMarketSymbol(instrument)
+    case 'provider':
+      return instrument.provider ?? '—'
     case 'tenor':
       return formatTenor(instrument.tenor)
     case 'assetClass':
@@ -58,6 +61,8 @@ export default function MarketCell({ column, row }) {
       return formatBidAsk(instrument)
     case 'trend':
       return <Sparkline values={instrument.history} />
+    case 'age':
+      return formatAge(row.providerAgeMs)
     case 'feed':
       return (
         <StatusPill level={live ? 'info' : 'stale'} label={live ? 'LIVE' : 'STALE'} compact />

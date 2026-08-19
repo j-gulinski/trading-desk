@@ -9,6 +9,34 @@ This phase also started `docs/market-data.md`, the domain reference seeded with 
 fact sheets. **Exit criterion, met:** the migration runs up, down, and up again clean on a
 fresh database (evidence in Step 4).
 
+## The decisions this phase locked in
+
+The business rules Phase 1 set — the policy layer; the steps carry the mechanics. (The
+README's "Operating decisions" table digests these together with later phases' rules.)
+
+1. **A spread is never invented** — `bid`/`ask`/`last` are stored exactly as the provider
+   gave them; missing stays NULL. *(Step 1)*
+2. **`mid` is derived by precedence** — both sides → official fixing → last, else the
+   quote cannot be constructed at all; `price_basis` records which branch fired. An
+   unpriced quote is unrepresentable. *(Step 1)*
+3. **Every price parses to `Decimal` at the boundary, through the string form** — the
+   wire text is the truth, never the float that briefly carried it. *(Step 1)*
+4. **Every quote carries a grade** — REALTIME / EOD / REFERENCE — so a daily close can
+   never masquerade as a live tradable price. *(Step 1)*
+5. **UNSUPPORTED is a capability fact, distinct from MISSING** — "cannot serve this
+   class" is never conflated with "nothing arrived". *(Step 1)*
+6. **Two clocks on every quote** — the provider's own event time and our receive time;
+   age is measured on the provider's clock. *(Step 1)*
+7. **The watchlist is the symbol master: what isn't watched isn't tradeable.** The
+   ticket, validation, and previews all read the same table. *(Step 2)*
+8. **Board and history are different promises, enforced in DDL** — one unique row per
+   (provider, symbol) versus append-only history that alone owns the raw payload.
+   *(Step 3)*
+9. **Provenance is a strict foreign key** — no cascade on `trades.entry_snapshot_id`, so
+   housekeeping can never amputate a trade's audit trail. *(Step 3)*
+10. **Market tables drop-and-recreate; business tables only ALTER** — synthetic rows are
+    never translated into fake provider data, and real rows are never dropped. *(Step 3)*
+
 ## Step 1 — the market-data contracts
 
 **Needed:** six providers will produce six raw payload shapes, but the plan's promises —
@@ -27,7 +55,7 @@ client is written, or each client would improvise its own.
   everything downstream may rely on `mid` existing. The basis tag records which branch fired,
   so the UI can always say what kind of number it is showing.
 - **Prices parse to `Decimal` at the contract boundary** — the D8 ingest rule, applied from
-  the first line of new code rather than retrofitted in Phase 7. The parse is
+  the first line of new code rather than retrofitted later. The parse is
   `Decimal(str(value))`: providers send strings, which convert exactly; if a float ever
   sneaks in, going *through the string form* captures the number as printed
   (`Decimal(str(0.1))` → `0.1`) instead of exposing the binary representation
@@ -40,7 +68,7 @@ client is written, or each client would improvise its own.
   threshold) → state. `UNSUPPORTED` is checked first because it is a *capability* fact — "this
   provider cannot serve this class" — and must never be conflated with `MISSING` ("should
   serve it, nothing arrived"). Threshold *values* are deliberately not here: they are 2–3× each
-  feed's scheduled cadence, so they belong to the scheduler phases as configuration.
+  feed's scheduled cadence, so they belong to each feed's scheduler as configuration.
 - **The registry is data plus two accessors — and it is only half of "capabilities."**
   `PROVIDERS` maps each of the six providers to its group and its verified class→grade facts
   (e.g. Alpha Vantage equity = `EOD`); `quote_grade()` / `supports_quotes()` answer "can this
@@ -50,8 +78,8 @@ client is written, or each client would improvise its own.
     property of the provider's *product*, established by the probes, so it is hardcoded data.
     This layer is what makes `UNSUPPORTED` a distinct freshness state: Finnhub × EURUSD is
     not missing data, it is data that can never arrive.
-  - *Symbol level — the `capabilities` JSONB on `watchlist_items`, filled at watchlist-add
-    (Phase 3).* Class facts are not enough: Twelve Data serves "EQUITY" as a class and may
+  - *Symbol level — the `capabilities` JSONB on `watchlist_items`, filled at
+    watchlist-add; nothing computes it yet.* Class facts are not enough: Twelve Data serves "EQUITY" as a class and may
     still not know one specific ticker. At add time the system asks each provider once
     ("do you quote NVDA?") and caches the per-provider verdict on the row — e.g.
     `{"FINNHUB": true, "TWELVE_DATA": true, "ALPHA_VANTAGE": false}`. The scheduler then
@@ -60,8 +88,8 @@ client is written, or each client would improvise its own.
     a restart does not re-spend the probe budget — "computed *once* at watchlist-add" stays
     literally true. (Metals cells were left absent pending the real-key check; resolved in
     the closing section below.)
-- **Curve points carry their own provenance** (`source_series`, `source_as_of`): the Phase 5
-  curve inspector's "which FRED series, as of when" drill is a schema fact from day one, and a
+- **Curve points carry their own provenance** (`source_series`, `source_as_of`): a curve
+  inspector's "which FRED series, as of when" drill is a schema fact from day one, and a
   NULL `source_series` is the explicit marker of an interpolated point (the PLN composite).
 - **One line of `build_curve_set` carries three Python idioms worth knowing** — it is how the
   "points are always in tenor order" invariant is made:
@@ -74,8 +102,8 @@ client is written, or each client would improvise its own.
     `lambda <params>: <expression>` defines a function whose body is that one expression and
     whose return value is the expression's result. It is exactly equivalent to writing
     `def tenor_of(point): return point.tenor_years` and passing `tenor_of` by name — `lambda`
-    is for functions too trivial to deserve a name. Java analogy: the
-    `p -> p.getTenorYears()` you hand to `Comparator.comparing(...)`.
+    is for functions too trivial to deserve a name. C# analogy: the
+    `p => p.TenorYears` you hand to `.OrderBy(...)`.
   - `sorted(points, key=...)` returns a **new list**, never mutating its input. The `key`
     function is called once per element to extract a sort key, and elements are ordered by
     comparing those keys, ascending; the sort is *stable* (equal keys keep their original
@@ -88,8 +116,8 @@ client is written, or each client would improvise its own.
     by any consumer. Converting to a tuple closes that hole, so a constructed curve genuinely
     cannot change.
   - Why sort at construction at all: `build_curve_set` is the single gate every curve passes
-    through, so ascending tenor order becomes an *invariant of the contract* — Phase 5's
-    interpolation and the CurveChart may rely on it instead of each re-sorting defensively.
+    through, so ascending tenor order becomes an *invariant of the contract* — curve
+    interpolation and charting may rely on it instead of each re-sorting defensively.
     The other common idiom for this exact key is `operator.attrgetter("tenor_years")` —
     identical behavior, a matter of taste; the lambda states what it extracts without knowing
     the `operator` module. Honest limit: a lambda body is one expression, no statements —
@@ -129,8 +157,8 @@ validation), pricing (`/price` preview), the ticket UI (via HTTP only).
   `DEFAULT_CURVE` / `DEFAULT_VOLATILITY` → `term_schemas.py` (they are term defaults);
   `CURVE_PRICED_ASSET_CLASSES` → `symbols.py` (taxonomy).
 - **What this leaves untradeable, honestly.** The catalog's predefined bonds (`GOVT_2Y/5Y`)
-  were synthetic instruments; with no custom BOND term schema until Phase 5's curve work, BOND
-  books hold no tradeable instruments during the interregnum. Nothing regressed in practice —
+  were synthetic instruments; with no custom BOND term schema before curve work exists, BOND
+  books hold no tradeable instruments. Nothing regressed in practice —
   with zero market data, *every* open already failed at the price check — but the source of
   truth is now the one that will carry real data.
 
@@ -170,10 +198,10 @@ plus the D2 provenance columns — had to land as one hand-written revision.
   **no raw payload**: history owns raw, the board is the read-optimized latest state.
 - **History is the provenance store**: same quote columns plus `raw_payload JSONB`, append
   keyed by `(provider, symbol, received_at)` — the index that serves both "latest row for this
-  pair" (what a trade freezes) and the Phase 6 drill.
+  pair" (what a trade freezes) and the provenance drill.
 - **`trades.entry_snapshot_id` is a deliberately strict FK** (no cascade, no SET NULL): the
-  Phase 2 retention sweep must *skip* snapshot rows referenced by trades. A trade's raw-payload
-  provenance therefore outlives the 30-day window by construction — the alternative (cascade
+  retention sweep must *skip* snapshot rows referenced by trades. A trade's raw-payload
+  provenance therefore outlives the retention window by construction — the alternative (cascade
   or nulling) would let routine housekeeping silently amputate the audit story.
 - **Curve sets + points as two tables** — `UNIQUE (provider, curve_name, as_of_date)` makes
   "≤ one set per source per day" a constraint rather than a hope; points `CASCADE` with their
@@ -222,14 +250,14 @@ Each item is something Phase 1's plan bullet does not name, with its why:
    formatter) because no free provider serves futures quotes — but every asset class,
    futures included, *was* implemented pre-fork, so the HW5 PDF's conditional ticket list
    ("jeżeli te instrumenty zostały już zaimplementowane", p. 6) is met by the archived repo.
-   The class is dormant, to be restored when a futures data source exists; Phase 7's README
-   "known limitations" section records the hidden status honestly.
+   The class is dormant, to be restored when a futures data source exists — this deviation
+   entry is the record of that hidden status.
 3. **`BENCHMARK_SYMBOL` code default changed `MARKET_INDEX` → `SPY`** as part of its move to
    `shared/config.py` — the old default named a deleted synthetic symbol; D14 names SPY.
 4. **`watchlist_items.capabilities JSONB` added.** D4 says the per-symbol capability matrix is
    "computed once at watchlist-add, cached" — persisting the cache on the row is what makes it
-   *once*: an in-process cache would re-spend provider probe budget on every restart. Written
-   from Phase 3.
+   *once*: an in-process cache would re-spend provider probe budget on every restart. Nothing
+   writes it yet.
 5. **`mid NOT NULL` on board and history** — the plan lists the quote columns without
    nullability; the constraint encodes `build_quote`'s "no unpriced quote" guarantee.
 6. **Constant rehoming** (`DEFAULT_CURVE`, `DEFAULT_VOLATILITY` → `term_schemas.py`;
@@ -240,18 +268,18 @@ Each item is something Phase 1's plan bullet does not name, with its why:
 No new environment knobs this phase — the D24 table is unchanged except the benchmark row's
 default.
 
-## Carried forward, deliberately
+## What Phase 1 did not do
 
-- **`DEFAULT_CURVE` still says `USD_GOV`** — a curve name no provider will ever publish. The
-  real curve catalog (`USD_TREASURY`, `EUR_GOV_*`, `PLN_*`) and the term-schema curve pickers
-  are Phase 5; renaming now would fake a decision that phase owns.
-- **Scenario `.http` files still reference catalog symbols** (`ACME` etc.) — the plan rewrites
-  scenarios in Phase 7; they were already inert (no market data existed to trade against).
-- **BOND books are untradeable until Phase 5** (see Step 2) — the catalog bonds were
-  synthetic; real bond terms arrive with the curve work.
-- **`NewTradePanel`'s curve/revision plumbing still speaks the old tick vocabulary** — the
-  ticket is rebuilt in Phase 4 against the provider board; today it renders the honest empty
-  state.
+The state at phase end, stated as facts; how each gap closes is scoped in the plan.
+
+- **`DEFAULT_CURVE` still says `USD_GOV`** — a curve name no provider will ever publish. No
+  real curve catalog exists yet; renaming now would fake a decision the curve work owns.
+- **Scenario `.http` files still reference catalog symbols** (`ACME` etc.) — already inert:
+  no market data exists to trade against.
+- **BOND books hold no tradeable instruments** (see Step 2) — the catalog bonds were
+  synthetic, and real bond terms need curves that do not exist yet.
+- **`NewTradePanel`'s curve/revision plumbing still speaks the old tick vocabulary** —
+  today it renders the honest empty state.
 
 ## Closed right after the phase (2026-08-18)
 

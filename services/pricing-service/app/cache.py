@@ -1,14 +1,16 @@
+import datetime
 import uuid
 import threading
 from decimal import Decimal
 
 from shared.db import session_scope
+from shared.quotes import as_decimal
 from shared.symbols import CURVE_PRICED_ASSET_CLASSES
 from shared.term_schemas import DEFAULT_CURVE
 from shared.models import Book, Trade, Valuation
 from shared.functions import utcnow, get_iso_timestamp
 from shared.logging_config import get_logger
-from app.config import SERVICE_NAME
+from app.config import DEFAULT_QUOTE_PROVIDER, SERVICE_NAME
 from app.pnl import signed_quantity
 
 log = get_logger(SERVICE_NAME)
@@ -21,7 +23,7 @@ last_event_timestamp = None
 market_data_connection = "DISCONNECTED"
 client_event_queues = set()
 
-# Market state cache
+# Market state cache, spots keyed (provider, symbol)
 spots = {}
 curves = {}
 
@@ -30,10 +32,16 @@ latest_valuations = {}
 book_risk_metrics = {}
 _active_set_seeded = False
 
+SPOT_PRICE_FIELDS = ("bid", "ask", "last", "mid")
+
 
 def update_spot(tick):
+    parsed = {
+        **tick,
+        **{field: as_decimal(tick.get(field)) for field in SPOT_PRICE_FIELDS},
+    }
     with data_lock:
-        spots[tick["symbol"]] = tick
+        spots[(tick["provider"], tick["symbol"])] = parsed
 
 
 def update_curve(tick):
@@ -41,9 +49,14 @@ def update_curve(tick):
         curves[tick["curve_name"]] = tick
 
 
-def get_spot(symbol):
+def get_spot(provider, symbol):
     with data_lock:
-        return spots.get(symbol)
+        return spots.get((provider, symbol))
+
+
+def has_spots():
+    with data_lock:
+        return len(spots) > 0
 
 
 def get_curve(name):
@@ -51,12 +64,19 @@ def get_curve(name):
         return curves.get(name)
 
 
-def trades_for_symbol(symbol):
+def trade_provider(trade):
+    return trade.get("market_data_provider") or DEFAULT_QUOTE_PROVIDER
+
+
+def trades_for_quote(provider, symbol):
     with data_lock:
         return [
             t for t in active_trades.values()
-            if t["symbol"] == symbol
-            or (t.get("metadata") or {}).get("underlying_symbol") == symbol
+            if trade_provider(t) == provider
+            and (
+                t["symbol"] == symbol
+                or (t.get("metadata") or {}).get("underlying_symbol") == symbol
+            )
         ]
 
 
@@ -128,6 +148,7 @@ def _trades_with_book(session):
 
 
 def refresh_active_trades():
+    """Returns the trades that just entered the active set."""
     global _active_set_seeded
     fresh = {}
     with session_scope() as session:
@@ -143,6 +164,7 @@ def refresh_active_trades():
                 "quantity": t.quantity,
                 "trade_price": t.trade_price,
                 "currency": t.trade_currency,
+                "market_data_provider": t.market_data_provider,
                 "metadata": t.trade_metadata or {},
             }
     global active_trades
@@ -157,7 +179,16 @@ def refresh_active_trades():
             trade = fresh[trade_id]
             log.info("trade_entered_active_set", trade_id=trade_id,
                      symbol=trade["symbol"], book_id=trade["book_id"])
-    return len(fresh)
+    return [fresh[trade_id] for trade_id in entered]
+
+
+def _parse_timestamp(value):
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def save_valuation(valuation):
@@ -175,6 +206,8 @@ def save_valuation(valuation):
                 realized_pnl=valuation["realized_pnl"],
                 total_pnl=valuation["total_pnl"],
                 currency=valuation["currency"],
+                market_data_provider=valuation.get("market_data_provider"),
+                market_data_timestamp=_parse_timestamp(valuation.get("market_data_timestamp")),
                 valuation_payload=valuation.get("valuation_payload"),
                 created_at=utcnow(),
             ))

@@ -7,12 +7,19 @@ export function usePanelChrome(panelRef, onClose, { closeOnOutsideClick = true }
 
     function handlePointerDown(event) {
       if (panel.contains(event.target)) return
-      if (event.target instanceof Element && event.target.closest('[data-panel-trigger]')) return
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[data-panel-trigger], .side-panel')
+      ) {
+        return
+      }
       onClose()
     }
 
     function handleKeyDown(event) {
       if (event.key !== 'Escape') return
+      const panels = document.querySelectorAll('.side-panel')
+      if (panels.length > 0 && panels[panels.length - 1] !== panel) return
       event.preventDefault()
       onClose()
     }

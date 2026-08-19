@@ -4,13 +4,13 @@ import urllib.request
 import urllib.error
 
 from shared.audit import write_audit
-from shared.config import BENCHMARK_SYMBOL
+from shared.config import BENCHMARK_PROVIDER, BENCHMARK_SYMBOL
 from shared.functions import first_present
 from shared.logging_config import get_logger
 from app import cache
 from app.config import MARKET_DATA_STREAM_URL, SERVICE_NAME
 from app.book_risk import sample_and_publish
-from app.valuation_engine import value_curve, value_symbol
+from app.valuation_engine import value_curve, value_quote
 from app.valuation_publisher import publish_valuation
 
 log = get_logger(SERVICE_NAME)
@@ -43,17 +43,33 @@ def _handle(event_type, tick):
 
 
     cache.update_spot(tick)
-    for event in value_symbol(tick["symbol"]):
+    for event in value_quote(tick["provider"], tick["symbol"]):
         publish_valuation(event)
-    if tick["symbol"] == BENCHMARK_SYMBOL:
-        level = first_present(tick, ("last", "spot", "mid"))
+    if tick["symbol"] == BENCHMARK_SYMBOL and tick["provider"] == BENCHMARK_PROVIDER:
+        level = first_present(tick, ("mid", "last"))
         if level is not None:
             sample_and_publish(level)
+
+
+def _seed_spots():
+    snapshot_url = MARKET_DATA_STREAM_URL.rsplit("/", 1)[0] + "/snapshot"
+    try:
+        with urllib.request.urlopen(snapshot_url, timeout=10) as response:
+            snapshot = json.loads(response.read())
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        log.warning("spot_seed_failed", error=str(error))
+        return
+    spots = snapshot.get("spots") or {}
+    for row in spots.values():
+        cache.update_spot(row)
+    log.info("spots_seeded", spots=len(spots))
 
 
 def market_data_stream_consumer():
     while True:
         log.info("stream_connecting", url=MARKET_DATA_STREAM_URL)
+        if not cache.has_spots():
+            _seed_spots()
         try:
             request = urllib.request.Request(MARKET_DATA_STREAM_URL)
             with urllib.request.urlopen(request) as stream:

@@ -2,8 +2,8 @@
 
 Six Python services, one Postgres, one React frontend, started by `docker compose up --build`.
 This is the base the provider build ([hw5-plan-v2.md](hw5-plan-v2.md)) lands on: the synthetic
-flows of the forked repo are gone, and market data is honestly empty until the first provider
-client arrives.
+flows of the forked repo are gone, and market data comes from real providers — Finnhub first
+(Phase 2), the rest landing phase by phase per the plan.
 
 ## The system in seven steps
 
@@ -20,7 +20,7 @@ client arrives.
 No message broker, and no service-to-service call about a trade — which is what the three rules
 below replace.
 
-## Three rules that explain most of the code
+## The three design rules
 
 - **The database row is the handoff.** Trade-action inserts a trade; pricing re-queries
   `ACTIVE` trades every `TRADE_REFRESH_SECONDS` and swaps its working set wholesale; blotter
@@ -29,8 +29,8 @@ below replace.
   that already streams.
 - **One writer per table.** Every mutation of `trades` goes through trade-action, even from the
   Books screen; books-service owns `books`; pricing owns `valuations`. When a destructive
-  precondition cannot be verified (blotter unreachable during a book delete), the answer is
-  `503`, never "probably fine".
+  precondition cannot be verified (blotter unreachable during a book delete), the request
+  is refused with `503`.
 - **Freeze at the boundary.** A trade's economics are validated once at open and frozen into
   its `metadata` JSONB; every later process prices from the frozen terms and never looks
   anything up again. Adding the two OTC classes (options, IRS) required no migration.
@@ -39,7 +39,7 @@ below replace.
 
 | Service | Port | Owns | Publishes |
 | --- | --- | --- | --- |
-| market-data | 8001 | provider quotes and curves | `GET /snapshot`, SSE `/stream` |
+| market-data | 8001 | provider quotes and curves, provider polling and budgets | `GET /snapshot`, `GET /quotes`, `GET /providers` (+ `/<p>/health`), `POST /refresh`, SSE `/stream` |
 | pricing | 8002 | valuations, book alpha/beta, scenario analysis | `GET /valuations`, `GET /book-risk`, SSE `/valuation-stream`, `POST /price`, `POST /scenario` |
 | monitoring | 8003 | health polling, audit queries, log collection | `GET /status`, `GET /audits`, `GET /logs`, SSE `/logs/stream` |
 | books | 8004 | book metadata and lifecycle | `GET/POST/PUT/DELETE /books` |
@@ -59,7 +59,7 @@ deployment-independent.
   holding the frozen terms; `asset_class` is `TEXT`, not a database enum. Phase 1 added the
   provenance columns (D2): `market_data_provider`, `entry_price_timestamp`,
   `entry_snapshot_id` (FK to the quote-history row used at execution), `client_seen_price`,
-  `created_by_service` — written from Phase 4 on.
+  `created_by_service` — present in the schema; nothing writes them at execution yet.
 - **`valuations`** — one row per repricing, plus the terminal row written at close; stamped
   with `market_data_provider` + `market_data_timestamp` from Phase 2 on.
 - **`audit_logs`** — service, event type, severity, message, entity, `correlation_id`,
@@ -90,8 +90,8 @@ before any service starts.
   The `db-migrations` compose entry reuses the market-data image for its one-shot
   `alembic upgrade head` job.
 - Intents carry a client-minted `client_request_id` (`manual-open-…`, `manual-move-…`); it is
-  the idempotency key (unique constraint) and the `correlation_id` joining audit rows and log
-  lines into one story.
+  the idempotency key (unique constraint) and the `correlation_id` that joins audit rows and
+  log lines into one correlated trace.
 
 ## Conventions
 

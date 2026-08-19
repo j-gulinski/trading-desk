@@ -426,13 +426,53 @@ provider-tagged SSE, endpoints (`/providers`, health, quotes, refresh), pricing 
 **Exit demo:** live AAPL on screen with honest age; a manual trade valued off Finnhub through
 the (provider, symbol) cache.
 
-### Phase 3 — Breadth, watchlist, scheduler v2 *(~2.5 days)*
-Twelve Data (batch) + Alpha Vantage (EOD equities, FX bid/ask) clients/normalizers; budget
-governor with daily ledgers + stagger + tiers; symbol search endpoint + watchlist CRUD;
-UI: search box, add/remove, board = watchlist, capability matrix → UNSUPPORTED cells, grade
-chips, CLOSED badge; provider ops card (budget gauges, next poll, backoff state).
-**Exit demo:** search "NVDA", add it, watch three providers populate at their honest cadences —
-Alpha Vantage's column reads "EOD (Fri)"; kill one key and the system degrades visibly.
+### Phase 3 — Showcase checkpoint: watchlist, second provider, honest board
+Re-shaped 2026-08-19 (owner): Phase 3 is the last phase before the 2026-08-20 review and a
+~one-week pause, so its end state must stand alone as the show. Split: **3a** is the
+checkpoint built for the review; **3b** completes the breadth after the pause. Phases 4–7
+are unchanged in content and resume after 3b (~2026-08-27). Items marked *(ruling)* come
+from the Phase 2 review (owner, 2026-08-19).
+
+**Phase 3a — the checkpoint *(by 2026-08-20)*, in demo-first build order:**
+1. **CLOSED freshness state** *(ruling; refined 2026-08-19: a first-class state, not a
+   display remap)*: fifth state in `shared/freshness.py`, so `/quotes` and the UI classify
+   identically and rows stay self-classifying (ticks and `/snapshot` rows gain the
+   market-open flag). Classification: market open → LIVE/STALE by `provider_timestamp` age
+   vs 3× open cadence (unchanged); market closed → **CLOSED** while confirmation polls keep
+   arriving (`received_at` age ≤ 3× closed cadence, 900 s), STALE once they stop. STALE
+   thereby means "the feed should be updating and is not" in both regimes; CLOSED renders
+   neutral; the Age column keeps counting from the provider clock.
+2. **Watchlist self-service**: symbol search endpoint (Finnhub `/search`) + watchlist CRUD +
+   board rework — the board *is* the watchlist (one row per provider × symbol), search box,
+   add/remove, UNSUPPORTED cells from the capability matrix.
+3. **Twelve Data wired as the second provider**: client + normalizer (quote; `EUR/USD` /
+   `XAU/USD` notation is the client's concern) + feed with the daily-ledger governor —
+   spread the 800/day across the day alongside the per-minute bucket; batch endpoint if it
+   proves as probed, else per-symbol.
+4. **Provider ops card on System Overview** *(ruling)*: per-provider status, budget gauges,
+   spend today, market session — reads `/providers`.
+5. **If time allows, else 3b**: sparkline seeded from `market_data_snapshots` via a history
+   endpoint, so a fresh tab shows the day's shape, not only ticks it witnessed *(ruling;
+   backfill from before recording started stays out of scope — Finnhub candles are premium,
+   Twelve Data history spends credits)*.
+
+Demo fixtures: NVDA searched + added live; EURUSD and XAUUSD on Twelve Data with
+UNSUPPORTED under Finnhub — board display only, FX/commodity *trade valuation* stays out of
+scope until its branch is rewired. New doc: `docs/demo.md` — the 5-minute walkthrough
+(what to click, what to say, how to reset).
+**Exit demo:** search "NVDA", add it, watch two providers populate at their honest
+cadences; EURUSD/XAUUSD quote on Twelve Data while Finnhub's cells read UNSUPPORTED; with
+the US market closed the board reads CLOSED, not STALE; the System Overview card shows both
+budgets moving; kill the Twelve Data key → its rows degrade visibly, Finnhub unaffected.
+
+**Phase 3b — breadth completion *(~2026-08-27, first after the pause)*:**
+Alpha Vantage wired (EOD equities with grade chips telling the truth on the board; FX with
+real bid/ask; `"Information"`/`"Note"` 200-body error classification; the 25/day governor);
+governor stagger + remaining-budget pacing polish; `MAX_ACTIVE_SYMBOLS` cap enforcement
+(D4); per-symbol capability matrix cached on the watchlist row (D4); sparkline seed if it
+slipped 3a.
+**Exit demo:** Alpha Vantage's column reads "EOD (Tue)" honestly next to two live columns,
+and its 25/day budget visibly paces itself on the ops card.
 
 ### Phase 4 — Trading flow refactor *(~2 days)*
 Ticket v2: per-provider comparison row (value, grade, age, state pill, disagreement in bps),
