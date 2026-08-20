@@ -297,13 +297,12 @@ closed trade, a poll racing a removal — leaves the board with it.
   create. A provider filter beside the board search narrows the watchlist without changing
   provider membership.
 
-`GET /history` returns the current UTC day's locally observed changes (the latest point in
-each five-minute bucket) and ends at the current board value. Previous close remains the
-separate basis for Change today; plotting it at midnight created a false diagonal through
-hours with no observation. The compact trend opens a detail panel with observation times,
-high/low, previous close, and recent values. History is filtered to the active set and capped at 300
-`[epoch_ms, mid]` points per (provider, symbol). There is no provider backfill or multi-day
-selector.
+The board deliberately does not draw an intraday trend. `market_data_snapshots` contains
+sparse changes observed while this application was running, not a complete market series;
+connecting those points or inserting previous close creates movement through unobserved
+time. Finnhub stock candles require Premium access, while using Twelve Data history only for
+one provider would make the comparison asymmetric. The UI therefore keeps the truthful
+summary: Last, Previous close/Change today, market state and quote age.
 
 ### Endpoints
 
@@ -314,7 +313,6 @@ selector.
 | `GET /quotes` | stored active-set quotes + computed freshness state; filterable by `symbol`, `asset_class`, `provider` |
 | `GET /watchlist` · `POST /watchlist` · `DELETE /watchlist/<symbol>?provider=` | the symbol master, self-service and per provider |
 | `GET /symbols/search?q=` | provider-tagged discovery, cached 10 min |
-| `GET /history` | observed Today mid series per (provider, symbol) |
 | `GET /providers` | all six registry entries (capabilities, wired flag) + runtime for wired ones: status, budget + daily ledger, market session, active symbols, and the current poll `strategy` (mode, cadences, server-composed description — what the board strip and the ops card display) |
 | `GET /providers/<p>/health` | one provider's runtime detail |
 | `POST /refresh?symbol=&provider=` | targeted poll within budget (provider defaults to FINNHUB) — 404 unknown symbol, 422 unsupported class, 429 budget/pace exhausted, 503 disabled/cooldown |

@@ -2,7 +2,6 @@ import time
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import tuple_
 from sqlalchemy.exc import IntegrityError
 
 from shared.db import session_scope
@@ -107,65 +106,6 @@ def delete_board_rows(symbol, providers=None):
     if deleted:
         log.info("board_rows_removed", symbol=symbol, rows=deleted)
     return deleted
-
-
-def today_history_series(bucket_seconds, max_points):
-    cutoff = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    with session_scope() as session:
-        active_pairs = tuple(sorted({
-            (provider, symbol)
-            for symbol, entry in load_active_set(session).items()
-            for provider in entry.providers
-            if entry.serves(provider)
-        }))
-        if not active_pairs:
-            return {}
-        pair_columns = tuple_(MarketDataSnapshot.provider, MarketDataSnapshot.symbol)
-        snapshots = (
-            session.query(
-                MarketDataSnapshot.provider,
-                MarketDataSnapshot.symbol,
-                MarketDataSnapshot.received_at,
-                MarketDataSnapshot.mid,
-            )
-            .filter(
-                MarketDataSnapshot.received_at >= cutoff,
-                pair_columns.in_(active_pairs),
-            )
-            .order_by(MarketDataSnapshot.received_at)
-            .all()
-        )
-        board = (
-            session.query(
-                MarketDataSpotPrice.provider,
-                MarketDataSpotPrice.symbol,
-                MarketDataSpotPrice.received_at,
-                MarketDataSpotPrice.mid,
-            )
-            .filter(
-                tuple_(MarketDataSpotPrice.provider, MarketDataSpotPrice.symbol)
-                .in_(active_pairs)
-            )
-            .all()
-        )
-
-    buckets_by_pair = {}
-    for provider, symbol, received_at, mid in snapshots:
-        bucket = int(received_at.timestamp()) // bucket_seconds
-        buckets_by_pair.setdefault((provider, symbol), {})[bucket] = (received_at, mid)
-
-    series = {}
-    for provider, symbol, received_at, mid in board:
-        observations = sorted(
-            ([int(at.timestamp() * 1000), value]
-             for at, value in buckets_by_pair.get((provider, symbol), {}).values()),
-            key=lambda point: point[0],
-        )
-        current = [int(received_at.timestamp() * 1000), mid]
-        if not observations or observations[-1] != current:
-            observations.append(current)
-        series[f"{provider}:{symbol}"] = observations[-max_points:]
-    return series
 
 
 def sweep_snapshots():

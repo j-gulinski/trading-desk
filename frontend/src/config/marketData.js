@@ -1,7 +1,5 @@
 export const STREAM_EVENTS = ['market_tick', 'market_remove']
 
-export const HISTORY_POINT_CAP = 300
-
 export const WATCHLIST_POLL_INTERVAL_MS = 10000
 
 export const SYMBOL_SEARCH_DEBOUNCE_MS = 400
@@ -64,14 +62,6 @@ export const MARKET_COLUMNS = [
     defaultDirection: 'desc',
     numeric: true,
     headerNote: 'today',
-  },
-  {
-    id: 'trend',
-    label: 'Trend',
-    sortable: false,
-    headerNote: 'today',
-    headerClass: 'market-cell--spark',
-    cellClass: 'market-cell--spark',
   },
   {
     id: 'feed',

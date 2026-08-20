@@ -1,4 +1,3 @@
-import Sparkline from '../charts/Sparkline.jsx'
 import StatusPill from '../status/StatusPill.jsx'
 import { providerLabel } from '../../config/providers.js'
 import {
@@ -7,12 +6,22 @@ import {
 } from '../../config/marketData.js'
 import { formatUnitPrice } from '../../domain/formatting.js'
 import {
+  formatAge,
   formatDelta,
   formatMarketSymbol,
   formatPercentDelta,
 } from '../../domain/marketFormat.js'
 
-export default function MarketBenchmark({ row, onInspect }) {
+function BenchmarkStat({ label, value, className }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd className={className}>{value}</dd>
+    </div>
+  )
+}
+
+export default function MarketBenchmark({ row }) {
   if (!row) return null
   const { instrument, todayChange } = row
   const percent = formatPercentDelta(todayChange.percent)
@@ -24,28 +33,27 @@ export default function MarketBenchmark({ row, onInspect }) {
         <h2 id="market-benchmark-title">{formatMarketSymbol(instrument)}</h2>
         <span>{providerLabel(instrument.provider)}</span>
       </div>
-      <div className={`market-benchmark__change delta delta--${row.todayDirection}`}>
-        <strong>{formatUnitPrice(instrument.value, instrument.assetClass)}</strong>
-        <span>
-          {formatDelta(instrument, todayChange.delta)}{percent ? ` (${percent})` : ''}
-        </span>
-      </div>
-      <button
-        type="button"
-        className="market-benchmark__chart"
-        onClick={() => onInspect(row)}
-        title="View benchmark intraday details"
-      >
-        <Sparkline points={instrument.history} label="benchmark intraday" width={180} height={44} />
-      </button>
+      <dl className="market-benchmark__stats">
+        <BenchmarkStat
+          label="LAST"
+          value={formatUnitPrice(instrument.value, instrument.assetClass)}
+        />
+        <BenchmarkStat
+          label="PREVIOUS CLOSE"
+          value={formatUnitPrice(instrument.previousClose, instrument.assetClass)}
+        />
+        <BenchmarkStat
+          label="CHANGE TODAY"
+          className={`delta delta--${row.todayDirection}`}
+          value={`${formatDelta(instrument, todayChange.delta)}${percent ? ` (${percent})` : ''}`}
+        />
+        <BenchmarkStat label="QUOTE AGE" value={formatAge(row.providerAgeMs)} />
+      </dl>
       <StatusPill
         level={FRESHNESS_PILL_LEVELS[row.state] ?? 'unknown'}
         label={FRESHNESS_LABELS[row.state] ?? row.state}
         compact
       />
-      <button type="button" className="market-benchmark__view" onClick={() => onInspect(row)}>
-        View chart →
-      </button>
     </section>
   )
 }

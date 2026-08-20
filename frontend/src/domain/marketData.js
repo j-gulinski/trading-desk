@@ -1,4 +1,3 @@
-import { HISTORY_POINT_CAP } from '../config/marketData.js'
 import { directionOf } from './formatting.js'
 import { sortRows } from './tableSort.js'
 
@@ -72,13 +71,6 @@ function instrumentsFromSnapshot(snapshot) {
     .filter(Boolean)
 }
 
-function appendPoint(history, atMs, value) {
-  if (!Number.isFinite(value) || !Number.isFinite(atMs)) return history
-  const last = history[history.length - 1]
-  if (last && last[0] === atMs && last[1] === value) return history
-  return [...history, [atMs, value]].slice(-HISTORY_POINT_CAP)
-}
-
 function mergeInstrument(prev, update) {
   let sourceRestarted = false
 
@@ -108,12 +100,7 @@ function mergeInstrument(prev, update) {
     }
   }
 
-  const previous = sourceRestarted ? { history: prev.history } : prev
-  const history = appendPoint(
-    previous?.history ?? [],
-    update.eventTimeMs ?? update.receivedAtMs,
-    update.value,
-  )
+  const previous = sourceRestarted ? null : prev
   const previousValue =
     previous && Number.isFinite(update.value) && Number.isFinite(previous.value)
       ? previous.value
@@ -121,7 +108,6 @@ function mergeInstrument(prev, update) {
 
   return {
     ...update,
-    history,
     previousValue,
     lastDirection: directionOf(
       Number.isFinite(previousValue) ? update.value - previousValue : null,
@@ -225,7 +211,6 @@ function restoreInstrument(candidate) {
     eventTimeMs: Number.isFinite(candidate.eventTimeMs) ? candidate.eventTimeMs : null,
     receivedAtMs: Number.isFinite(candidate.receivedAtMs) ? candidate.receivedAtMs : null,
     previousValue: toNum(candidate.previousValue),
-    history: [],
     lastDirection: ['pos', 'neg', 'flat'].includes(candidate.lastDirection)
       ? candidate.lastDirection
       : 'flat',
@@ -353,7 +338,6 @@ function placeholderInstrument(id, provider, item) {
     watched: true,
     held: false,
     benchmark: false,
-    history: [],
     watchlisted: true,
   }
 }
@@ -374,22 +358,6 @@ export function boardInstruments(instruments, watchlistItems, watchlistReady = t
     }
   }
   return annotated
-}
-
-export function seedInstrumentHistories(previous, series) {
-  if (!series || typeof series !== 'object') return previous
-  const instruments = {}
-  for (const [id, current] of Object.entries(previous)) {
-    const rawPoints = series[id]
-    const points = (Array.isArray(rawPoints) ? rawPoints : [])
-      .map((point) => [toNum(point?.[0]), toNum(point?.[1])])
-      .filter(([atMs, value]) => atMs != null && value != null)
-    instruments[id] = {
-      ...current,
-      history: appendPoint(points, current.eventTimeMs, current.value),
-    }
-  }
-  return instruments
 }
 
 const STATE_SORT_RANK = { LIVE: 0, CLOSED: 1, STALE: 2, MISSING: 3 }

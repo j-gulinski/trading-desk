@@ -18,7 +18,6 @@ export const endpoints = {
   marketData: {
     stream: '/api/market-data/stream',
     snapshot: '/api/market-data/snapshot',
-    history: '/api/market-data/history',
     providers: '/api/market-data/providers',
     watchlist: '/api/market-data/watchlist',
     watchlistItem: (symbol, provider) =>

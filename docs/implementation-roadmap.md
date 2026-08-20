@@ -253,9 +253,8 @@ yes — via the ETF proxy, because indices are premium on all three providers an
 (all alpha/beta needs) track the index. The estimator itself survives unchanged, as
 `decisions.md` bet it would.
 
-**D15 (new) — The curve chart stays hand-rolled SVG.** Extend the existing `Sparkline` approach
-into a small `CurveChart` (tenor axis, per-curve series, as-of + provider caption) — the repo's
-only viz primitive is hand-rolled inline SVG and `package.json` has zero chart dependencies;
+**D15 (new) — The curve chart stays hand-rolled SVG.** Build a small `CurveChart` (tenor axis,
+per-curve series, as-of + provider caption) — `package.json` has zero chart dependencies;
 consistency beats a library for one chart. *Rejected:* adding recharts/d3 for a single plot.
 
 **D16 (decided) — Naming & fork mechanics** as §1: bare-clone push, archive + pointer; the new
@@ -424,10 +423,10 @@ Phase 3 is split by dependency. **3a** completes the core two-provider workflow 
    proves as probed, else per-symbol.
 4. **Provider ops card on System Overview** *(ruling)*: per-provider status, budget gauges,
    spend today, market session — reads `/providers`.
-5. **If time allows, else 3b**: sparkline seeded from `market_data_snapshots` via a history
-   endpoint, so a fresh tab shows the day's shape, not only ticks it witnessed *(ruling;
-   backfill from before ingestion started stays out of scope — Finnhub candles are premium,
-   Twelve Data history spends credits)*.
+5. **Intraday chart deliberately omitted**: `market_data_snapshots` is sparse application
+   observation history, not a complete market series. Finnhub candles require Premium
+   access and Twelve Data history alone would make provider rows asymmetric, so the board
+   shows a structured quote summary instead of drawing an incomplete trend.
 
 Validation fixtures: NVDA searched + added live; EURUSD and XAUUSD on Twelve Data with
 UNSUPPORTED under Finnhub — board display only, FX/commodity *trade valuation* stays out of
@@ -443,8 +442,7 @@ budgets moving; kill the Twelve Data key → its rows degrade visibly, Finnhub u
 Alpha Vantage wired (EOD equities with grade chips telling the truth on the board; FX with
 real bid/ask; `"Information"`/`"Note"` 200-body error classification; the 25/day governor);
 governor stagger + remaining-budget pacing polish; `MAX_ACTIVE_SYMBOLS` cap enforcement
-(D4); per-symbol capability matrix cached on the watchlist row (D4); sparkline seed if it
-slipped 3a.
+(D4); per-symbol capability matrix cached on the watchlist row (D4).
 **Acceptance check:** Alpha Vantage's column reads "EOD (Tue)" honestly next to two live columns,
 and its 25/day budget visibly paces itself on the ops card.
 
@@ -500,7 +498,7 @@ quantization at the boundary, and the fact that every money leg remains Decimal.
 
 | View | Keeps | Changes |
 | --- | --- | --- |
-| MarketData | two-table layout, DataTable/MarketCell machinery, sparklines | instruments table becomes the **watchlist board**: search+add, per-provider expandable rows (or provider columns), mid headline + basis tag, grade/age chips, CLOSED badge, UNSUPPORTED cells; curve section gains **CurveChart** + inspector with as-of + provider |
+| MarketData | two-table layout, DataTable/MarketCell machinery | instruments table becomes the **watchlist board**: search+add, per-provider expandable rows (or provider columns), mid headline + basis tag, grade/age chips, CLOSED badge, UNSUPPORTED cells; curve section gains **CurveChart** + inspector with as-of + provider |
 | Trades / NewTradePanel | form flow, TERM_SCHEMAS-driven fields, validation UX | ticket v2: provider comparison row + radio, side-aware price highlight (BUY highlights ask), STALE ack, refresh button, slippage shown post-fill |
 | TradeDetail (panel) | layout | + provenance block (D2/D12 fields, raw-payload drill) |
 | Valuations / Blotter views | tables, filters | + provider column; valuation rows show market_data_timestamp |

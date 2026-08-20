@@ -11,8 +11,8 @@ for equities, FX and metals.
 
 Each symbol is watched per provider, so the same asset can be compared on both feeds and
 either membership can be removed independently. The Market Data board shows provider-specific
-quotes, an observed-only Today trend with a detail view, and market-aware
-LIVE/CLOSED/STALE/MISSING states. The trade ticket compares selected feeds and stores the
+quotes, a structured benchmark summary, and market-aware LIVE/CLOSED/STALE/MISSING states.
+The trade ticket compares selected feeds and stores the
 provider used for execution; pricing and closing continue to use that same provider. See
 [docs/implementation/multi-provider-trading.md](docs/implementation/multi-provider-trading.md)
 for the complete implementation guide.
@@ -40,8 +40,8 @@ the implementation guides; knob values are in
 | Budget exhaustion | An empty token bucket ends the polling round; due symbols retry on the next 1 s cycle. No state change, no audit. | Client-side throttling is normal operation, distinct from provider failure. |
 | Provider failure | Provider responses drive a per-provider state machine: 429 → RATE_LIMITED (cooldown = `Retry-After`, default 60 s); 401/403 → AUTH_FAILED (300 s); network/5xx → ERROR (10 s). Audits are written on state transitions only. Per-symbol data errors do not change provider state. | Failures are visible, scoped to the provider that caused them, and one symbol cannot stop the feed. |
 | Storage | `market_data_spot_prices`: one row per (provider, symbol), updated in place. `market_data_snapshots`: append only when the price changed, with the raw provider payload. | Bounded board size; history records price changes, not polling activity. |
-| Retention | Snapshots older than 90 days are deleted daily, except rows referenced by a trade's entry or close snapshot ID. | Chart depth vs. hosted database storage; trade provenance must survive retention. |
-| Trend history | The board plots only today's locally observed price changes in five-minute buckets and ends at the current board value; previous close remains a separate comparison metric. Clicking the trend opens times, high/low and recent observations. | Treating previous close at midnight as a real observation drew a misleading diagonal through an unobserved period. |
+| Retention | Snapshots older than 90 days are deleted daily, except rows referenced by a trade's entry or close snapshot ID. | Hosted database storage stays bounded while trade provenance survives retention. |
+| Intraday chart | Not displayed. The stored snapshots are sparse application observations, not complete provider history; Finnhub candles require Premium access while Twelve Data history would make the two provider rows inconsistent. | A polished line through incomplete points implies market movement and coverage the application does not have. The board instead shows Last, Previous close/Change today, market state and quote age. |
 | Quote audit volume | `QUOTE_WRITTEN` is audited on the **first** stored quote per (provider, symbol); every later tick is in the structured log only. | Auditing every tick is ~8 000 rows a day of noise at these cadences; AuditLogs is the business record, not the poll log. |
 | Registration | The watchlist stores a **provider choice per symbol**, not a capability. Search results list capable providers as toggles; the board can be filtered by provider. Adding a provider merges. `DELETE /watchlist/<symbol>?provider=` drops one feed and leaves the others ticking; `market_remove` tells every tab which row left. The configured benchmark is shown in its own strip rather than mixed into watchlist quotes. | Each feed must be addable/removable and comparable independently; benchmark context is not watchlist membership. |
 | Tradeable universe | `GET /instruments` serves the active set minus the benchmark: a symbol is tradeable if it is watched or already held. A held symbol keeps alive only the provider frozen on its trade. | SPY is polled to compute the return series, not to be bought; pinning every capable provider for a held symbol spends budget nobody reads. |
@@ -103,7 +103,7 @@ streams only — never through each other's APIs.
 | `market_data_snapshots` | DELETE sweep | daily | 90-day retention; rows referenced by trades are skipped. |
 | browser ← monitoring | SSE `/logs/stream`; REST seed | per log line | Live log tail. |
 | browser ← blotter, books, monitoring, trade-action | REST polling | ~5 s while the view is open | View data: trades list, books summary, health cards, intent queue. |
-| browser ← market-data | REST polling + one-shot seed | watchlist 10 s, provider ops 5 s (while the view is open); `/history` per stream connect and active-pair change | Board placeholders, the ops card, today's trend. |
+| browser ← market-data | REST polling + one-shot seed | watchlist 10 s, provider ops 5 s while the view is open | Board placeholders and the ops card. |
 | browser ← trade-action | REST polling | every 5 s while the New trade panel is open | The tradeable universe (`/instruments`) with the providers polling each symbol. |
 | ticket ← market-data | the market SSE stream already open | per tick | The provider comparison prices and ages update in place, with no extra request and no reload. |
 

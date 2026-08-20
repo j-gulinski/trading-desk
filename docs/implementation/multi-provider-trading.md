@@ -182,20 +182,17 @@ Network failures are returned to the budget-aware feed loop; the HTTP client doe
 hidden second attempt. This keeps the token bucket, daily-credit ledger and upstream calls in
 agreement.
 
-### Today change and Today trend
+### Today change and snapshot history
 
 Change today compares the latest normalized `mid` with the provider's `previous_close`.
-Trend today is intentionally different: it plots only actual price changes stored since UTC
-midnight, reduced to the last observation in each five-minute bucket, and ends at the latest
-normalized `mid`.
+The board presents that comparison directly alongside Last, market state and quote age.
 
-`persistence.today_history_series()` uses normal SQLAlchemy queries and small Python grouping;
-there is no PostgreSQL-specific `DISTINCT ON`/`unnest` query. It always includes the current
-board value. Previous close is shown in the detail view but is not inserted as a midnight
-observation; doing so would draw movement through time the service did not observe.
-
-The middle of the line contains only quotes this application collected. It does not pretend
-to be vendor-backfilled intraday history from before the service started.
+Snapshots remain an audit/provenance record of price changes observed while the service was
+running. They are not rendered as a trend: their coverage begins when ingestion starts and
+can contain long gaps, so connecting them would imply a complete intraday market series.
+Previous close is likewise not inserted as a synthetic chart point. Finnhub stock candles
+require Premium access, and Twelve Data history alone would make equivalent provider rows
+show different kinds of data.
 
 ## Flow 3: selected provider to trade, valuation and close
 
@@ -310,7 +307,6 @@ providers render only `NOT AVAILABLE`.
 | `GET/POST /watchlist` | list or merge provider membership |
 | `DELETE /watchlist/<symbol>?provider=` | remove one provider membership |
 | `GET /quotes` | current stored normalized board, filterable by provider/symbol/class |
-| `GET /history` | locally observed Today series; previous close stays separate |
 | `GET /snapshot` + `GET /stream` | seed and live normalized quote updates |
 | `GET /providers` + `/providers/<name>/health` | provider runtime and budgets |
 | `POST /refresh?symbol=&provider=` | immediate budgeted poll |
@@ -338,8 +334,8 @@ Run [provider-trading.http](../../scenarios/provider-trading.http) and verify in
 
 1. Search AAPL and add Finnhub only, then Twelve Data.
 2. Confirm two independent board rows and remove only one provider.
-3. Confirm Change today uses previous close while Trend today plots only real intraday
-   observations and ends at the current mid, including when the venue is closed.
+3. Confirm the board shows Last, Change today, market state and quote age without an
+   incomplete trend or chart action.
 4. Open the ticket, compare provider rows and submit one usable LIVE or CLOSED quote.
 5. Confirm Trades shows the chosen provider, quote time and server execution price.
 6. Confirm valuation and close retain that provider.

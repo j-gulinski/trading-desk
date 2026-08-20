@@ -14,7 +14,6 @@ import {
   mergeInstruments,
   reconcileSnapshotInstruments,
   restoreInstruments,
-  seedInstrumentHistories,
 } from '../domain/marketData.js'
 
 function readStoredTickCount() {
@@ -101,23 +100,6 @@ export function useMarketFeed() {
       )
     })
   })
-
-  const activePairs = Object.keys(instruments).sort().join('|')
-
-  useEffect(() => {
-    if (seedStatus !== 'ready') return undefined
-    const controller = new AbortController()
-    apiGet(endpoints.marketData.history, {
-      signal: controller.signal,
-    })
-      .then((history) => {
-        setInstruments((previous) => seedInstrumentHistories(previous, history?.series))
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return
-      })
-    return () => controller.abort()
-  }, [seedStatus, activePairs])
 
   return useMemo(
     () => ({

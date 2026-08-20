@@ -16,8 +16,8 @@ open at http://localhost:3000.
 ### 1. Compare market quotes
 
 Open Market Data. The two NVDA rows are separate feeds for the same asset. Compare Last,
-Change, quote age and provider timestamps. Use the provider filter to isolate either feed,
-then click Trend to inspect high/low and the actual intraday observations.
+Change, quote age and provider timestamps. Use the provider filter to isolate either feed.
+The benchmark strip separately summarizes Last, Previous close, Change today and quote age.
 
 Interpret quote state as follows:
 
@@ -26,10 +26,8 @@ Interpret quote state as follows:
 - STALE means an expected provider update is overdue.
 - NO DATA means the selected feed has not supplied its first usable quote.
 
-Today's sparkline begins at the same previous close used by Change, includes prices observed
-and stored today, and ends at the current mid. On a closed market it must still show the
-previous-session move rather than a flat browser-only line. It does not claim vendor
-backfill.
+No trend line or chart action should appear. Sparse application snapshots are retained for
+audit provenance, but are not presented as complete provider history.
 
 ### 2. Add and remove one provider
 

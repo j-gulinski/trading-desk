@@ -1,5 +1,4 @@
 import StatusPill from '../status/StatusPill.jsx'
-import Sparkline from '../charts/Sparkline.jsx'
 import {
   formatAge,
   formatDelta,
@@ -32,8 +31,6 @@ function ChangeValue({ instrument, change }) {
 export default function MarketCell({
   column,
   row,
-  historyLabel,
-  onInspect,
   onRemove,
   busyKey,
 }) {
@@ -55,17 +52,6 @@ export default function MarketCell({
       return formatUnitPrice(instrument.last, instrument.assetClass)
     case 'todayChange':
       return <ChangeValue instrument={instrument} change={todayChange} />
-    case 'trend':
-      return (
-        <button
-          type="button"
-          className="market-trend-button"
-          title={`View ${instrument.symbol} intraday details`}
-          onClick={() => onInspect?.(row)}
-        >
-          <Sparkline points={instrument.history} label={historyLabel} />
-        </button>
-      )
     case 'age':
       return formatAge(row.providerAgeMs)
     case 'feed':

@@ -32,7 +32,6 @@ import MarketTable from '../../components/marketdata/MarketTable.jsx'
 import WatchlistSearch from '../../components/marketdata/WatchlistSearch.jsx'
 import ProviderStrategyStrip from '../../components/marketdata/ProviderStrategyStrip.jsx'
 import MarketBenchmark from '../../components/marketdata/MarketBenchmark.jsx'
-import MarketTrendPanel from '../../components/marketdata/MarketTrendPanel.jsx'
 import { providerLabel } from '../../config/providers.js'
 
 const marketColumnById = new Map(MARKET_COLUMNS.map((column) => [column.id, column]))
@@ -67,8 +66,6 @@ export default function MarketData() {
   const [activeClass, setActiveClass] = useState(null)
   const [activeProvider, setActiveProvider] = useState(null)
   const [query, setQuery] = useState('')
-  const [inspectedId, setInspectedId] = useState(null)
-
   async function handleRemove(symbol, provider) {
     const removal = await watchlist.remove(symbol, provider)
     if (!removal) return
@@ -123,10 +120,8 @@ export default function MarketData() {
   )
 
   const summary = summarizeFeed(quoteRows.map((row) => row.instrument), now)
-  const historyLabel = 'today'
   const providerOptions = countOptions(quoteRows, (row) => row.instrument.provider)
     .map((option) => ({ ...option, label: providerLabel(option.value) }))
-  const inspectedRow = rows.find((row) => row.instrument.id === inspectedId) ?? null
 
   function boardEmptyMessage() {
     if (quoteRows.length > 0) return 'No board rows match these filters.'
@@ -171,7 +166,7 @@ export default function MarketData() {
         />
       </div>
 
-      <MarketBenchmark row={benchmarkRow} onInspect={(row) => setInspectedId(row.instrument.id)} />
+      <MarketBenchmark row={benchmarkRow} />
 
       <FilterBar
         label="CLASS"
@@ -243,21 +238,15 @@ export default function MarketData() {
           <MarketTable
             table={marketTable}
             rows={visibleRows}
-            historyLabel={historyLabel}
             sortDisabledReason={sortDisabledReason}
-            onInspect={(row) => setInspectedId(row.instrument.id)}
             onRemove={handleRemove}
             busyKey={watchlist.busyKey}
-            caption="Watchlist quotes by provider with last price, daily change, intraday history, freshness, and quote time"
+            caption="Watchlist quotes by provider with last price, daily change, freshness, and quote time"
           />
         ) : (
           <EmptyState message={boardEmptyMessage()} />
         )}
       </section>
-
-      {inspectedRow && (
-        <MarketTrendPanel row={inspectedRow} onClose={() => setInspectedId(null)} />
-      )}
     </section>
   )
 }

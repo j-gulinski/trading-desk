@@ -10,11 +10,7 @@ from app.publisher import (
     publish_removal,
     stream_id,
 )
-from app.config import (
-    HISTORY_MAX_POINTS,
-    SERVICE_NAME,
-    TODAY_HISTORY_BUCKET_SECONDS,
-)
+from app.config import SERVICE_NAME
 from shared.active_set import load_active_set
 from shared.freshness import classify
 from shared.functions import utcnow
@@ -167,18 +163,6 @@ def search_symbols():
         response.status = 400
         return to_json({"error": "q must be at least 2 characters"})
     return to_json({"query": query.upper(), "results": symbol_search.search(query)})
-
-
-@app.route("/history")
-def get_history():
-    response.content_type = "application/json"
-    return to_json({
-        "session": "TODAY",
-        "bucket_seconds": TODAY_HISTORY_BUCKET_SECONDS,
-        "series": persistence.today_history_series(
-            TODAY_HISTORY_BUCKET_SECONDS, HISTORY_MAX_POINTS
-        ),
-    })
 
 
 @app.route("/providers")
