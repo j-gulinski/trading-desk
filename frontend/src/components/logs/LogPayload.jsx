@@ -1,9 +1,16 @@
 import { Fragment } from 'react'
 import { payloadEntriesOf } from '../../domain/logLines.js'
 
-function displayValue(value) {
+function displayValue(key, value) {
+  if (key === 'response_json' && typeof value === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2)
+    } catch {
+      return value
+    }
+  }
   if (typeof value === 'string') return value
-  return JSON.stringify(value)
+  return JSON.stringify(value, null, 2)
 }
 
 export default function LogPayload({ payload, onTradeClick, onCorrelationClick, activeId }) {
@@ -34,7 +41,7 @@ export default function LogPayload({ payload, onTradeClick, onCorrelationClick, 
                   {value}
                 </button>
               ) : (
-                displayValue(value)
+                displayValue(key, value)
               )}
             </dd>
           </Fragment>

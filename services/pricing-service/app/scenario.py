@@ -34,7 +34,8 @@ def run_scenario(req: ScenarioRequest) -> dict | None:
     inst = req.position.instrument
     pos = req.position
 
-    inputs = market_inputs(inst.asset_class, inst.symbol, inst.meta)
+    inputs = market_inputs(inst.asset_class, inst.symbol, inst.meta,
+                           req.market_data_provider)
     base_priced = price_from_inputs(inst.asset_class, inst.meta, inputs)
     if base_priced is None:
         return None

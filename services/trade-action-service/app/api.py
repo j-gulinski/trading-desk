@@ -3,13 +3,27 @@ import uuid
 import bottle
 from bottle import request, response
 
-from app import action_queue
-from app.config import SERVICE_NAME
+from app import action_queue, trade_processor
+from app.config import QUOTE_PROVIDER_CHOICES
+from shared.active_set import load_active_set
 from shared.db import session_scope
-from shared.symbols import watchlist_items, watchlist_spot_symbols
+from shared.providers import supports_quotes
+from shared.symbols import watchlist_spot_symbols
 from shared.term_schemas import public_term_schemas
 
 app = bottle.Bottle()
+
+VALIDATED_ACTIONS = {
+    "OPEN_TRADE": trade_processor.validate_open,
+    "CLOSE_TRADE": trade_processor.validate_close,
+}
+
+QUEUED_ACTIONS = (*VALIDATED_ACTIONS, "REASSIGN_TRADES", "CLOSE_ALL")
+
+def _normalize(body):
+    intent = dict(body or {})
+    intent.setdefault("action_type", "OPEN_TRADE")
+    return intent
 
 
 def _json(data, status=200):
@@ -31,15 +45,37 @@ def _accept(intent):
     return ack
 
 
+def _rejection(intent):
+    action = intent.get("action_type")
+    if action not in QUEUED_ACTIONS:
+        return f"unknown action type: {action}"
+    validate = VALIDATED_ACTIONS.get(action)
+    if validate is None:
+        return None
+    with session_scope() as session:
+        _, error = validate(session, intent)
+        if error is not None:
+            trade_processor.audit_rejection(session, intent, error)
+    return error
+
+
 @app.route("/instruments")
 def instruments():
     with session_scope() as session:
         items = [
-            {"symbol": item.symbol, "asset_class": item.asset_class,
-             "currency": item.currency}
-            for item in watchlist_items(session)
+            {"symbol": entry.symbol, "asset_class": entry.asset_class,
+             "currency": entry.currency,
+             "providers": sorted(
+                 provider for provider in QUOTE_PROVIDER_CHOICES
+                 if entry.serves(provider)
+             ),
+             "capabilities": {
+                 provider: supports_quotes(provider, entry.asset_class)
+                 for provider in QUOTE_PROVIDER_CHOICES
+             }}
+            for entry in load_active_set(session).values() if entry.tradeable
         ]
-    return _json(items)
+    return _json(sorted(items, key=lambda item: item["symbol"]))
 
 
 @app.route("/instruments/term-schemas")
@@ -51,13 +87,26 @@ def term_schemas():
 
 @app.route("/trade-actions", method="POST")
 def trade_action():
-    return _json(_accept(dict(request.json or {})), 202)
+    intent = _normalize(request.json)
+    error = _rejection(intent)
+    if error is not None:
+        return _json({"error": error}, 422)
+    return _json(_accept(intent), 202)
 
 
 @app.route("/trade-actions/batch", method="POST")
 def trade_action_batch():
-    acks = [_accept(dict(item)) for item in (request.json or [])]
-    return _json({"accepted": len(acks)}, 202)
+    accepted, rejected = [], []
+    for item in (request.json or []):
+        intent = _normalize(item)
+        error = _rejection(intent)
+        if error is not None:
+            rejected.append({"client_request_id": intent.get("client_request_id"),
+                             "error": error})
+            continue
+        accepted.append(_accept(intent))
+    status = 202 if accepted else 422
+    return _json({"accepted": len(accepted), "rejected": rejected}, status)
 
 
 @app.route("/trade-actions/close-all", method="POST")

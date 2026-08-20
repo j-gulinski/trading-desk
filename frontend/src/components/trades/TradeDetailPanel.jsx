@@ -4,7 +4,8 @@ import StatusPill from '../status/StatusPill.jsx'
 import SidePanel from '../panel/SidePanel.jsx'
 import PanelTabs from '../panel/PanelTabs.jsx'
 import ValuationHistoryTable from './ValuationHistoryTable.jsx'
-import { VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
+import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
+import { providerLabel } from '../../config/providers.js'
 import {
   directionOf,
   formatAmount,
@@ -128,7 +129,7 @@ export default function TradeDetailPanel({
           />
           <StatusPill
             level={VALUATION_STATUS_LEVEL[row.valuationStatus]}
-            label={row.valuationStatus}
+            label={VALUATION_STATUS_LABEL[row.valuationStatus] ?? row.valuationStatus}
           />
         </>
       }
@@ -143,14 +144,11 @@ export default function TradeDetailPanel({
         <PanelTabs tabs={tabs} activeId={tab} onSelect={setTab} />
       }
       footer={
-        <>
-          <span>
-            {lastUpdated == null
-              ? 'Waiting for detail snapshot'
-              : `Detail refreshed ${formatClockTime(lastUpdated)}`}
-          </span>
-          <span>Live value comes from the shared pricing feed</span>
-        </>
+        <span>
+          {lastUpdated == null
+            ? 'Waiting for detail'
+            : `Updated ${formatClockTime(lastUpdated)}`}
+        </span>
       }
     >
       {tab === 'details' && (
@@ -174,8 +172,8 @@ export default function TradeDetailPanel({
                 valuation == null
                   ? 'not valued yet'
                   : row.valuationSource === 'feed'
-                    ? 'pricing stream'
-                    : 'blotter snapshot'
+                    ? 'live'
+                    : 'latest'
               }
             />
           </section>
@@ -199,12 +197,21 @@ export default function TradeDetailPanel({
               <DetailField label="Entry">
                 {formatUnitPrice(trade.entryPrice, trade.assetClass)}
               </DetailField>
+              <DetailField label="Priced by">
+                {trade.provider ? providerLabel(trade.provider) : null}
+              </DetailField>
+              <DetailField label="Quote time">
+                {trade.entryPriceAtMs == null ? null : formatDateTime(trade.entryPriceAtMs)}
+              </DetailField>
               <DetailField label="Opened">{formatDateTime(trade.openedAtMs)}</DetailField>
               {row.lifecycle === 'CLOSED' && (
                 <>
                   <DetailField label="Closed">{formatDateTime(trade.closedAtMs)}</DetailField>
                   <DetailField label="Close price">
                     {formatUnitPrice(trade.closePrice, trade.assetClass)}
+                  </DetailField>
+                  <DetailField label="Close quote time">
+                    {trade.closePriceAtMs == null ? null : formatDateTime(trade.closePriceAtMs)}
                   </DetailField>
                   <DetailField label="Close reason">{trade.closeReason}</DetailField>
                 </>

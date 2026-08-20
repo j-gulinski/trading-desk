@@ -23,6 +23,12 @@ def _to_cached_trade(row: Trade) -> CachedTrade:
         closed_at=row.closed_at,
         close_price=row.close_price,
         close_reason=row.close_reason,
+        market_data_provider=row.market_data_provider,
+        entry_price_timestamp=row.entry_price_timestamp,
+        entry_snapshot_id=str(row.entry_snapshot_id) if row.entry_snapshot_id else None,
+        close_price_timestamp=row.close_price_timestamp,
+        close_snapshot_id=str(row.close_snapshot_id) if row.close_snapshot_id else None,
+        client_seen_price=row.client_seen_price,
     )
 
 

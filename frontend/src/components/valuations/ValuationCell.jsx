@@ -1,5 +1,6 @@
 import StatusPill from '../status/StatusPill.jsx'
-import { VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
+import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
+import { providerLabel } from '../../config/providers.js'
 import {
   formatAmount,
   formatClockTime,
@@ -26,10 +27,14 @@ export default function ValuationCell({ column, row }) {
       )
     case 'symbol':
       return valuation.symbol ?? '—'
+    case 'provider':
+      return valuation.marketDataProvider ? providerLabel(valuation.marketDataProvider) : '—'
     case 'price':
       return formatUnitPrice(valuation.price, valuation.assetClass)
     case 'fairValue':
       return formatAmount(valuation.fairValue)
+    case 'notional':
+      return formatAmount(valuation.notional)
     case 'unrealized':
       return valuation.closed ? '—' : formatSignedAmount(valuation.unrealizedPnl)
     case 'return':
@@ -37,7 +42,13 @@ export default function ValuationCell({ column, row }) {
     case 'updated':
       return formatClockTime(valuation.valuationTimeMs, { millis: true })
     case 'valuation':
-      return <StatusPill level={VALUATION_STATUS_LEVEL[status]} label={status} compact />
+      return (
+        <StatusPill
+          level={VALUATION_STATUS_LEVEL[status]}
+          label={VALUATION_STATUS_LABEL[status] ?? status}
+          compact
+        />
+      )
     default:
       return null
   }

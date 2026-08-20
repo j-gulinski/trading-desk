@@ -3,28 +3,28 @@
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: 5px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 .pill__dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: currentColor;
 }
 .pill--compact {
   gap: 4px;
-  padding: 2px 6px;
-  font-size: 10px;
+  padding: 1px 5px;
+  font-size: 9px;
 
   .pill__dot {
-    width: 5px;
-    height: 5px;
+    width: 4px;
+    height: 4px;
   }
 }
 
@@ -48,6 +48,15 @@
 .pill--unknown {
   color: var(--text-muted);
   background: rgba(255, 255, 255, 0.05);
+}
+
+.pill--closed {
+  color: var(--text-secondary);
+  background: rgba(var(--info-rgb), 0.08);
+}
+.pill--final {
+  color: var(--accent-strong);
+  background: var(--accent-bg);
 }
 
 // Audit severities (own names; palette overlaps health but the meaning differs).

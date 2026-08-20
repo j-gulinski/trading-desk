@@ -35,12 +35,15 @@ def _handle(event_type, tick):
         cache.ticks_received += 1
         cache.last_event_timestamp = tick.get("event_time")
 
+    if event_type == "market_remove":
+        cache.drop_spots(tick.get("rows") or [])
+        return
+
     if event_type == "curve_tick":
         cache.update_curve(tick)
         for event in value_curve(tick["curve_name"]):
             publish_valuation(event)
         return
-
 
     cache.update_spot(tick)
     for event in value_quote(tick["provider"], tick["symbol"]):

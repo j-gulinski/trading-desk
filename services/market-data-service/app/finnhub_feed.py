@@ -2,9 +2,9 @@ import time
 
 from shared.functions import utcnow
 from shared.logging_config import get_logger
-from shared.providers import FINNHUB, supports_quotes
+from shared.providers import FINNHUB
 from app import persistence
-from app.active_set import load_active_set
+from shared.active_set import load_active_set
 from app.clients.base import (
     ProviderAuthError,
     ProviderDataError,
@@ -17,10 +17,12 @@ from app.config import (
     AUTH_FAILURE_COOLDOWN_SECONDS,
     FINNHUB_API_KEY,
     FINNHUB_BUDGET_PER_MINUTE,
+    FINNHUB_PROVIDER_LIMIT_PER_MINUTE,
     FINNHUB_CLOSED_POLL_SECONDS,
     FINNHUB_TIER1_POLL_SECONDS,
     FINNHUB_TIER2_POLL_SECONDS,
     FRESHNESS_THRESHOLD_MULTIPLIER,
+    PROVIDER_CLOCK_LAG_SECONDS,
     MARKET_STATUS_REFRESH_SECONDS,
     RATE_LIMIT_DEFAULT_COOLDOWN_SECONDS,
     SERVICE_NAME,
@@ -29,11 +31,17 @@ from app.config import (
 from app.normalizer import normalize_finnhub_quote
 from app.provider_runtime import ProviderRuntime
 from app.publisher import publish_quote
+from app.quote_audit import audit_first_quote
 
 log = get_logger(SERVICE_NAME)
 
 PROVIDER = FINNHUB
-runtime = ProviderRuntime(FINNHUB, FINNHUB_BUDGET_PER_MINUTE, bool(FINNHUB_API_KEY))
+runtime = ProviderRuntime(
+    FINNHUB,
+    FINNHUB_BUDGET_PER_MINUTE,
+    bool(FINNHUB_API_KEY),
+    provider_minute_limit=FINNHUB_PROVIDER_LIMIT_PER_MINUTE,
+)
 _client = FinnhubClient(FINNHUB_API_KEY)
 _next_due = {}
 
@@ -42,10 +50,32 @@ def stale_after_seconds(symbol):
     entry = runtime.active_entry(symbol)
     tier1 = entry is not None and entry.tier == 1
     poll = FINNHUB_TIER1_POLL_SECONDS if tier1 else FINNHUB_TIER2_POLL_SECONDS
-    return FRESHNESS_THRESHOLD_MULTIPLIER * poll
+    return FRESHNESS_THRESHOLD_MULTIPLIER * poll + PROVIDER_CLOCK_LAG_SECONDS
+
+
+def closed_stale_after_seconds(symbol):
+    return FRESHNESS_THRESHOLD_MULTIPLIER * FINNHUB_CLOSED_POLL_SECONDS
+
+
+def market_open(symbol):
+    return runtime.market_open()
+
+
+def reload_active():
+    runtime.set_active(load_active_set())
+
+
+def _classifier(symbol):
+    return {
+        "stale_after_seconds": stale_after_seconds(symbol),
+        "closed_stale_after_seconds": closed_stale_after_seconds(symbol),
+        "market_open": runtime.market_open(),
+    }
 
 
 def _wire_quote(quote):
+    entry = runtime.active_entry(quote.symbol)
+    origin = entry.origin(FINNHUB) if entry else {}
     return {
         "provider": quote.provider,
         "symbol": quote.symbol,
@@ -57,10 +87,14 @@ def _wire_quote(quote):
         "mid": quote.mid,
         "price_basis": quote.price_basis,
         "quote_grade": quote.quote_grade,
+        "previous_close": quote.previous_close,
         "provider_timestamp": quote.provider_timestamp,
         "received_at": quote.received_at,
         "event_time": quote.received_at,
-        "stale_after_seconds": stale_after_seconds(quote.symbol),
+        **_classifier(quote.symbol),
+        "watched": bool(origin.get("watched")),
+        "held": bool(origin.get("held")),
+        "benchmark": bool(origin.get("benchmark")),
     }
 
 
@@ -70,7 +104,9 @@ def _fetch_and_publish(entry):
     quote = normalize_finnhub_quote(
         entry.symbol, entry.asset_class, entry.currency, payload, utcnow()
     )
-    persistence.store_quote(quote)
+    _, created = persistence.store_quote(quote, _classifier(entry.symbol))
+    if created:
+        audit_first_quote(FINNHUB, quote)
     tick = _wire_quote(quote)
     publish_quote(tick)
     runtime.record_success()
@@ -154,11 +190,7 @@ def poll_loop():
         if not last_status_refresh or now - last_status_refresh >= MARKET_STATUS_REFRESH_SECONDS:
             _refresh_market_status()
             last_status_refresh = now
-        # collect due symbols Finnhub can serve, tier 1 first
-        pollable = [
-            entry for entry in runtime.active_entries()
-            if supports_quotes(FINNHUB, entry.asset_class)
-        ]
+        pollable = runtime.pollable_entries()
         due = sorted(
             (entry for entry in pollable
              if _next_due.get(entry.symbol, 0) <= time.monotonic()),
@@ -186,8 +218,8 @@ def refresh_symbol(symbol):
         entry = runtime.active_entry(symbol)
     if entry is None:
         return None, "symbol is not in the active set", 404
-    if not supports_quotes(FINNHUB, entry.asset_class):
-        return None, f"FINNHUB does not serve {entry.asset_class}", 422
+    if not entry.serves(FINNHUB):
+        return None, f"FINNHUB is not watching {symbol}", 422
     # capacity: no cooldown running, one token available
     cooldown_left = runtime.cooldown_seconds_left()
     if cooldown_left > 0:
@@ -203,11 +235,51 @@ def refresh_symbol(symbol):
     return tick, None, 200
 
 
-def runtime_snapshot():
-    return runtime.snapshot(
-        sorted(
-            entry.symbol
-            for entry in runtime.active_entries()
-            if supports_quotes(FINNHUB, entry.asset_class)
+def search(query):
+    if not FINNHUB_API_KEY or runtime.cooldown_seconds_left() > 0:
+        return None
+    if not runtime.try_take():
+        return None
+    runtime.record_request()
+    return _client.search(query)
+
+
+def poll_strategy():
+    closed = runtime.market_open() is False
+    if closed:
+        description = (
+            f"market closed — confirmation poll every {FINNHUB_CLOSED_POLL_SECONDS} s "
+            f"({FINNHUB_TIER1_POLL_SECONDS} s / {FINNHUB_TIER2_POLL_SECONDS} s when open)"
         )
-    )
+    else:
+        description = (
+            f"every {FINNHUB_TIER1_POLL_SECONDS} s tier 1 (open trades + benchmark) · "
+            f"every {FINNHUB_TIER2_POLL_SECONDS} s watchlist"
+        )
+    return {
+        "mode": "TIERED",
+        "tier1_seconds": FINNHUB_TIER1_POLL_SECONDS,
+        "tier2_seconds": FINNHUB_TIER2_POLL_SECONDS,
+        "closed_seconds": FINNHUB_CLOSED_POLL_SECONDS,
+        "current_cadence_seconds": FINNHUB_CLOSED_POLL_SECONDS if closed
+        else FINNHUB_TIER1_POLL_SECONDS,
+        "description": description,
+    }
+
+
+def active_symbols():
+    return sorted(entry.symbol for entry in runtime.pollable_entries())
+
+
+def runtime_snapshot():
+    symbols = active_symbols()
+    is_open = runtime.market_open()
+    return {
+        **runtime.snapshot(symbols),
+        "market_states": {
+            "open": len(symbols) if is_open is True else 0,
+            "closed": len(symbols) if is_open is False else 0,
+            "unknown": len(symbols) if is_open is None else 0,
+        },
+        "strategy": poll_strategy(),
+    }

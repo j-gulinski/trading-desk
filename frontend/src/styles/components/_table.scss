@@ -90,36 +90,6 @@
   box-shadow: inset 2px 0 var(--accent);
 }
 
-@keyframes data-table-tick-pos {
-  from {
-    background: rgba(var(--pos-rgb), 0.18);
-  }
-  to {
-    background: transparent;
-  }
-}
-@keyframes data-table-tick-neg {
-  from {
-    background: rgba(var(--neg-rgb), 0.18);
-  }
-  to {
-    background: transparent;
-  }
-}
-.data-table__row--tick-pos td {
-  animation: data-table-tick-pos 0.45s ease-out;
-}
-.data-table__row--tick-neg td {
-  animation: data-table-tick-neg 0.45s ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .data-table__row--tick-pos td,
-  .data-table__row--tick-neg td {
-    animation: none;
-  }
-}
-
 .data-table__sort {
   width: 100%;
   min-height: 52px;

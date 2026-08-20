@@ -28,3 +28,19 @@ export function normalizeAuditEvents(raw) {
     }
   })
 }
+
+export function activeAuditAlerts(events) {
+  const alertSeverities = new Set(['WARNING', 'ERROR', 'CRITICAL'])
+  return events.filter((event) => {
+    if (!alertSeverities.has(event.severity)) return false
+    if (event.eventType !== 'STREAM_DISCONNECTED') return true
+
+    return !events.some((candidate) => (
+      candidate.service === event.service
+      && candidate.eventType === 'STREAM_CONNECTED'
+      && candidate.createdAtMs != null
+      && event.createdAtMs != null
+      && candidate.createdAtMs > event.createdAtMs
+    ))
+  })
+}

@@ -22,11 +22,13 @@ export default function FilterChipGroup({
             onClick={() => onChange(selected ? null : option.value)}
           >
             {tone && (
-              <span className={`filter-chip__dot filter-chip__dot--${tone}`} />
+              <span
+                className={`filter-chip__dot filter-chip__dot--${tone}`}
+                aria-hidden="true"
+              />
             )}
-            {option.count != null && <span>{option.count}</span>}
-            {option.label}
-            {option.trailing ?? null}
+            <span className="filter-chip__label">{option.label}</span>
+            {option.count != null && <span className="filter-chip__count">{option.count}</span>}
           </button>
         )
       })}

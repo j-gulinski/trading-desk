@@ -3,20 +3,24 @@
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
 }
 .filter-chip {
   appearance: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 9px;
+  min-height: 28px;
+  padding: 4px 9px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--bg-panel);
   color: var(--text-secondary);
   font: inherit;
+  font-size: 12px;
+  line-height: 1;
   cursor: pointer;
+  white-space: nowrap;
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 
   &:hover {
@@ -36,9 +40,23 @@
     color: var(--text-primary);
   }
 }
+.filter-chip__label {
+  line-height: 1;
+}
+.filter-chip__count {
+  min-width: 1ch;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.filter-chip[aria-pressed="true"] .filter-chip__count {
+  color: var(--accent-strong);
+}
 .filter-chip__dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
   border-radius: 50%;
 }
 .filter-chip__dot--healthy {
@@ -55,4 +73,14 @@
 }
 .filter-chip__dot--unknown {
   background: var(--text-muted);
+}
+.filter-chip__dot--info {
+  background: var(--info);
+}
+.filter-chip__dot--warning {
+  background: var(--warn);
+}
+.filter-chip__dot--error,
+.filter-chip__dot--critical {
+  background: var(--neg);
 }

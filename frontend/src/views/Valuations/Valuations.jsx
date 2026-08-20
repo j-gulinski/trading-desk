@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useValuationFeedContext } from '../../providers/feedContext.js'
+import { useMarketFeedContext, useValuationFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { useTableState } from '../../hooks/useTableState.js'
 import { STORAGE_KEYS } from '../../config/storage.js'
@@ -10,6 +10,7 @@ import {
   VALUATION_FALLBACK_SORT,
 } from '../../config/valuations.js'
 import {
+  benchmarkDayChangeOf,
   benchmarkOf,
   bookOptionsOf,
   bookRisksOf,
@@ -45,13 +46,14 @@ function matchesSearch(row, search) {
 
 export default function Valuations() {
   const { valuations, bookRisk, status, seedStatus } = useValuationFeedContext()
+  const { instruments } = useMarketFeedContext()
   const { now } = useElapsedTime()
 
   const [activeClass, setActiveClass] = useState(null)
   const [activeBook, setActiveBook] = useState(null)
   const [query, setQuery] = useState('')
 
-  const openRows = valuationRowsOf(Object.values(valuations), now).filter(
+  const openRows = valuationRowsOf(Object.values(valuations), now, instruments).filter(
     (row) => !row.valuation.closed,
   )
   const summary = summarizeValuations(openRows)
@@ -83,17 +85,26 @@ export default function Valuations() {
     : null
 
   const benchmark = benchmarkOf(bookRisk)
+  const benchmarkDayChange = benchmarkDayChangeOf(instruments, benchmark)
+  const benchmarkWindow =
+    benchmark && Number.isFinite(benchmark.windowReturn)
+      ? `${formatPercent(benchmark.windowReturn * 100, 2)} over ${benchmark.observations} observations`
+      : null
   const benchmarkNote = benchmark
     ? [
         `Benchmark: ${benchmark.symbol}`,
         Number.isFinite(benchmark.level) ? formatAmount(benchmark.level, 2) : null,
-        Number.isFinite(benchmark.windowReturn)
-          ? `${formatPercent(benchmark.windowReturn * 100, 2)} over ${benchmark.observations} samples`
-          : null,
+        Number.isFinite(benchmarkDayChange)
+          ? `${formatPercent(benchmarkDayChange, 2)} today`
+          : benchmarkWindow,
       ]
         .filter(Boolean)
         .join(' · ')
     : 'Benchmark: —'
+  const benchmarkTitle =
+    Number.isFinite(benchmarkDayChange) && benchmarkWindow
+      ? `α/β window: ${benchmarkWindow}`
+      : undefined
 
   const table = useTableState({
     columns: VALUATION_COLUMNS,
@@ -163,6 +174,11 @@ export default function Valuations() {
 
       <div className="valuation-summary">
         <StatCard
+          label={`CAPITAL INVESTED · ${currency}`}
+          value={summary.currency == null ? '—' : formatAmount(summary.notional)}
+          sub="gross entry value of open positions"
+        />
+        <StatCard
           label={`UNREALIZED PNL · ${currency}`}
           value={formatSignedAmount(summary.unrealized)}
           sub={`${summary.open} open positions · ${summary.books} books`}
@@ -170,9 +186,14 @@ export default function Valuations() {
         />
         <StatCard label="LIVE" value={summary.live} sub="valued now" tone="info" />
         <StatCard
+          label="MKT CLOSED"
+          value={summary.marketClosed}
+          sub="marked at the close"
+        />
+        <StatCard
           label="STALE"
           value={summary.stale}
-          sub="> 10s threshold"
+          sub="past the feed window"
           tone={summary.stale > 0 ? 'warn' : 'default'}
         />
       </div>
@@ -181,7 +202,7 @@ export default function Valuations() {
         <div className="valuation-section__head">
           <div>
             <h2 id="book-risk-title">Alpha / beta by book</h2>
-            <p>{benchmarkNote}</p>
+            <p title={benchmarkTitle}>{benchmarkNote}</p>
           </div>
           <span>{books.length} books with open valuations</span>
         </div>

@@ -5,50 +5,72 @@ import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { filterLogLines, logServicesOf, warnPulseOf } from '../../domain/logLines.js'
 import { formatNumber } from '../../domain/formatting.js'
-import { LOG_LEVELS, LOG_META_POLL_MS, LOG_RENDER_LIMIT } from '../../config/logs.js'
+import {
+  LOG_LEVELS,
+  LOG_LEVEL_TONES,
+  LOG_META_POLL_MS,
+  LOG_RENDER_LIMIT,
+} from '../../config/logs.js'
 import { streamStatusLevel } from '../../config/stream.js'
 import Panel from '../../components/Panel.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
 import FilterBar from '../../components/filters/FilterBar.jsx'
 import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
 import StatusPill from '../../components/status/StatusPill.jsx'
-import Sparkline from '../../components/charts/Sparkline.jsx'
 import LogLineList from '../../components/logs/LogLineList.jsx'
 import StoryPanel from '../../components/logs/StoryPanel.jsx'
+import { providerLabel } from '../../config/providers.js'
 
-const LEVEL_TONES = { warning: 'warning', error: 'error', critical: 'critical' }
+function initialFilters() {
+  const queryString = window.location.hash.split('?')[1] ?? ''
+  const params = new URLSearchParams(queryString)
+  return {
+    service: params.get('service'),
+    provider: params.get('provider'),
+    scope: params.get('scope'),
+    query: params.get('q') ?? '',
+  }
+}
 
 export default function Logs() {
+  const initial = initialFilters()
   const { lines, status, seedStatus, paused, setPaused, pendingCount } = useLogsFeed()
   const meta = usePolling(
     ({ signal }) => apiGet(endpoints.monitoring.logs({ limit: 1 }), { signal }),
     { intervalMs: LOG_META_POLL_MS },
   )
-  const [service, setService] = useState(null)
+  const [service, setService] = useState(initial.service)
   const [minLevel, setMinLevel] = useState(null)
-  const [query, setQuery] = useState('')
+  const [provider, setProvider] = useState(initial.provider)
+  const [scope, setScope] = useState(initial.scope)
+  const [query, setQuery] = useState(initial.query)
   const [story, setStory] = useState(null)
 
   const now = Date.now()
-  const services = logServicesOf(meta.data?.meta, now)
+  const services = logServicesOf(meta.data?.meta)
   const pulse = warnPulseOf(meta.data?.meta, now)
 
   const serviceOptions = services.map((entry) => ({
     value: entry.service,
     label: entry.label,
     count: entry.buffered,
-    tone: entry.warnPlus > 0 ? 'warning' : undefined,
-    trailing: (
-      <Sparkline values={entry.warnSeries} width={44} height={14} className="filter-chip__spark" />
-    ),
   }))
   const levelOptions = LOG_LEVELS.map((level) => ({
     value: level,
     label: `${level.toUpperCase()}+`,
-    tone: LEVEL_TONES[level],
+    tone: LOG_LEVEL_TONES[level],
   }))
+  const providerOptions = [
+    ...new Set([provider, ...lines.map((line) => line.provider)].filter(Boolean)),
+  ]
+    .sort()
+    .map((value) => ({
+      value,
+      label: providerLabel(value),
+    }))
+  const eventOptions = [{ value: 'provider-http', label: 'PROVIDER API' }]
 
-  const visible = filterLogLines(lines, { service, minLevel, query })
+  const visible = filterLogLines(lines, { service, minLevel, provider, scope, query })
   const rendered = visible.slice(0, LOG_RENDER_LIMIT)
 
   return (
@@ -66,12 +88,6 @@ export default function Logs() {
           onChange: setQuery,
         }}
       >
-        <FilterChipGroup
-          ariaLabel="Minimum log level"
-          options={levelOptions}
-          value={minLevel}
-          onChange={setMinLevel}
-        />
         <button
           type="button"
           className={`logs__pause${paused ? ' logs__pause--active' : ''}`}
@@ -80,9 +96,40 @@ export default function Logs() {
           {paused ? `Resume · ${formatNumber(pendingCount)} new` : 'Pause'}
         </button>
       </FilterBar>
+      <div className="logs__filter-row">
+        <div className="logs__filter-cluster">
+          <span className="filter-bar__label">PROVIDER</span>
+          <FilterChipGroup
+            ariaLabel="Filter log lines by provider"
+            options={providerOptions}
+            value={provider}
+            onChange={setProvider}
+          />
+        </div>
+        <div className="logs__filter-cluster">
+          <span className="filter-bar__label">EVENTS</span>
+          <FilterChipGroup
+            ariaLabel="Filter provider API events"
+            options={eventOptions}
+            value={scope}
+            onChange={setScope}
+          />
+        </div>
+        <div className="logs__filter-cluster logs__filter-cluster--level">
+          <span className="filter-bar__label">LEVEL</span>
+          <FilterChipGroup
+            ariaLabel="Minimum log level"
+            options={levelOptions}
+            value={minLevel}
+            onChange={setMinLevel}
+          />
+        </div>
+      </div>
 
       <Panel
-        title="Live tail · all services"
+        title={scope === 'provider-http'
+          ? `Provider API · ${provider ? providerLabel(provider) : 'all providers'}`
+          : 'Live tail · all services'}
         meta={
           <>
             <StatusPill level={streamStatusLevel(status)} label={status} />

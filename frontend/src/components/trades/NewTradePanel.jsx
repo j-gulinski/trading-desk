@@ -1,23 +1,27 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import SidePanel from '../panel/SidePanel.jsx'
+import ProviderQuoteOption from './ProviderQuoteOption.jsx'
 import { useMarketFeedContext } from '../../providers/feedContext.js'
+import { useElapsedTime } from '../../hooks/useElapsedTime.js'
+import { usePolling } from '../../hooks/usePolling.js'
 import { apiGet, apiPost } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import {
   buildOpenTradeIntent,
-  derivedSymbolOf,
   instrumentCatalogOf,
+  isCurvePriced,
   newOpenTradeRequestId,
-  termErrorsOf,
-  termSchemaOf,
-  termsFromValues,
+  providerQuotesOf,
   tradeFormErrorsOf,
   tradeableInstrumentsOf,
 } from '../../domain/tradeActions.js'
+import { providerLabel } from '../../config/providers.js'
 import { bookSummariesOf } from '../../domain/books.js'
 import { describeApiError } from '../../domain/apiErrors.js'
+import { TICKET_OPTIONS_POLL_INTERVAL_MS } from '../../config/tradeActions.js'
 import {
   formatAmount,
+  formatDateTime,
   formatNumber,
   formatShortId,
   formatUnitPrice,
@@ -32,239 +36,47 @@ function FieldError({ id, message }) {
   )
 }
 
-function normalizedQuote(data) {
-  return {
-    ...data,
-    price: Number(data?.price),
-    multiplier: Number(data?.multiplier),
-  }
-}
-
-function formatRate(rate) {
-  const value = Number(rate)
-  return Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : '—'
-}
-
-function choiceLabel(field, choice) {
-  return field.labels?.[choice] ?? String(choice).replaceAll('_', ' ')
-}
-
-function SwapTerms({ instrument }) {
-  if (instrument?.assetClass !== 'IRS') return null
-
-  const payFixed = instrument.direction === 'PAY_FIXED_RECEIVE_FLOAT'
-  const payments = Number(instrument.payments_per_year)
-  const maturity = Number(instrument.maturity_years)
-  const paymentLabel = payments === 1
-    ? 'Annual'
-    : Number.isFinite(payments) && payments > 0
-      ? `${formatNumber(payments)} per year`
-      : '—'
-  const countLabel = Number.isFinite(payments) && Number.isFinite(maturity)
-    ? `${formatNumber(Math.ceil(payments * maturity))} payments`
-    : null
-
-  return (
-    <div className="panel-form__info" aria-label="Selected interest-rate swap terms">
-      <div className="panel-form__info-row">
-        <span className="panel-form__info-label">FIXED LEG</span>
-        <span className="panel-form__info-value">
-          {payFixed ? 'Pay' : 'Receive'} {formatRate(instrument.fixed_rate)} / year
-        </span>
-      </div>
-      <div className="panel-form__info-row">
-        <span className="panel-form__info-label">FLOATING LEG</span>
-        <span className="panel-form__info-value">
-          {payFixed ? 'Receive' : 'Pay'} USD_GOV floating rate
-        </span>
-      </div>
-      <div className="panel-form__info-row">
-        <span className="panel-form__info-label">NOTIONAL</span>
-        <span className="panel-form__info-value">
-          USD {formatAmount(Number(instrument.notional), 0)} · not exchanged
-        </span>
-      </div>
-      <div className="panel-form__info-row">
-        <span className="panel-form__info-label">TERM</span>
-        <span className="panel-form__info-value">
-          {formatNumber(maturity)} years · {paymentLabel}{countLabel != null && ` · ${countLabel}`}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function TermField({ field, value, error, onChange }) {
-  const inputId = `new-trade-term-${field.name}`
-  const errorId = `${inputId}-error`
-
-  if (field.type === 'choice' && field.choices.length === 2) {
-    return (
-      <div className="panel-form__field panel-form__field--span">
-        <span className="panel-form__label" id={`${inputId}-label`}>{field.label}</span>
-        <div className="panel-form__side panel-form__side--stretch" role="group" aria-labelledby={`${inputId}-label`}>
-          {field.choices.map((choice) => (
-            <button
-              key={choice}
-              type="button"
-              className="panel-form__side-button"
-              aria-pressed={value === choice}
-              onClick={() => onChange(field.name, choice)}
-            >
-              {choiceLabel(field, choice)}
-            </button>
-          ))}
-        </div>
-        <FieldError id={errorId} message={error} />
-      </div>
-    )
-  }
-
-  return (
-    <div className="panel-form__field">
-      <label className="panel-form__label" htmlFor={inputId}>{field.label}</label>
-      {field.type === 'choice' ? (
-        <select
-          id={inputId}
-          className="panel-form__select"
-          value={value ?? ''}
-          aria-invalid={error != null}
-          aria-describedby={error ? errorId : undefined}
-          onChange={(event) => onChange(field.name, event.target.value)}
-        >
-          <option value="">Select…</option>
-          {field.choices.map((choice) => (
-            <option key={choice} value={choice}>{choiceLabel(field, choice)}</option>
-          ))}
-        </select>
-      ) : (
-        <input
-          id={inputId}
-          className="panel-form__input"
-          type="number"
-          inputMode="decimal"
-          step={field.type === 'integer' ? 1 : 'any'}
-          value={value ?? ''}
-          aria-invalid={error != null}
-          aria-describedby={error ? errorId : undefined}
-          onChange={(event) => onChange(field.name, event.target.value)}
-        />
-      )}
-      <FieldError id={errorId} message={error} />
-    </div>
-  )
-}
-
 export default function NewTradePanel({ onClose }) {
   const { instruments } = useMarketFeedContext()
-  const [books, setBooks] = useState(null)
-  const [booksError, setBooksError] = useState(null)
+  const { now } = useElapsedTime()
   const [bookId, setBookId] = useState('')
   const [symbol, setSymbol] = useState('')
   const [side, setSide] = useState('BUY')
+  const [providerChoice, setProviderChoice] = useState('')
   const [quantityText, setQuantityText] = useState('')
   const [errors, setErrors] = useState({})
   const [pending, setPending] = useState(false)
   const [submitError, setSubmitError] = useState(null)
   const [ack, setAck] = useState(null)
   const [requestId, setRequestId] = useState(newOpenTradeRequestId)
-  const [catalog, setCatalog] = useState(null)
-  const [catalogError, setCatalogError] = useState(null)
-  const [preview, setPreview] = useState(null)
-  const [termSchemas, setTermSchemas] = useState(null)
-  const [termValues, setTermValues] = useState({})
-
-  useEffect(() => {
-    const controller = new AbortController()
-    apiGet(endpoints.blotter.booksSummary, { signal: controller.signal })
-      .then((data) => setBooks(bookSummariesOf(data)))
-      .catch((err) => {
-        if (controller.signal.aborted) return
-        setBooks([])
-        setBooksError(err?.message ?? 'Could not load books')
-      })
-    return () => controller.abort()
-  }, [])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    apiGet(endpoints.tradeAction.instruments, { signal: controller.signal })
-      .then((data) => setCatalog(instrumentCatalogOf(data)))
-      .catch((err) => {
-        if (controller.signal.aborted) return
-        setCatalog([])
-        setCatalogError(err?.message ?? 'Could not load instruments')
-      })
-    apiGet(endpoints.tradeAction.termSchemas, { signal: controller.signal })
-      .then(setTermSchemas)
-      .catch(() => {
-        if (controller.signal.aborted) return
-      })
-    return () => controller.abort()
-  }, [])
+  const booksRequest = usePolling(
+    ({ signal }) => apiGet(endpoints.blotter.booksSummary, { signal }),
+    { intervalMs: TICKET_OPTIONS_POLL_INTERVAL_MS },
+  )
+  const catalogRequest = usePolling(
+    ({ signal }) => apiGet(endpoints.tradeAction.instruments, { signal }),
+    { intervalMs: TICKET_OPTIONS_POLL_INTERVAL_MS },
+  )
+  const books = booksRequest.data == null ? null : bookSummariesOf(booksRequest.data)
+  const catalog = catalogRequest.data == null ? null : instrumentCatalogOf(catalogRequest.data)
 
   const bookList = (books ?? []).filter((book) => book.isActive)
   const selectedBook = bookList.find((book) => book.id === bookId) ?? null
   const assetClass = selectedBook?.assetClass
-  const options = tradeableInstrumentsOf(catalog, assetClass)
+  const curvePriced = isCurvePriced(assetClass)
+  const options = curvePriced ? [] : tradeableInstrumentsOf(catalog, assetClass)
   const instrument = options.find((option) => option.symbol === symbol) ?? null
 
-  const schema = termSchemaOf(termSchemas, assetClass)
-  const customMode = schema != null
-  const fields = customMode ? schema.fields : []
-  const termErrors = customMode ? termErrorsOf(fields, termValues) : {}
-  const termsComplete = customMode && Object.keys(termErrors).length === 0
-  const customTerms = termsComplete ? termsFromValues(fields, termValues) : null
-  const customTermsKey = customTerms == null ? '' : JSON.stringify(customTerms)
-  const effectiveSymbol = customMode
-    ? (customTerms == null ? '' : derivedSymbolOf(assetClass, customTerms))
-    : symbol
+  const quotes = providerQuotesOf({ instrument, feed: instruments, side, now })
+  const priced = quotes.filter((option) => Number.isFinite(option.price))
+  const provider = providerChoice || (priced.length === 1 ? priced[0].provider : '')
+  const quote = quotes.find((option) => option.provider === provider) ?? null
 
-  const price = preview?.price ?? null
-  const curveName = instrument?.curve ?? 'USD_GOV'
-  const curveRevision = Object.values(instruments).find(
-    (marketInstrument) =>
-      marketInstrument.assetClass === 'RATE' && marketInstrument.id.startsWith(`${curveName}@`),
-  )?.sourceEventId ?? ''
-  const activeUnderlying = customMode
-    ? termValues.underlying_symbol ?? ''
-    : instrument?.underlying_symbol ?? symbol
-  const spotRevision = Object.values(instruments).find(
-    (marketInstrument) =>
-      marketInstrument.symbol === activeUnderlying && marketInstrument.assetClass !== 'RATE',
-  )?.sourceEventId ?? ''
-  const quoteRevision = assetClass === 'IRS' || assetClass === 'BOND'
-    ? curveRevision
-    : assetClass === 'EUROPEAN_OPTION'
-      ? `${spotRevision}:${curveRevision}`
-      : spotRevision
-
-  useEffect(() => {
-    if (customMode ? customTerms == null : !symbol) {
-      setPreview(null)
-      return undefined
-    }
-    const controller = new AbortController()
-    const body = customMode
-      ? { asset_class: assetClass, terms: customTerms }
-      : { symbol }
-    apiPost(endpoints.pricing.price, body, { signal: controller.signal })
-      .then((data) => {
-        setPreview(normalizedQuote(data))
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return
-      })
-    return () => controller.abort()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, customMode, customTermsKey, quoteRevision])
-
+  const wholeUnits = assetClass === 'EQUITY'
   const trimmed = quantityText.trim()
   const quantity = trimmed === '' ? null : Number(trimmed)
   const estimatedPositionValue =
-    Number.isFinite(quantity) && Number.isFinite(price)
-      ? quantity * price * (preview?.multiplier ?? 1)
-      : null
+    Number.isFinite(quantity) && quote?.price != null ? quantity * quote.price : null
 
   function clearError(field) {
     setErrors((current) => {
@@ -275,32 +87,24 @@ export default function NewTradePanel({ onClose }) {
     })
   }
 
-  function resetInstrumentState() {
-    setPreview(null)
-    setTermValues({})
-    setErrors({})
-  }
-
   function selectBook(nextBookId) {
     setBookId(nextBookId)
-    resetInstrumentState()
+    setProviderChoice('')
+    setErrors({})
     const nextBook = bookList.find((book) => book.id === nextBookId) ?? null
-    const nextOptions = tradeableInstrumentsOf(catalog, nextBook?.assetClass)
+    const nextOptions = isCurvePriced(nextBook?.assetClass)
+      ? []
+      : tradeableInstrumentsOf(catalog, nextBook?.assetClass)
     setSymbol(nextOptions.length === 1 ? nextOptions[0].symbol : '')
   }
 
-  function setTermValue(name, value) {
-    setTermValues((current) => ({ ...current, [name]: value }))
-    clearError(name)
-    clearError('price')
+  function selectProvider(nextProvider) {
+    setProviderChoice(nextProvider)
+    clearError('provider')
   }
 
   function formErrorsOf() {
-    const base = tradeFormErrorsOf({ bookId, symbol: effectiveSymbol, quantity, price, assetClass })
-    if (!customMode) return base
-    const combined = { ...base, ...termErrorsOf(fields, termValues) }
-    delete combined.instrument
-    return combined
+    return tradeFormErrorsOf({ bookId, symbol, quantity, quote, assetClass })
   }
 
   async function handleSubmit(event) {
@@ -316,19 +120,19 @@ export default function NewTradePanel({ onClose }) {
         clientRequestId: requestId,
         bookId,
         assetClass,
-        symbol: effectiveSymbol,
+        symbol,
         side,
         quantity,
-        price,
-        currency: customMode ? 'USD' : instrument.currency,
-        terms: customMode ? customTerms : undefined,
+        quote,
       })
       const accepted = await apiPost(endpoints.tradeAction.submit, intent)
       setAck({
         tradeId: accepted?.trade_id ?? null,
         side,
         quantity,
-        symbol: effectiveSymbol,
+        symbol,
+        price: quote.price,
+        provider: quote.provider,
       })
       setRequestId(newOpenTradeRequestId())
     } catch (err) {
@@ -343,25 +147,70 @@ export default function NewTradePanel({ onClose }) {
     }
   }
 
-  const valid = Object.keys(formErrorsOf()).length === 0
+  const currentFormErrors = formErrorsOf()
+  const valid = Object.keys(currentFormErrors).length === 0
+  const providerError = errors.provider ?? (
+    quote != null && !quote.tradeable ? currentFormErrors.provider : null
+  )
   const submitLabel = valid
-    ? `Submit ${side} ${formatNumber(quantity)} ${effectiveSymbol}`
+    ? `${side} ${formatNumber(quantity)} ${symbol} at ${formatUnitPrice(quote.price, assetClass)}`
     : 'Submit trade intent'
-  const termsInstrument = customMode
-    ? (termsComplete ? { assetClass, ...customTerms } : null)
-    : instrument
+
+  if (ack) {
+    return (
+      <SidePanel
+        eyebrow="TRADE ACTION"
+        title="Trade submitted"
+        subtitle="The order was accepted for processing"
+        dismissOnOutsideClick={false}
+        onClose={onClose}
+      >
+        <div className="panel-form__ack" role="status">
+          <span>
+            {ack.side} {formatNumber(ack.quantity)} × {ack.symbol} via{' '}
+            {providerLabel(ack.provider)}
+            {ack.tradeId != null && ` · trade ${formatShortId(ack.tradeId)}`}
+          </span>
+        </div>
+        <div className="panel-form__actions">
+          <button
+            type="button"
+            className="panel-form__cancel"
+            onClick={() => {
+              setAck(null)
+              setQuantityText('')
+              setSubmitError(null)
+              setErrors({})
+            }}
+          >
+            New trade
+          </button>
+          <button
+            type="button"
+            className="panel-form__submit"
+            onClick={() => {
+              window.location.hash = '/trades'
+              onClose()
+            }}
+          >
+            View in Trades
+          </button>
+        </div>
+      </SidePanel>
+    )
+  }
 
   return (
     <SidePanel
       eyebrow="TRADE ACTION"
       title="New trade"
-      subtitle="intent at displayed snapshot price"
+      subtitle="Compare quotes and choose a provider"
       dismissOnOutsideClick={false}
       onClose={onClose}
     >
       <form className="panel-form__form" onSubmit={handleSubmit} noValidate>
         <div className="panel-form__row">
-          <div className={customMode ? 'panel-form__field panel-form__field--span' : 'panel-form__field'}>
+          <div className="panel-form__field">
             <label className="panel-form__label" htmlFor="new-trade-book">BOOK</label>
             <select
               id="new-trade-book"
@@ -378,62 +227,50 @@ export default function NewTradePanel({ onClose }) {
             </select>
             <FieldError
               id="new-trade-book-error"
-              message={booksError ? 'Books service unavailable — could not load books.' : errors.book}
+              message={booksRequest.error ? 'Books service unavailable — could not load books.' : errors.book}
             />
           </div>
 
-          {!customMode && (
-            <div className="panel-form__field">
-              <label className="panel-form__label" htmlFor="new-trade-instrument">INSTRUMENT</label>
-              <select
-                id="new-trade-instrument"
-                className="panel-form__select"
-                value={symbol}
-                disabled={options.length === 0}
-                aria-invalid={errors.instrument != null}
-                aria-describedby={errors.instrument ? 'new-trade-instrument-error' : undefined}
-                onChange={(event) => {
-                  if (event.target.value !== symbol) setPreview(null)
-                  setSymbol(event.target.value)
-                  clearError('instrument')
-                  clearError('price')
-                }}
-              >
-                <option value="">{options.length === 0 ? 'No instrument' : 'Select instrument…'}</option>
-                {options.map((option) => (
-                  <option key={option.symbol} value={option.symbol}>{option.symbol}</option>
-                ))}
-              </select>
-              <FieldError id="new-trade-instrument-error" message={errors.instrument} />
-            </div>
-          )}
+          <div className="panel-form__field">
+            <label className="panel-form__label" htmlFor="new-trade-instrument">INSTRUMENT</label>
+            <select
+              id="new-trade-instrument"
+              className="panel-form__select"
+              value={symbol}
+              disabled={options.length === 0}
+              aria-invalid={errors.instrument != null}
+              aria-describedby={errors.instrument ? 'new-trade-instrument-error' : undefined}
+              onChange={(event) => {
+                setSymbol(event.target.value)
+                setProviderChoice('')
+                clearError('instrument')
+                clearError('provider')
+              }}
+            >
+              <option value="">{options.length === 0 ? 'No instrument' : 'Select instrument…'}</option>
+              {options.map((option) => (
+                <option key={option.symbol} value={option.symbol}>{option.symbol}</option>
+              ))}
+            </select>
+            <FieldError id="new-trade-instrument-error" message={errors.instrument} />
+          </div>
         </div>
 
-        {customMode && (
-          <div className="panel-form__row">
-            {fields.map((field) => (
-              <TermField
-                key={field.name}
-                field={field}
-                value={termValues[field.name]}
-                error={errors[field.name]}
-                onChange={setTermValue}
-              />
-            ))}
-          </div>
-        )}
-
-        {selectedBook != null && !customMode && options.length === 0 && (
+        {curvePriced && (
           <p className="panel-form__note" role="status">
-            {catalog == null
-              ? 'Loading supported instruments…'
-              : catalogError
-                ? 'Instrument catalog unavailable — reopen this panel to retry.'
-                : `No ${selectedBook.assetClass} instrument is configured.`}
+            New {assetClass} trades are not available.
           </p>
         )}
 
-        <SwapTerms instrument={termsInstrument} />
+        {selectedBook != null && !curvePriced && options.length === 0 && (
+          <p className="panel-form__note" role="status">
+            {catalog == null
+              ? 'Loading tradeable instruments…'
+              : catalogRequest.error
+                ? 'Instrument list unavailable — retrying.'
+                : `No ${selectedBook.assetClass} symbol is on the watchlist — add one in Market data.`}
+          </p>
+        )}
 
         <div className="panel-form__field">
           <span className="panel-form__label" id="new-trade-side-label">SIDE</span>
@@ -452,15 +289,39 @@ export default function NewTradePanel({ onClose }) {
           </div>
         </div>
 
+        {symbol !== '' && (
+          <div className="panel-form__field">
+            <span className="panel-form__label" id="new-trade-provider-label">
+              MARKET DATA PROVIDER
+            </span>
+            <ul className="quote-options" aria-labelledby="new-trade-provider-label">
+              {quotes.map((option) => (
+                <ProviderQuoteOption
+                  key={option.provider}
+                  quote={option}
+                  assetClass={assetClass}
+                  side={side}
+                  selected={provider === option.provider}
+                  now={now}
+                  onSelect={selectProvider}
+                />
+              ))}
+            </ul>
+            <FieldError id="new-trade-provider-error" message={providerError} />
+          </div>
+        )}
+
         <div className="panel-form__field">
-          <label className="panel-form__label" htmlFor="new-trade-quantity">QUANTITY</label>
+          <label className="panel-form__label" htmlFor="new-trade-quantity">
+            {wholeUnits ? 'QUANTITY' : 'NOTIONAL'}
+          </label>
           <input
             id="new-trade-quantity"
             className="panel-form__input"
             type="number"
-            inputMode="numeric"
+            inputMode="decimal"
             min={1}
-            step={1}
+            step={wholeUnits ? 1 : 'any'}
             value={quantityText}
             aria-invalid={errors.quantity != null}
             aria-describedby={errors.quantity ? 'new-trade-quantity-error' : undefined}
@@ -473,22 +334,22 @@ export default function NewTradePanel({ onClose }) {
         </div>
 
         <div className="panel-form__info">
-          {customMode && (
-            <div className="panel-form__info-row">
-              <span className="panel-form__info-label">SYMBOL</span>
-              <span className="panel-form__info-value">{effectiveSymbol || '—'}</span>
-            </div>
-          )}
           <div className="panel-form__info-row">
-            <span className="panel-form__info-label">BACKEND MARK</span>
+            <span className="panel-form__info-label">ESTIMATED PRICE</span>
             <span className="panel-form__info-value">
-              {formatUnitPrice(price, assetClass)}
+              {quote?.price != null
+                ? `${formatUnitPrice(quote.price, assetClass)} ${quote.currency ?? ''}`
+                : '—'}
             </span>
           </div>
           <div className="panel-form__info-row">
-            <span className="panel-form__info-label">
-              EST. POSITION VALUE
+            <span className="panel-form__info-label">QUOTE TIME</span>
+            <span className="panel-form__info-value">
+              {quote?.atMs != null ? formatDateTime(quote.atMs) : '—'}
             </span>
+          </div>
+          <div className="panel-form__info-row">
+            <span className="panel-form__info-label">EST. POSITION VALUE</span>
             <span className="panel-form__info-value">{formatAmount(estimatedPositionValue)}</span>
           </div>
           <div className="panel-form__info-row">
@@ -500,29 +361,11 @@ export default function NewTradePanel({ onClose }) {
             </span>
           </div>
         </div>
-        <FieldError id="new-trade-price-error" message={errors.price} />
-
-        <div className="panel-form__summary" aria-live="polite">
-          <span className={`panel-form__summary-side panel-form__summary-side--${side.toLowerCase()}`}>
-            ● {side}
-          </span>
-          <span>{Number.isFinite(quantity) ? formatNumber(quantity) : '—'} × {effectiveSymbol || '—'}</span>
-        </div>
 
         {submitError && <div className="panel-form__submit-error" role="alert">{submitError}</div>}
 
-        {ack && (
-          <div className="panel-form__ack" role="status">
-            <span>
-              Accepted — {ack.side} {formatNumber(ack.quantity)} × {ack.symbol}
-              {ack.tradeId != null && ` as trade ${formatShortId(ack.tradeId)}`}.
-            </span>
-            <a className="panel-form__ack-link" href="#/trades" onClick={onClose}>View in Trades</a>
-          </div>
-        )}
-
-        <button type="submit" className="panel-form__submit" disabled={pending}>
-          {pending ? 'Submitting…' : submitLabel}
+        <button type="submit" className="panel-form__submit" disabled={pending || !valid}>
+          {pending ? 'Submitting…' : valid ? submitLabel : 'Submit trade'}
         </button>
       </form>
     </SidePanel>

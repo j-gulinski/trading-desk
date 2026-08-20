@@ -24,6 +24,7 @@ class NormalizedQuote:
     mid: Decimal
     price_basis: PriceBasis
     quote_grade: QuoteGrade
+    previous_close: Decimal | None
     provider_timestamp: datetime | None
     received_at: datetime
     raw_payload: dict
@@ -37,6 +38,7 @@ def as_decimal(value):
 
 def build_quote(provider, symbol, asset_class, quote_grade, received_at, raw_payload,
                 currency=None, bid=None, ask=None, last=None, reference_mid=None,
+                previous_close=None,
                 provider_timestamp=None):
     bid = as_decimal(bid)
     ask = as_decimal(ask)
@@ -66,6 +68,7 @@ def build_quote(provider, symbol, asset_class, quote_grade, received_at, raw_pay
         mid=mid,
         price_basis=price_basis,
         quote_grade=quote_grade,
+        previous_close=as_decimal(previous_close),
         provider_timestamp=provider_timestamp,
         received_at=received_at,
         raw_payload=raw_payload,

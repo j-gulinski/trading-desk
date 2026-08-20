@@ -32,6 +32,12 @@ export const TRADE_COLUMNS = [
     numeric: true,
   },
   {
+    id: 'provider',
+    label: 'Provider',
+    sortable: true,
+    defaultDirection: 'asc',
+  },
+  {
     id: 'price',
     label: 'Mark',
     sortable: true,
@@ -57,7 +63,6 @@ export const TRADE_COLUMNS = [
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerNote: 'realized once closed',
   },
   {
     id: 'return',
@@ -66,7 +71,6 @@ export const TRADE_COLUMNS = [
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerNote: 'unrealized only',
   },
   {
     id: 'opened',
@@ -101,9 +105,11 @@ export const DEFAULT_TRADE_COLUMNS = [
   'trade',
   'book',
   'assetClass',
+  'symbol',
   'side',
   'quantity',
   'entry',
+  'provider',
   'fairValue',
   'pnl',
   'valuation',

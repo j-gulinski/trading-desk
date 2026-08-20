@@ -1,6 +1,6 @@
 """provider market schema
 
-Phase 1 reshape for the six-provider world (docs/hw5-plan-v2.md §5–6). Drops and
+Phase 1 reshape for the six-provider world (docs/implementation-roadmap.md §5–6). Drops and
 recreates the market tables — the pre-fork rows are synthetic and a fresh DB is the
 deployment path.
 
@@ -39,8 +39,13 @@ def upgrade() -> None:
         sa.Column('mid', sa.Numeric(), nullable=False),
         sa.Column('price_basis', sa.Text(), nullable=False),
         sa.Column('quote_grade', sa.Text(), nullable=False),
+        sa.Column('previous_close', sa.Numeric(), nullable=True),
         sa.Column('provider_timestamp', sa.DateTime(timezone=True), nullable=True),
         sa.Column('received_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('stale_after_seconds', sa.Integer(), nullable=True),
+        sa.Column('closed_stale_after_seconds', sa.Integer(), nullable=True),
+        sa.Column('market_open', sa.Boolean(), nullable=True),
+        sa.Column('latest_snapshot_id', sa.UUID(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('market_data_id'),
         sa.UniqueConstraint('provider', 'symbol',
@@ -67,6 +72,10 @@ def upgrade() -> None:
     )
     op.create_index('ix_market_data_snapshots_provider_symbol_received_at',
                     'market_data_snapshots', ['provider', 'symbol', 'received_at'])
+    op.create_foreign_key(
+        'fk_market_data_spot_prices_latest_snapshot_id', 'market_data_spot_prices',
+        'market_data_snapshots', ['latest_snapshot_id'], ['snapshot_id'],
+    )
 
     op.create_table('market_data_curves',
         sa.Column('curve_id', sa.UUID(), nullable=False),
@@ -102,7 +111,7 @@ def upgrade() -> None:
         sa.Column('symbol', sa.Text(), nullable=False),
         sa.Column('asset_class', sa.Text(), nullable=False),
         sa.Column('currency', sa.Text(), nullable=False),
-        sa.Column('capabilities', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column('providers', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('symbol'),
     )
@@ -115,6 +124,11 @@ def upgrade() -> None:
                           ['entry_snapshot_id'], ['snapshot_id'])
     op.add_column('trades', sa.Column('client_seen_price', sa.Numeric(), nullable=True))
     op.add_column('trades', sa.Column('created_by_service', sa.Text(), nullable=True))
+    op.add_column('trades',
+                  sa.Column('close_price_timestamp', sa.DateTime(timezone=True), nullable=True))
+    op.add_column('trades', sa.Column('close_snapshot_id', sa.UUID(), nullable=True))
+    op.create_foreign_key('fk_trades_close_snapshot_id', 'trades', 'market_data_snapshots',
+                          ['close_snapshot_id'], ['snapshot_id'])
 
     op.add_column('valuations', sa.Column('market_data_provider', sa.Text(), nullable=True))
     op.add_column('valuations',
@@ -127,6 +141,9 @@ def downgrade() -> None:
     op.drop_column('valuations', 'market_data_timestamp')
     op.drop_column('valuations', 'market_data_provider')
 
+    op.drop_constraint('fk_trades_close_snapshot_id', 'trades', type_='foreignkey')
+    op.drop_column('trades', 'close_snapshot_id')
+    op.drop_column('trades', 'close_price_timestamp')
     op.drop_column('trades', 'created_by_service')
     op.drop_column('trades', 'client_seen_price')
     op.drop_constraint('fk_trades_entry_snapshot_id', 'trades', type_='foreignkey')
@@ -137,6 +154,8 @@ def downgrade() -> None:
     op.drop_table('watchlist_items')
     op.drop_table('market_data_curve_points')
     op.drop_table('market_data_curves')
+    op.drop_constraint('fk_market_data_spot_prices_latest_snapshot_id',
+                       'market_data_spot_prices', type_='foreignkey')
     op.drop_index('ix_market_data_snapshots_provider_symbol_received_at',
                   table_name='market_data_snapshots')
     op.drop_table('market_data_snapshots')

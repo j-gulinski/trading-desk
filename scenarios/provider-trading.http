@@ -1,0 +1,150 @@
+###############################################################################
+# Multi-provider trading: discover, watch and book with two real quote providers
+#
+# It covers provider discovery, an independent provider-symbol watchlist, provider
+# runtime/budget visibility, quote comparison, provider-bound entry, provider-bound
+# valuation and cleanup.
+#
+# Prerequisites:
+#   - the full stack is running with FINNHUB_API_KEY and TWELVE_DATA_API_KEY;
+#   - the trade section accepts usable LIVE or confirmed-CLOSED quotes. STALE
+#     and missing quotes remain visible but cannot create a simulated fill.
+#
+# Send requests top-to-bottom. Pause where noted so the pollers can fetch quotes.
+###############################################################################
+
+@marketData = http://localhost:8001
+@books      = http://localhost:8004
+@actions    = http://localhost:8008
+@blotter    = http://localhost:8006
+@pricing    = http://localhost:8002
+@monitoring = http://localhost:8003
+
+# ====================== DISCOVER AND BUILD THE BOARD ======================
+
+### Search is normalized and tagged with the providers that can serve each result
+GET {{marketData}}/symbols/search?q=AAPL
+
+### Add Finnhub only
+POST {{marketData}}/watchlist
+Content-Type: application/json
+
+{ "symbol": "AAPL", "asset_class": "EQUITY", "currency": "USD", "providers": ["FINNHUB"] }
+
+### Add Twelve Data independently; the existing Finnhub row remains
+POST {{marketData}}/watchlist
+Content-Type: application/json
+
+{ "symbol": "AAPL", "asset_class": "EQUITY", "currency": "USD", "providers": ["TWELVE_DATA"] }
+
+# Wait for both pollers. The result is two rows, keyed by provider + symbol.
+
+### Compare the two normalized quote rows and freshness states
+GET {{marketData}}/quotes?symbol=AAPL
+
+### Each series starts at previous_close and ends at the current board mid
+GET {{marketData}}/history
+
+### Inspect provider health, cadence and remaining budgets
+GET {{marketData}}/providers
+
+### Inspect one completed-call event per upstream response; API keys are never logged
+GET {{monitoring}}/logs?service=market-data-service&q=provider_http_response&limit=100
+
+# ======================== PROVIDER-BOUND TRADING =========================
+
+### Create one equity book
+# @name createBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "PROVIDER_COMPARE_{{$timestamp}}", "expected_asset_class": "EQUITY" }
+
+###
+@bookId = {{createBook.response.body.$.book_id}}
+
+### Read the two rows shown by the ticket
+# @name finnhubQuote
+GET {{marketData}}/quotes/FINNHUB/AAPL
+
+###
+# @name twelveQuote
+GET {{marketData}}/quotes/TWELVE_DATA/AAPL
+
+### Open through Finnhub
+# @name finnhubTrade
+POST {{actions}}/trades
+Content-Type: application/json
+
+{ "client_request_id": "finnhub-{{$timestamp}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "FINNHUB", "client_seen_price": "{{finnhubQuote.response.body.$.mid}}" }
+
+### Open through Twelve Data
+# @name twelveTrade
+POST {{actions}}/trades
+Content-Type: application/json
+
+{ "client_request_id": "twelve-{{$timestamp}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "TWELVE_DATA", "client_seen_price": "{{twelveQuote.response.body.$.mid}}" }
+
+### Repeat the first request ID; the worker must not create a second trade
+# @name duplicateFinnhubTrade
+POST {{actions}}/trades
+Content-Type: application/json
+
+{ "client_request_id": "{{finnhubTrade.response.body.$.client_request_id}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "FINNHUB", "client_seen_price": "{{finnhubQuote.response.body.$.mid}}" }
+
+# Wait about 3 seconds for valuation and blotter reconciliation.
+
+### Each detail keeps its selected provider and quote provenance
+GET {{blotter}}/trades/{{finnhubTrade.response.body.$.trade_id}}
+
+###
+GET {{blotter}}/trades/{{twelveTrade.response.body.$.trade_id}}
+
+### The duplicate response has a new acknowledgement ID but no persisted trade (404)
+GET {{blotter}}/trades/{{duplicateFinnhubTrade.response.body.$.trade_id}}
+
+### Close the Finnhub trade through its frozen feed
+POST {{actions}}/trades
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "close-finnhub-{{$timestamp}}", "trade_id": "{{finnhubTrade.response.body.$.trade_id}}", "close_reason": "SCENARIO_CLEANUP" }
+
+### Close the Twelve Data trade through its frozen feed
+POST {{actions}}/trades
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "close-twelve-{{$timestamp}}", "trade_id": "{{twelveTrade.response.body.$.trade_id}}", "close_reason": "SCENARIO_CLEANUP" }
+
+### A second close is rejected because the trade is no longer active
+POST {{actions}}/trades
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "double-close-{{$timestamp}}", "trade_id": "{{finnhubTrade.response.body.$.trade_id}}", "close_reason": "SHOULD_NOT_APPLY" }
+
+# =============================== CLEANUP ================================
+
+# Wait about 3 seconds for both close actions to reach the blotter.
+
+### Terminal valuations retain each trade's provider and close quote timestamp
+GET {{pricing}}/valuations/{{finnhubTrade.response.body.$.trade_id}}
+
+###
+GET {{pricing}}/valuations/{{twelveTrade.response.body.$.trade_id}}
+
+### Closed detail includes realized PnL and close provenance
+GET {{blotter}}/trades/{{finnhubTrade.response.body.$.trade_id}}
+
+### Persisted valuation and audit histories remain available
+GET {{blotter}}/trades/{{finnhubTrade.response.body.$.trade_id}}/valuations
+
+###
+GET {{blotter}}/trades/{{finnhubTrade.response.body.$.trade_id}}/audit-logs
+
+### Deactivate the temporary book after it has no active trades
+DELETE {{books}}/books/{{bookId}}
+
+### Remove Twelve Data only; the Finnhub AAPL row continues to be polled
+DELETE {{marketData}}/watchlist/AAPL?provider=TWELVE_DATA
+
+### Remove the remaining Finnhub row
+DELETE {{marketData}}/watchlist/AAPL?provider=FINNHUB

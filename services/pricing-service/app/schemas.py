@@ -23,6 +23,7 @@ class Position:
 class ScenarioRequest:
     position: Position
     shock: float
+    market_data_provider: str | None
 
     @classmethod
     def from_body(cls, body: dict) -> "ScenarioRequest":
@@ -43,6 +44,7 @@ class ScenarioRequest:
                     ),
                 ),
                 shock=float(body["shock"]),
+                market_data_provider=body.get("market_data_provider"),
             )
         except (KeyError, TypeError, ValueError) as e:
             raise ValueError(f"invalid request: {e}")

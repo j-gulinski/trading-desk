@@ -2,9 +2,16 @@ import queue
 import bottle
 from bottle import request, response
 
-from app import persistence, scheduler
-from app.publisher import client_event_queues, clients_lock, last_event_id, stream_id
+from app import persistence, scheduler, symbol_search, watchlist
+from app.publisher import (
+    client_event_queues,
+    clients_lock,
+    last_event_id,
+    publish_removal,
+    stream_id,
+)
 from app.config import SERVICE_NAME
+from shared.active_set import load_active_set
 from shared.freshness import classify
 from shared.functions import utcnow
 from shared.serialization import to_json
@@ -12,7 +19,6 @@ from shared.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
 app = bottle.Bottle()
-
 
 @app.route("/stream")
 def stream():
@@ -38,14 +44,35 @@ def stream():
 
     return generate_events()
 
-
 def _board_payload():
-    rows = persistence.board_rows()
+    active = load_active_set()
+    rows = [
+        row for row in persistence.board_rows()
+        if row["symbol"] in active and active[row["symbol"]].serves(row["provider"])
+    ]
     for row in rows:
-        row["stale_after_seconds"] = scheduler.stale_after_seconds(
-            row["provider"], row["symbol"]
-        )
         row["event_time"] = row["received_at"]
+        row.update(active[row["symbol"]].origin(row["provider"]))
+    return rows
+
+
+def _classify_row(row, now):
+    return classify(
+        True,
+        row["provider_timestamp"],
+        row["received_at"],
+        now,
+        row["stale_after_seconds"],
+        market_open=row["market_open"],
+        closed_stale_after_seconds=row["closed_stale_after_seconds"],
+    )
+
+
+def _quote_rows():
+    now = utcnow()
+    rows = _board_payload()
+    for row in rows:
+        row["freshness"] = _classify_row(row, now)
     return rows
 
 
@@ -64,13 +91,100 @@ def get_snapshot():
 @app.route("/quotes")
 def get_quotes():
     response.content_type = "application/json"
-    now = utcnow()
-    rows = _board_payload()
-    for row in rows:
-        row["freshness"] = classify(
-            True, row["provider_timestamp"], now, row["stale_after_seconds"]
-        )
+    symbol = (request.query.symbol or "").strip().upper() or None
+    asset_class = (request.query.asset_class or "").strip().upper() or None
+    provider = (request.query.provider or "").strip().upper() or None
+    rows = [
+        row for row in _quote_rows()
+        if (symbol is None or row["symbol"] == symbol)
+        and (asset_class is None or row["asset_class"] == asset_class)
+        and (provider is None or row["provider"] == provider)
+    ]
     return to_json(rows)
+
+
+@app.route("/quotes/<provider>/<symbol>/history")
+def get_quote_history(provider, symbol):
+    response.content_type = "application/json"
+    normalized_provider = provider.strip().upper()
+    normalized_symbol = symbol.strip().upper()
+    try:
+        limit = int(request.query.limit or 60)
+    except (TypeError, ValueError):
+        response.status = 400
+        return to_json({"error": "limit must be an integer between 1 and 200"})
+    if not 1 <= limit <= 200:
+        response.status = 400
+        return to_json({"error": "limit must be between 1 and 200"})
+    if normalized_provider not in scheduler.wired_quote_providers():
+        response.status = 404
+        return to_json({"error": f"unknown or unwired provider: {normalized_provider}"})
+    return to_json(persistence.quote_history(
+        normalized_provider, normalized_symbol, limit
+    ))
+
+
+@app.route("/watchlist")
+def get_watchlist():
+    response.content_type = "application/json"
+    return to_json(watchlist.list_items(scheduler.wired_quote_providers()))
+
+
+@app.route("/watchlist", method="POST")
+def post_watchlist():
+    response.content_type = "application/json"
+    body = dict(request.json or {})
+    item, error, status = watchlist.add_item(
+        body.get("symbol"), body.get("asset_class"), body.get("currency"),
+        scheduler.wired_quote_providers(), body.get("providers"),
+    )
+    if error is not None:
+        response.status = status
+        return to_json({"error": error})
+    scheduler.reload_active_set()
+    log.info("watchlist_symbol_added", symbol=item["symbol"],
+             asset_class=item["asset_class"],
+             providers=[p for p, on in item["providers"].items() if on])
+    response.status = status
+    return to_json(item)
+
+
+@app.route("/watchlist/<symbol>", method="DELETE")
+def delete_watchlist(symbol):
+    response.content_type = "application/json"
+    provider = (request.query.provider or "").strip().upper() or None
+    result, error, status = watchlist.remove_item(symbol, provider)
+    if error is not None:
+        response.status = status
+        return to_json({"error": error})
+    scheduler.reload_active_set()
+    normalized = symbol.strip().upper()
+    active = load_active_set().get(normalized)
+    released = [
+        name for name in result["dropped"]
+        if active is None or not active.serves(name)
+    ]
+    if released:
+        persistence.delete_board_rows(normalized, released)
+        publish_removal([{"provider": name, "symbol": normalized} for name in released])
+    log.info("watchlist_symbol_removed", symbol=normalized, provider=provider,
+             released=released, remaining=result["remaining"])
+    return to_json({
+        "symbol": normalized,
+        "removed_providers": result["dropped"],
+        "remaining_providers": result["remaining"],
+        "still_polled": [name for name in result["dropped"] if name not in released],
+    })
+
+
+@app.route("/symbols/search")
+def search_symbols():
+    response.content_type = "application/json"
+    query = (request.query.q or "").strip()
+    if len(query) < 2:
+        response.status = 400
+        return to_json({"error": "q must be at least 2 characters"})
+    return to_json({"query": query.upper(), "results": symbol_search.search(query)})
 
 
 @app.route("/providers")
@@ -93,13 +207,17 @@ def get_provider_health(name):
 def refresh():
     response.content_type = "application/json"
     symbol = (request.query.symbol or "").strip().upper()
+    provider = (request.query.provider or "").strip().upper() or None
     if not symbol:
-        response.status = 400
-        return to_json({"error": "symbol query parameter is required"})
-    tick, error, status = scheduler.refresh_symbol(symbol)
+        refreshed, skipped = scheduler.refresh_all(provider)
+        log.info("manual_refresh_all", provider=provider, refreshed=len(refreshed),
+                 skipped=skipped)
+        return to_json({"refreshed": refreshed, "skipped": skipped})
+    tick, error, status = scheduler.refresh_symbol(symbol, provider)
     if error is not None:
         response.status = status
-        log.warning("manual_refresh_rejected", symbol=symbol, reason=error)
+        log.warning("manual_refresh_rejected", symbol=symbol, provider=provider,
+                    reason=error)
         return to_json({"error": error, "symbol": symbol})
-    log.info("manual_refresh", symbol=symbol)
+    log.info("manual_refresh", symbol=symbol, provider=provider)
     return to_json(tick)

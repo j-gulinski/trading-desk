@@ -1,13 +1,10 @@
 import { labelForService } from './auditEvents.js'
-import { LOG_FEED_CAP, LOG_LEVELS, PULSE_SPAN_MINUTES, PULSE_WINDOW_MINUTES } from '../config/logs.js'
-
-const LEVEL_TONE = {
-  debug: 'unknown',
-  info: 'info',
-  warning: 'warning',
-  error: 'error',
-  critical: 'critical',
-}
+import {
+  LOG_FEED_CAP,
+  LOG_LEVELS,
+  LOG_LEVEL_TONES,
+  PULSE_WINDOW_MINUTES,
+} from '../config/logs.js'
 
 // Already shown in the row header — repeating them in the detail block is noise.
 const HEADER_KEYS = new Set(['event', 'level', 'service', 'id', 'timestamp'])
@@ -26,9 +23,10 @@ export function normalizeLogLine(raw) {
     service: raw.service ?? null,
     serviceLabel: labelForService(raw.service),
     level,
-    tone: LEVEL_TONE[level],
+    tone: LOG_LEVEL_TONES[level],
     atMs: Number.isNaN(atMs) ? null : atMs,
     event: String(raw.event ?? ''),
+    provider: typeof raw.provider === 'string' ? raw.provider : null,
     correlationId: typeof raw.correlation_id === 'string' ? raw.correlation_id : null,
     payload: raw,
   }
@@ -53,11 +51,16 @@ function levelAtLeast(level, minLevel) {
   return LOG_LEVELS.indexOf(level) >= LOG_LEVELS.indexOf(minLevel)
 }
 
-export function filterLogLines(lines, { service = null, minLevel = null, query = '' } = {}) {
+export function filterLogLines(
+  lines,
+  { service = null, minLevel = null, provider = null, scope = null, query = '' } = {},
+) {
   const needle = query.trim().toLowerCase()
   return lines.filter((line) => {
     if (service && line.service !== service) return false
     if (minLevel && !levelAtLeast(line.level, minLevel)) return false
+    if (provider && line.provider !== provider) return false
+    if (scope === 'provider-http' && line.event !== 'provider_http_response') return false
     if (needle) {
       const haystack =
         `${line.event} ${line.correlationId ?? ''} ${JSON.stringify(line.payload)}`.toLowerCase()
@@ -75,37 +78,15 @@ function warnCountOf(bucket) {
   )
 }
 
-function minuteSeriesOf(minutes, nowMs, span = PULSE_SPAN_MINUTES) {
-  const byMinute = new Map()
-  for (const bucket of minutes ?? []) {
-    const ms = Date.parse(bucket?.t ?? '')
-    if (!Number.isNaN(ms)) byMinute.set(ms, warnCountOf(bucket))
-  }
-  const currentMinute = Math.floor(nowMs / 60000) * 60000
-  const series = []
-  for (let i = span - 1; i >= 0; i -= 1) {
-    series.push(byMinute.get(currentMinute - i * 60000) ?? 0)
-  }
-  return series
-}
-
-export function logServicesOf(meta, nowMs) {
+export function logServicesOf(meta) {
   const services = meta?.services
   if (services == null || typeof services !== 'object') return []
   return Object.entries(services)
-    .map(([service, info]) => {
-      const counts = info?.counts ?? {}
-      const lastAtMs = Date.parse(info?.last_at ?? '')
-      return {
-        service,
-        label: labelForService(service),
-        buffered: Number(info?.buffered) || 0,
-        lastAtMs: Number.isNaN(lastAtMs) ? null : lastAtMs,
-        counts,
-        warnPlus: warnCountOf(counts),
-        warnSeries: minuteSeriesOf(info?.minutes, nowMs),
-      }
-    })
+    .map(([service, info]) => ({
+      service,
+      label: labelForService(service),
+      buffered: Number(info?.buffered) || 0,
+    }))
     .sort((a, b) => a.service.localeCompare(b.service))
 }
 

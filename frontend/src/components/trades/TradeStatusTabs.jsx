@@ -20,7 +20,7 @@ export default function TradeStatusTabs({ value, openCount, closedCount, totalCo
         disabled={locked}
         onClick={() => onChange?.('BOTH')}
       >
-        <span>Both</span>
+        <span>All</span>
         <span className="trade-tabs__count">{totalCount}</span>
       </button>
       <button

@@ -1,19 +1,20 @@
 import StatusPill from '../status/StatusPill.jsx'
-import Sparkline from '../charts/Sparkline.jsx'
 import {
   formatAge,
-  formatBidAsk,
   formatDelta,
   formatMarketSymbol,
   formatPercentDelta,
-  formatTenor,
-  formatValue,
-  formatValueUnit,
 } from '../../domain/marketFormat.js'
-import { formatClockTime } from '../../domain/formatting.js'
+import { formatClockTime, formatUnitPrice } from '../../domain/formatting.js'
+import { providerLabel } from '../../config/providers.js'
+import {
+  FRESHNESS_HINTS,
+  FRESHNESS_LABELS,
+  FRESHNESS_PILL_LEVELS,
+} from '../../config/marketData.js'
 
 function ChangeValue({ instrument, change }) {
-  const percent = instrument.unit === 'rate' ? null : formatPercentDelta(change.percent)
+  const percent = formatPercentDelta(change.percent)
   return (
     <>
       <span>{formatDelta(instrument, change.delta)}</span>
@@ -27,16 +28,36 @@ function ChangeValue({ instrument, change }) {
   )
 }
 
-export default function MarketCell({ column, row }) {
-  const { instrument, observedChange, lastTickChange, live } = row
+function LastPrice({ instrument }) {
+  const hasPreviousTick = Number.isFinite(instrument.previousValue)
+  const className = hasPreviousTick
+    ? `market-price-tick market-price-tick--${instrument.lastDirection}`
+    : undefined
+  return (
+    <span className="market-mark">
+      <span key={instrument.eventTimeMs ?? instrument.polledAtMs} className={className}>
+        {formatUnitPrice(instrument.value, instrument.assetClass)}
+      </span>
+      {instrument.priceBasis && (
+        <span className="market-mark__basis">{instrument.priceBasis.replaceAll('_', ' ')}</span>
+      )}
+    </span>
+  )
+}
+
+export default function MarketCell({
+  column,
+  row,
+  onRemove,
+  busyKey,
+}) {
+  const { instrument, tickChange, todayChange } = row
 
   switch (column.id) {
     case 'symbol':
       return formatMarketSymbol(instrument)
     case 'provider':
-      return instrument.provider ?? '—'
-    case 'tenor':
-      return formatTenor(instrument.tenor)
+      return instrument.provider ? providerLabel(instrument.provider) : '—'
     case 'assetClass':
       return (
         <span className="class-tag">
@@ -44,31 +65,62 @@ export default function MarketCell({ column, row }) {
           {instrument.assetClass}
         </span>
       )
-    case 'marketLevel': {
-      const unit = formatValueUnit(instrument)
-      return (
-        <span className="market-value">
-          {formatValue(instrument)}
-          {unit && <span className="market-value__unit">{unit}</span>}
-        </span>
-      )
-    }
-    case 'observedChange':
-      return <ChangeValue instrument={instrument} change={observedChange} />
-    case 'lastTickChange':
-      return <ChangeValue instrument={instrument} change={lastTickChange} />
-    case 'quote':
-      return formatBidAsk(instrument)
-    case 'trend':
-      return <Sparkline values={instrument.history} />
+    case 'last':
+      return <LastPrice instrument={instrument} />
+    case 'tickChange':
+      return <ChangeValue instrument={instrument} change={tickChange} />
+    case 'todayChange':
+      return <ChangeValue instrument={instrument} change={todayChange} />
     case 'age':
       return formatAge(row.providerAgeMs)
     case 'feed':
       return (
-        <StatusPill level={live ? 'info' : 'stale'} label={live ? 'LIVE' : 'STALE'} compact />
+        <StatusPill
+          level={FRESHNESS_PILL_LEVELS[row.state] ?? 'unknown'}
+          label={FRESHNESS_LABELS[row.state] ?? row.state}
+          title={FRESHNESS_HINTS[row.state]}
+          compact
+        />
       )
+    case 'watch':
+      if (instrument.watchlisted && onRemove) {
+        const label = `Stop watching ${instrument.symbol} on ${providerLabel(instrument.provider)}`
+        return (
+          <button
+            type="button"
+            className="watchlist-remove"
+            title={label}
+            aria-label={label}
+            disabled={busyKey === instrument.id}
+            onClick={(event) => {
+              event.stopPropagation()
+              onRemove(instrument.symbol, instrument.provider)
+            }}
+          >
+            ✕
+          </button>
+        )
+      }
+      if (instrument.held) {
+        return (
+          <span
+            className="board-origin-tag"
+            title="Held in an open position — leaves the board when the position closes"
+          >
+            POS
+          </span>
+        )
+      }
+      if (instrument.benchmark) {
+        return (
+          <span className="board-origin-tag" title="Benchmark — always polled">
+            BMK
+          </span>
+        )
+      }
+      return null
     case 'updated':
-      return formatClockTime(instrument.eventTimeMs, { millis: true })
+      return formatClockTime(instrument.polledAtMs, { millis: true })
     default:
       return null
   }

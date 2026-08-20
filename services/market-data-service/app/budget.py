@@ -1,6 +1,7 @@
 import threading
 import time
-from datetime import date
+
+from shared.functions import utcnow
 
 
 class TokenBucket:
@@ -18,12 +19,12 @@ class TokenBucket:
         )
         self._refilled_at = now
 
-    def try_take(self):
+    def try_take(self, cost=1):
         with self._lock:
             self._refill()
-            if self._tokens < 1:
+            if self._tokens < cost:
                 return False
-            self._tokens -= 1
+            self._tokens -= cost
             return True
 
     def state(self):
@@ -33,21 +34,38 @@ class TokenBucket:
 
 
 class DailyLedger:
-    def __init__(self):
-        self._day = date.today()
+    def __init__(self, daily_budget=None, provider_limit=None):
+        self._daily_budget = daily_budget
+        self._provider_limit = provider_limit
+        self._day = utcnow().date()
         self._requests = 0
+        self._credits = 0
         self._lock = threading.Lock()
 
-    def record(self):
+    def _roll_day(self):
+        today = utcnow().date()
+        if today != self._day:
+            self._day = today
+            self._requests = 0
+            self._credits = 0
+
+    def record(self, credits=1):
         with self._lock:
-            today = date.today()
-            if today != self._day:
-                self._day = today
-                self._requests = 0
+            self._roll_day()
             self._requests += 1
+            self._credits += credits
+
+    def credits_today(self):
+        with self._lock:
+            self._roll_day()
+            return self._credits
 
     def state(self):
         with self._lock:
-            if date.today() != self._day:
-                return {"requests_today": 0}
-            return {"requests_today": self._requests}
+            self._roll_day()
+            state = {"requests_today": self._requests}
+            if self._daily_budget is not None:
+                state["credits_today"] = self._credits
+                state["daily_budget"] = self._daily_budget
+                state["provider_daily_limit"] = self._provider_limit
+            return state

@@ -1,4 +1,4 @@
-import { useValuationFeedContext } from '../../providers/feedContext.js'
+import { useMarketFeedContext, useValuationFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import {
   bookRisksOf,
@@ -25,15 +25,17 @@ function BookPnlRow({ book }) {
 
 export default function BusinessOverview() {
   const { valuations, bookRisk, status, seedStatus } = useValuationFeedContext()
+  const { instruments } = useMarketFeedContext()
   const { now } = useElapsedTime()
 
-  const rows = valuationRowsOf(Object.values(valuations), now)
+  const rows = valuationRowsOf(Object.values(valuations), now, instruments)
 
   const summary = summarizeValuations(rows)
   const books = bookRisksOf(rows, bookRisk)
   const currency = summary.currency ?? 'MIXED'
-  const valued = summary.live + summary.stale
-  const livePercent = valued > 0 ? (summary.live / valued) * 100 : 0
+  const valued = summary.live + summary.marketClosed + summary.stale
+  const fresh = summary.live + summary.marketClosed
+  const livePercent = valued > 0 ? (fresh / valued) * 100 : 0
 
   const emptyMessage =
     seedStatus === 'error'
@@ -103,6 +105,12 @@ export default function BusinessOverview() {
                   <StatusPill level="info" label="LIVE" compact />
                   <strong>{summary.live}</strong>
                 </span>
+                {summary.marketClosed > 0 && (
+                  <span className="freshness__count">
+                    <StatusPill level="closed" label="MKT CLOSED" compact />
+                    <strong>{summary.marketClosed}</strong>
+                  </span>
+                )}
                 <span className="freshness__count">
                   <StatusPill level="stale" label="STALE" compact />
                   <strong>{summary.stale}</strong>
@@ -111,7 +119,7 @@ export default function BusinessOverview() {
               <div
                 className="freshness__bar"
                 role="img"
-                aria-label={`${summary.live} of ${valued} open valuations are live`}
+                aria-label={`${fresh} of ${valued} open valuations are current`}
               >
                 <span className="freshness__fill" style={{ transform: `scaleX(${livePercent / 100})` }} />
               </div>

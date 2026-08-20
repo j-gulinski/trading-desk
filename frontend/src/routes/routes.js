@@ -13,7 +13,7 @@ export const ROUTES = [
   { path: 'logs', label: 'Logs', subtitle: 'central log stream — live tail across services', group: 'SYSTEM', component: Logs },
 
   { path: 'business-overview', label: 'Business Overview', subtitle: 'top-level PnL, book risk & valuation freshness', group: 'TRADING', component: BusinessOverview },
-  { path: 'market-data', label: 'Market Data', subtitle: 'live market data ticks', group: 'TRADING', component: MarketData },
+  { path: 'market-data', label: 'Market Data', subtitle: 'provider watchlist and live quotes', group: 'TRADING', component: MarketData },
   { path: 'valuations', label: 'Valuations & Risk', subtitle: 'fair value, PnL, alpha & beta', group: 'TRADING', component: Valuations },
   { path: 'books', label: 'Books', subtitle: 'manage trading books', group: 'TRADING', component: Books },
   { path: 'trades', label: 'Trades & PnL', subtitle: 'operational blotter — trades, valuations & audit', group: 'TRADING', component: Trades },

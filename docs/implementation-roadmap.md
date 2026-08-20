@@ -1,36 +1,18 @@
-# HW5 plan v2 — fork to a real-data trading system
+# Implementation roadmap — real-data trading system
 
-> **Fresh-session brief (read this first after a context reset).** Status as of 2026-08-17:
-> planning is **complete, owner-reviewed, and audited against recording 5** — nothing is
-> implemented yet, no provider API keys are registered, and the new repository does not exist
-> yet. **The next action is Phase 0 (§6): create the `trading-desk` repo and run the deep
-> clean.** Decisions D1–D25 (§4, §11.4) are binding owner decisions — do not re-litigate them;
-> the only open items are §10 #6 (a one-line teacher reconfirm at demo handover) and §11.6
-> #8–11 (hosting choices, needed only when Phase 8 starts). Read alongside this file:
-> `docs/hw5-plan.md` §2 (the prepared-seams table and file:line gap map of the current code —
-> still accurate), `AGENTS.md` (repo conventions), and the local stack is currently RUNNING
-> with 3 days of data (the 38 M-row valuations table §11.2 is live evidence — don't wipe it
-> before Phase 7's log-contention audit harvests it). House rules that govern implementation:
-> no code comments (self-explanatory code, rationale in `docs/`), minimal README, every config
-> value gets a one-line why in `.env.example`, no unit tests — verification is scenario flows
-> + the D25 load scenarios.
+This roadmap records capability boundaries, dependencies, technical decisions and acceptance
+checks for the real-data trading system. It is a forward-looking companion to the current-state
+guides under `docs/implementation/`; implemented behavior is authoritative there.
 
-> **Planning artifact, v2 — for review.** Supersedes `hw5-plan.md` (kept for the record); the
-> premise changed: instead of evolving `trading-microservices` in place, the project **forks to a
-> new repository**, deletes every static/synthetic flow, and rebuilds market data around six real
-> providers. Sources: the v1 plan, the HW5 PDF, kurs-5 expectations, the owner's directives
-> (2026-08-17), a fresh repo survey, and **live API research run against all six providers on
-> 2026-08-17**. Facts below are tagged *verified* (seen in a live response) or *docs* (from
-> documentation — re-check at key signup).
+The migration starts from `trading-microservices`, removes synthetic/static market flows and
+rebuilds market data around real providers. Provider facts come from live probes performed on
+2026-08-17 or from provider documentation and are marked accordingly. Revalidate documented
+limits when registering production keys.
 
-Budget: the load-bearing anchor is the teacher's **~2-week scope** — "dobrze zaimplementować,
-przetestować, zrobić jakiś stres test" [kurs-5 00:04:52]. The next-session date (possibly
-Aug 31 — the transcript's own analysis flags that line as attribution-uncertain: "nie budować
-na tym niczego") is *not* load-bearing; phases sum to the two-week scope regardless. Phases 0–7
-= **~14–15 focused days** starting Mon Aug 17 (Phase 0's deep clean adds ~half a day) — zero
-slack; Phase 6 (polish) is the designated shock absorber. **§11 adds Phase 8** (hosted showcase
-on Railway + the technical load dashboard) — ~3–4 further days, targeted after the session; the
-strategy runner is **deferred to HW6 proper** (owner: "for now skip generator").
+The core sequence is budgeted at roughly 14–15 focused engineering days. Hosting and the
+technical load dashboard are a separate 3–4 day capability group. Automated strategy execution
+is deliberately deferred until the market-data, execution and operational foundations are
+complete.
 
 ---
 
@@ -39,22 +21,16 @@ strategy runner is **deferred to HW6 proper** (owner: "for now skip generator").
 **Mechanics.** GitHub cannot fork a repo into the same account. The correct move:
 `git clone --bare` the current repo → push to a new repository (full history preserved) → tag the
 old repo's final state (`pre-fork-final`) → add a one-paragraph pointer to its README
-("continued in <new-repo>") → **archive** the old repo. The old repo *is* the teacher's runnable
-synthetic demo, frozen forever; the new repo owes it nothing.
+("continued in <new-repo>") → **archive** the old repo. The archived repository remains the
+runnable synthetic baseline; the new repository contains only the real-data architecture.
 
-**Naming — decided: `trading-desk`** (owner, 2026-08-17). It names what the system actually is
+**Naming — `trading-desk`.** It names what the system actually is
 (a mini front-to-back desk: market data → ticket → blotter → books → risk) and reads
 professional on a portfolio.
 
-**What the fork buys.** The teacher's "keep the generator for the demo" advice [kurs-5 00:19:13]
-is now satisfied by the *old repo*, not by a runtime flag — so the new repo can be genuinely
-clean: no `SIMULATED` provider, no random flows, no dead demo machinery threaded through the
-provider abstraction. This retires v1's D1 compromise entirely. **The fork approach was
-acknowledged in-session** (verified verbatim, `kurs-5.txt:160-163`): to his generator advice
-Jakub replied "i tak se zforkuję pewne repo i zostawię właśnie do pokazania" [~00:19:33] and
-the teacher answered "Mhm, dobra, no bo później będę chciał to w jakiejś fajnej formie
-graficznej" [~00:19:43] — a mid-conversation acknowledgement, not a formal sign-off, so a
-one-line reconfirm when handing over the demo remains cheap insurance (§10 #6).
+**What the fork buys.** The archived repository preserves the synthetic baseline without a
+runtime compatibility flag. The real-data repository therefore needs no `SIMULATED` provider,
+random flow, or generator-specific branch threaded through the provider abstraction.
 
 ---
 
@@ -68,10 +44,10 @@ one-line reconfirm when handing over the demo remains cheap insurance (§10 #6).
 | Equity quote | `c/d/dp/h/l/o/pc/t` — last trade, unix seconds *(verified)* | `close` + `timestamp` (unix) + `last_quote_at` + `is_market_open` *(verified)* | `GLOBAL_QUOTE`: price/OHLC/volume, **date-only timestamp** *(verified)* |
 | Equity bid/ask | none | none | none |
 | FX | **premium only** *(docs)* | free (`EUR/USD` style) *(verified)* | free — `CURRENCY_EXCHANGE_RATE` has **real bid/ask + full datetime** *(verified)* |
-| Metals (XAU) | premium | demo-blocked — verify with real key | demo-blocked — verify with real key |
+| Metals (XAU) | premium | sandbox-blocked — verify with real key | sandbox-blocked — verify with real key |
 | Indices (^GSPC/SPX) | premium *(docs)* | limited | premium |
 | ETF (SPY) | free, real-time US *(docs)* | free | free (EOD grade) |
-| Batch | none | **`symbol=A,B,…` — one HTTP call, 1 credit/symbol** *(docs; demo can't test)* | none (bulk = premium) |
+| Batch | none | **`symbol=A,B,…` — one HTTP call, 1 credit/symbol** *(documentation; verify with a real key)* | none (bulk = premium) |
 | Symbol search | `/search` + full `/stock/symbol?exchange=US` directory, free | `symbol_search` — works **without a key** *(verified)* | `SYMBOL_SEARCH`, free *(verified)* |
 | Market open/closed | `/stock/market-status`, free *(docs)* | `is_market_open` on every quote *(verified)* | static hours in search metadata |
 | Error shape | proper `401`/`429` + `{"error": …}` *(verified 401)* | **HTTP 200** + `{"code":429,"status":"error"}` *(verified shape)* | **HTTP 200** + `"Information"`/`"Note"` key *(verified)* |
@@ -144,8 +120,8 @@ unchanged.
 
 **D1 (revised) — Fork, don't flag.** New repo per §1; delete simulator + random flows entirely.
 *Rejected:* v1's `SIMULATED`-provider-behind-a-flag — the fork made that compromise pointless,
-and carrying demo machinery through the provider abstraction taxes a "clean project". If an
-offline demo is ever needed, the honest future option is a *replay provider* that replays
+and carrying synthetic machinery through the provider abstraction taxes a clean project. If
+offline operation is ever needed, the honest future option is a *replay provider* that replays
 persisted real history (deterministic, no randomness) — noted, not scoped.
 
 **D2 (sharpened) — Provider frozen on the trade, with an exact provenance pointer.** `trades`
@@ -197,7 +173,7 @@ numbers.
   the domain-analysis centerpiece.
 - `PLN_NBP_BASE` — a second PLN curve: flat at the NBP reference rate (config-sourced — NBP
   publishes the rate but not via the API — clearly labeled a proxy). Two PLN curves make
-  **projection-vs-discount selection demonstrable on the PLN swap itself**, his home ground.
+  **projection-vs-discount selection demonstrable on the PLN swap itself**.
 - **The tenor dimension, honestly** (audit fix — his verbatim example was "wibor trzymiesięczny,
   wibor sześciomiesięczny… na swapie na złotówce" [00:05:45]): curve metadata gains an
   `index_tenor` label, IRS terms gain `floating_rate_index_tenor`, and validation matches the
@@ -209,7 +185,8 @@ numbers.
   thresholds). NBP gold is PLN per **gram**; XAU/USD is per troy ounce — the documented
   conversion (×31.1034768) is a nice cross-check detail.
 
-**D7 (concretized) — Scheduler = per-provider budget governor.** Token bucket at ~80% of the
+**D7 (concretized) — Scheduler = per-provider budget governor.** Token bucket at a configurable
+90% of the
 published budget; priority tiers (open-trade symbols + benchmark first, rest of watchlist
 second); provider cycles offset in time so the board refreshes rolling, not in synchronized
 bursts. Per provider: **Finnhub** round-robin — tier-1 ~15 s, tier-2 ~60 s, decaying to ~5 min
@@ -222,7 +199,7 @@ next window; OECD Poland checked weekly. `429`/limit bodies classify as `RATE_LI
 state + audit + cooldown), never as generic errors; `Retry-After` respected. Opening a ticket
 fires a targeted `POST /market-data/refresh?symbol=` within budget (Finnhub always, Twelve Data
 if headroom, Alpha Vantage only via an explicit button showing remaining budget).
-**Budget isolation is a rule, not an emergent property** (owner directive 2026-08-17): each
+**Budget isolation is a rule, not an emergent property:** each
 provider keeps its own ledger, and within a provider each asset-class feed keeps its own
 cadence — a scarce feed (Alpha Vantage equities at 25/day) never drags a rich one (Finnhub
 equities at 60/min) down to a defensive common denominator. Poor-availability feeds simply
@@ -276,9 +253,8 @@ yes — via the ETF proxy, because indices are premium on all three providers an
 (all alpha/beta needs) track the index. The estimator itself survives unchanged, as
 `decisions.md` bet it would.
 
-**D15 (new) — The curve chart stays hand-rolled SVG.** Extend the existing `Sparkline` approach
-into a small `CurveChart` (tenor axis, per-curve series, as-of + provider caption) — the repo's
-only viz primitive is hand-rolled inline SVG and `package.json` has zero chart dependencies;
+**D15 (new) — The curve chart stays hand-rolled SVG.** Build a small `CurveChart` (tenor axis,
+per-curve series, as-of + provider caption) — `package.json` has zero chart dependencies;
 consistency beats a library for one chart. *Rejected:* adding recharts/d3 for a single plot.
 
 **D16 (decided) — Naming & fork mechanics** as §1: bare-clone push, archive + pointer; the new
@@ -299,7 +275,7 @@ has no free FX anyway).
 **D24 (new) — Config is explained or it doesn't exist; code explains itself.** Every tunable is
 an env var whose line in `.env.example` carries a one-line rationale saying *why this value for
 this provider* — e.g. `ALPHA_VANTAGE_DAILY_BUDGET=20` (25/day free tier minus a 5-call
-manual-refresh reserve), `FINNHUB_TIER1_POLL_SECONDS=15` (60/min free tier at ~80% utilization
+manual-refresh reserve), `FINNHUB_TIER1_POLL_SECONDS=15` (60/min free tier below its safe utilization
 across a 25-symbol set), `TRADE_PRICE_TOLERANCE_PCT=1.0` (fills rejected beyond 1% of the seen
 price), `IDLE_PAUSE_MINUTES=12` (inside the 10–15 min window; above Railway's 10-min sleep
 threshold). `docs/configuration.md` mirrors the full table with per-profile defaults. The
@@ -307,17 +283,16 @@ counterpart rules: **code carries no comments** — it is written to be self-exp
 all rationale in `docs/`; the **README shrinks to only what a stranger needs** to run and test
 (the PDF's required sections, kept lean, linking into `docs/` for approaches and decisions);
 and **config controls in the UI live on technical views only** (SystemOverview/monitoring),
-never on business screens. One more consistency rule, straight from kurs-5 [00:32:14] ("lepiej
-prosić AI o spójną strukturę kodu, niż pomieszanie dziesięciu różnych patternów"): the six
-provider clients follow **one enforced module shape** — same base class, same
-client/normalizer pairing, same method names — so a reviewer who has read one has read them
-all.
+never on business screens. The six provider clients follow **one enforced module shape** —
+same base class, same
+client/normalizer pairing and same method names — so learning one provider path transfers to
+the others.
 
-**D25 (revised per owner, 2026-08-17) — Verification = scenario flows + scenario load tests;
+**D25 — Verification = scenario flows + scenario load tests;
 no unit-test suite.** The house convention stays: `scenarios/*.http` flows verify behavior
 end-to-end through the real system (rewritten for the provider world in Phase 7). The
-teacher's "zaimplementować, **przetestować**, stres test" [00:04:52] is answered by **scripted
-load scenarios** — small stdlib scripts (urllib + threads, no frameworks) injecting load at
+load layer uses **scripted scenarios** — small stdlib scripts (urllib + threads, no frameworks)
+injecting load at
 the system's internal seams, each with a measured result recorded in `performance.md`:
 
 - `load_ticket_storm` — N concurrent clients submitting open/close intents: queue depth,
@@ -330,8 +305,8 @@ the system's internal seams, each with a measured result recorded in `performanc
   write throttle provably doing its job.
 
 Provider APIs are never load-tested (their rate limits are contractual) — load enters behind
-the gateway. Every run records `docker stats` before/during/after: this *is* the teacher's
-stress test, systematized. *Rejected (owner):* a unit-test suite — the scenario harness
+the gateway. Every run records `docker stats` before/during/after. A unit-test suite remains
+out of scope because the scenario harness
 exercises the same logic through the real system instead.
 
 ---
@@ -380,10 +355,10 @@ app/
 
 ## 6. Phases
 
-Each phase ends demoable; its phase report feeds docs + finance-hub.
+Each phase ends with an executable acceptance check and updates the relevant feature guide.
 
 ### Phase 0 — Fork & deep clean *(~1.5–2 days)*
-Owner directive: this phase is **deep** — the fork must contain no rubbish, and simplification
+This phase is intentionally **deep** — the fork must contain no rubbish, and simplification
 by extraction is in scope, not just deletion.
 
 - New repo **`trading-desk`** (D16); old repo tagged, pointed, archived. Delete the §3
@@ -403,12 +378,11 @@ by extraction is in scope, not just deletion.
 - **README reset to the minimal runbook** (D24); approach/decision prose lives under `docs/`.
 - Verify metals capability on Twelve Data / Alpha Vantage with the real keys (decides
   XAUUSD's fate).
-- **Verify the preserved demo before archiving** (audit fix): fresh-clone the old repo at its
-  final tag, `docker compose up --build`, click through the demo — his "fajna forma graficzna"
-  [00:19:43] depends on that repo actually still booting for a stranger.
+- **Verify the preserved baseline before archiving**: fresh-clone the old repository at its
+  final tag, run `docker compose up --build`, and exercise its primary workflow.
 
-**Exit demo:** clean boot of `trading-desk` — no synthetic data anywhere, empty-but-honest UI,
-health green, and a repo a reviewer can read without tripping over leftovers.
+**Acceptance check:** clean boot of `trading-desk` — no synthetic data anywhere, empty-but-honest UI,
+health green, and a repository a developer can read without tripping over leftovers.
 
 ### Phase 1 — Contracts & schema *(~1 day)*
 `shared/`: normalized-quote + curve-point contracts, provider registry + capability matrix,
@@ -423,17 +397,15 @@ Start `docs/market-data.md` seeded with §2's fact sheets — the domain analysi
 (active set, token bucket, market-status awareness), board upsert + change-only history +
 provider-tagged SSE, endpoints (`/providers`, health, quotes, refresh), pricing cache keyed
 (provider, symbol), UI board shows provider + age from `provider_timestamp`.
-**Exit demo:** live AAPL on screen with honest age; a manual trade valued off Finnhub through
+**Acceptance check:** live AAPL on screen with honest age; a manual trade valued off Finnhub through
 the (provider, symbol) cache.
 
-### Phase 3 — Showcase checkpoint: watchlist, second provider, honest board
-Re-shaped 2026-08-19 (owner): Phase 3 is the last phase before the 2026-08-20 review and a
-~one-week pause, so its end state must stand alone as the show. Split: **3a** is the
-checkpoint built for the review; **3b** completes the breadth after the pause. Phases 4–7
-are unchanged in content and resume after 3b (~2026-08-27). Items marked *(ruling)* come
-from the Phase 2 review (owner, 2026-08-19).
+### Phase 3 — Watchlist, second provider and honest board
 
-**Phase 3a — the checkpoint *(by 2026-08-20)*, in demo-first build order:**
+Phase 3 is split by dependency. **3a** completes the core two-provider workflow end to end;
+**3b** adds provider breadth and pacing refinements after that path is stable.
+
+**Phase 3a — core multi-provider workflow:**
 1. **CLOSED freshness state** *(ruling; refined 2026-08-19: a first-class state, not a
    display remap)*: fifth state in `shared/freshness.py`, so `/quotes` and the UI classify
    identically and rows stay self-classifying (ticks and `/snapshot` rows gain the
@@ -451,16 +423,18 @@ from the Phase 2 review (owner, 2026-08-19).
    proves as probed, else per-symbol.
 4. **Provider ops card on System Overview** *(ruling)*: per-provider status, budget gauges,
    spend today, market session — reads `/providers`.
-5. **If time allows, else 3b**: sparkline seeded from `market_data_snapshots` via a history
-   endpoint, so a fresh tab shows the day's shape, not only ticks it witnessed *(ruling;
-   backfill from before recording started stays out of scope — Finnhub candles are premium,
-   Twelve Data history spends credits)*.
+5. **Intraday chart deliberately omitted**: `market_data_snapshots` is sparse application
+   observation history, not a complete market series. Finnhub candles require Premium
+   access and Twelve Data history alone would make provider rows asymmetric, so the board
+   shows a structured quote summary and a discrete selected-row observation tape instead of
+   drawing an incomplete trend.
 
-Demo fixtures: NVDA searched + added live; EURUSD and XAUUSD on Twelve Data with
+Validation fixtures: NVDA searched + added live; EURUSD and XAUUSD on Twelve Data with
 UNSUPPORTED under Finnhub — board display only, FX/commodity *trade valuation* stays out of
-scope until its branch is rewired. New doc: `docs/demo.md` — the 5-minute walkthrough
+scope until its branch is rewired. The validation workflow lives in
+`docs/validation-runbook.md`.
 (what to click, what to say, how to reset).
-**Exit demo:** search "NVDA", add it, watch two providers populate at their honest
+**Acceptance check:** search "NVDA", add it, watch two providers populate at their honest
 cadences; EURUSD/XAUUSD quote on Twelve Data while Finnhub's cells read UNSUPPORTED; with
 the US market closed the board reads CLOSED, not STALE; the System Overview card shows both
 budgets moving; kill the Twelve Data key → its rows degrade visibly, Finnhub unaffected.
@@ -469,9 +443,8 @@ budgets moving; kill the Twelve Data key → its rows degrade visibly, Finnhub u
 Alpha Vantage wired (EOD equities with grade chips telling the truth on the board; FX with
 real bid/ask; `"Information"`/`"Note"` 200-body error classification; the 25/day governor);
 governor stagger + remaining-budget pacing polish; `MAX_ACTIVE_SYMBOLS` cap enforcement
-(D4); per-symbol capability matrix cached on the watchlist row (D4); sparkline seed if it
-slipped 3a.
-**Exit demo:** Alpha Vantage's column reads "EOD (Tue)" honestly next to two live columns,
+(D4); per-symbol capability matrix cached on the watchlist row (D4).
+**Acceptance check:** Alpha Vantage's column reads "EOD (Tue)" honestly next to two live columns,
 and its 25/day budget visibly paces itself on the ops card.
 
 ### Phase 4 — Trading flow refactor *(~2 days)*
@@ -480,7 +453,7 @@ provider radio, STALE ack flow, targeted-refresh button. trade-action: D12 serve
 execution (freshness gate, side-aware price, tolerance, snapshot FK freeze, slippage record);
 close path identical. Valuations stamped with provider; blotter/trades views gain the provider
 column.
-**Exit demo:** the PDF's ticket scenario end-to-end; the trade's PnL provably moves only with
+**Acceptance check:** execute the provider-selection ticket scenario end-to-end; the trade's PnL moves only with
 its frozen provider.
 
 ### Phase 5 — Curves & multi-curve pricing *(~2.5 days)*
@@ -492,7 +465,7 @@ pricing curve registry; `TERM_SCHEMAS` gains `settlement_currency` / `discount_c
 (projection curve's declared `index_tenor` must match the leg) — both reject with readable
 reasons; both PLN curves (composite + NBP-base proxy) + the write-up; per-currency PnL
 subtotals (D10); a curve-selection scenario flow lands in `scenarios/` (D25).
-**Exit demo:** the teacher's scenario, honestly delivered — a PLN swap prices with a *chosen*
+**Acceptance check:** a PLN swap prices with a *chosen*
 projection curve (two PLN curves to choose from) and is rejected when pointed at
 `USD_TREASURY`; EUR AAA vs ALL selectable; the tenor mechanism demonstrated in schema and
 validation, with the write-up stating why free data can't supply WIBOR 3M/6M curves
@@ -504,24 +477,21 @@ audit story link); valuation-blocked honest UI state + audit; alpha/beta flipped
 SPY@Finnhub; board best-quote badge + bps disagreement (D13); audit-event completeness pass
 against the PDF's list. *(Shock absorber: everything here degrades gracefully if time runs
 out.)*
-**Exit demo:** click any trade → "why this price, from whom, when, what did the provider
-actually send" without leaving the screen.
+**Acceptance check:** click any trade and trace the price, provider, timestamp and original
+provider payload without leaving the screen.
 
 ### Phase 7 — Hardening & documentation *(~1.5 days)*
 D8 Decimal conversion + telescoping re-verification; idempotency (duplicate poll → zero
 duplicate rows) + restart warm-start; **the D25 scenario load tests** (ticket storm, SSE
 fan-out, active-board soak, valuation soak) with `docker stats` CPU/RSS per container
-recorded into `performance.md` — the teacher's stress test, systematized; README per the PDF's
-section list
+recorded into `performance.md`; README covers the required operational and domain sections
 (per-provider endpoint docs from §2, D11 price-basis policy, D3 STALE rationale argued from
 market hours, keys how-to, run + test); scenarios refreshed (delete `full-flow.http`, add
-provider/watchlist/ticket flows); decisions register updated (D1–D25); defense-prep notes:
-market-index answer, log security, **write queueing including the audit he prescribed** —
-scan the existing 3-day log corpus for warnings/errors evidencing write contention
-[00:35:00] and record what was (or wasn't) found — and the **Decimal audit with the argued
-Black–Scholes boundary**: why `erf`/`log`/`sqrt` stay float, error-magnitude vs the Decimal
-quantization at the boundary, and the fact that every money leg is Decimal — the prepared
-answer to "Nie korzystaliśmy z floatów" [00:52:47].
+provider/watchlist/ticket flows); decisions register updated (D1–D25); operational analysis
+scans the existing log corpus for warnings/errors evidencing write contention and records the
+result; the numerical analysis documents the **Black–Scholes Decimal boundary**: why
+`erf`/`log`/`sqrt` stay float, error magnitude versus the Decimal
+quantization at the boundary, and the fact that every money leg remains Decimal.
 
 ---
 
@@ -529,7 +499,7 @@ answer to "Nie korzystaliśmy z floatów" [00:52:47].
 
 | View | Keeps | Changes |
 | --- | --- | --- |
-| MarketData | two-table layout, DataTable/MarketCell machinery, sparklines | instruments table becomes the **watchlist board**: search+add, per-provider expandable rows (or provider columns), mid headline + basis tag, grade/age chips, CLOSED badge, UNSUPPORTED cells; curve section gains **CurveChart** + inspector with as-of + provider |
+| MarketData | two-table layout, DataTable/MarketCell machinery | instruments table becomes the **watchlist board**: search+add, per-provider expandable rows (or provider columns), mid headline + basis tag, grade/age chips, CLOSED badge, UNSUPPORTED cells; curve section gains **CurveChart** + inspector with as-of + provider |
 | Trades / NewTradePanel | form flow, TERM_SCHEMAS-driven fields, validation UX | ticket v2: provider comparison row + radio, side-aware price highlight (BUY highlights ask), STALE ack, refresh button, slippage shown post-fill |
 | TradeDetail (panel) | layout | + provenance block (D2/D12 fields, raw-payload drill) |
 | Valuations / Blotter views | tables, filters | + provider column; valuation rows show market_data_timestamp |
@@ -544,14 +514,14 @@ form (pills/badges) not prose. Everything else stays the existing clean table la
 
 ---
 
-## 8. Portfolio angle — v2 delta
+## 8. Engineering properties
 
-All nine v1 ideas survive; the research strengthened these:
+The design intentionally preserves these technically important properties:
 
 1. **Provenance drill** now lands on an exact FK (`entry_snapshot_id` → raw payload) — trade →
    quote → raw provider JSON in one join.
 2. **Slippage as a first-class record** (seen vs executed, D12) — real order-flow semantics no
-   other homework will have.
+   that distinguishes this system from a basic CRUD trading exercise.
 3. **Rate limits as visible ops** — now with real numbers (60/min vs 800/day vs 25/day) and a
    RATE_LIMITED state machine.
 4. **Cross-official validation** — ECB×NBP FX cross agreed to <0.3% in live probes; NBP
@@ -568,23 +538,7 @@ an instruments table, backtesting (HW6's opening), the replay provider (noted on
 
 ---
 
-## 9. finance-hub
-
-v1 §6 stands unchanged (bookkeeping now; M38/M40 per wave plan; evidence updates as phases
-land; defense prep). v2 adds only:
-
-- The §2 fact sheets are ready evidence for the market-data owner pages (provenance,
-  staleness, reference-data modules) — cite the probe date.
-- The 200-with-error-body pattern (AV/TD) is a concrete exhibit for the error-handling module
-  (M10): status codes are not the error contract.
-- Once the fork lands, update hub notes that point at `trading-microservices` paths to the new
-  repo name.
-
----
-
-## 10. Review outcomes (owner, 2026-08-17)
-
-Resolved:
+## 9. Locked implementation decisions
 
 1. **Repo name** → **`trading-desk`** (D16).
 2. **`MAX_ACTIVE_SYMBOLS`** → **25** to start; adding beyond the cap blocks with an
@@ -594,60 +548,29 @@ Resolved:
 4. **Twelve Data daily ledger** → as recommended (~60% RTH / 40% off-hours).
 5. **XAUUSD** → as recommended (keep if a real free key serves metals, else
    NBP-gold-reference only).
-7. **BusinessOverview desk home** → yes, as the Phase 6 stretch — with config controls kept on
+6. **BusinessOverview desk home** → yes, as the Phase 6 stretch — with config controls kept on
    technical views only (D24).
-
-Still open (downgraded after the recording-5 audit):
-
-6. **Teacher one-liner** on D1 — the fork approach was **acknowledged in-session**
-   (`kurs-5.txt:160-163`: Jakub's "i tak se zforkuję pewne repo i zostawię do pokazania" →
-   teacher's "Mhm, dobra…"), so this is no longer a deviation pending approval, just a
-   mid-conversation nod worth one reconfirming sentence when handing over the demo link.
 
 ---
 
-## 11. Addendum (2026-08-17) — Phase 8: hosted showcase, smart trades, load dashboard
+## 10. Hosted operation, strategies and load visibility
 
-Added on the owner's directive. Grounded in three new evidence sets: a full-transcript re-scan
-(kurs-1…5), live measurement of the running local stack, and Railway research **plus the actual
-account state checked in the browser**.
+This capability group is based on measurements from the running local stack and Railway
+platform constraints checked on 2026-08-17.
 
-### 11.1 Why this phase is teacher-aligned (the re-scan verdict)
+### 10.1 Operational requirements
 
-This isn't garnish — the teacher has *already asked for most of it*:
+- Keep hosted cost bounded through explicit resource limits, idle suspension and predictable
+  provider polling.
+- Prevent unbounded database and log growth through write throttling, retention and capacity
+  gauges.
+- Expose RAM, CPU, thread, queue, stream and database usage through an overview with tabular
+  drill-down and log navigation.
+- Keep automated investment strategies separate from random trade generation and defer them
+  until the real-data execution path is stable.
+- Put every non-local deployment behind authentication and expose only one public gateway.
 
-- **He plans to host student demos himself, cheaply**: "postaram się znaleźć jakiś tani sposób
-  uruchamiania tych aplikacji, żeby nie zbankrutować siebie i chłopaków" [kurs-4 00:31:54] —
-  followed by "to musimy popracować nad optymalizacją projektów" and the striking idea:
-  **"Może podam te parametry kontenera, żeby ludzie sobie ocenili jak zoptymalizowane jest te
-  rozwiązania"** [00:32:24] — constrained containers as a public quality signal. A self-hosted,
-  resource-capped deployment is a direct answer.
-- **His stated blockers for keeping apps standing** are cost and disk-fill upkeep: "nie chcemy
-  płacić za hosting tony wirtualek… i cały czas dbać o to, żeby się nie zapełniło"
-  [kurs-2 01:07:54]. Auto-sleep + data ceilings remove exactly those two.
-- **The technical dashboard is his personal pattern**: "ja często lubię robić metryki w takich
-  dashboardach technicznych z informacją jaki jest przydzielony rozmiar bazy danych, jaki jest
-  stopień wykorzystania" [kurs-1 00:08:55]; he asked the monitoring view for "ile mamy
-  przydzielonego RAMu, jaki jest priorytet na procesorze" [kurs-1 00:15:29]; and his dashboard
-  formula is "wizualny dashboard + szczegółowe widoki tabularyczne + enriched behavior na
-  kliknięciu" [kurs-1 00:16:35]. The HW5 profiling ask [kurs-5 00:16:37/00:17:21] makes it live.
-- **The horror story we already reproduced**: "niektórzy zapominają wyłączyć dokera i mają
-  postgresa 50 GB zapchanego logami" [kurs-2 00:50:28]. Our own measurement (below) is that
-  story in miniature — and the ceilings are the fix.
-- **Smart trades = his HW6, verbatim**: "praca domowa nr 6 — proste strategie inwestycyjne…
-  będziemy symulowali zawieranie transakcji w oparciu o prawdziwe dane i analizowali, jak
-  zachowuje się nasz portfel" [kurs-5 00:07:01]; algorithms he named: "moving average, trend
-  following" [kurs-4 00:16:17], the fair-value-vs-market divergence signal [kurs-3 00:12:42];
-  benchmark question: "czy udało nam się S&P 500 pobić" [kurs-4 00:16:29]; "matematyki ciężkiej
-  nie będzie" [kurs-4 00:16:41]. (Attribution corrected by the audit: his "wyłączyłbym wtedy
-  ten generator" [kurs-5 00:07:17] is about the *HW6 strategies stage*, conditional — it is
-  **not** a license for deleting the generator at HW5. The actual license for the fork is the
-  in-session exchange at 00:19:33–43, cited in §1.)
-- **Off-localhost requires access control**: "taki system musi w jakiś sposób autoryzować ten
-  dostęp; lokalnie to jest trochę prostsze" [kurs-3 00:14:51] — so the hosted demo ships behind
-  an auth gate from day one.
-
-### 11.2 Measured reality (local stack, 3 days uptime, 2026-08-17)
+### 10.2 Measured local baseline (3 days uptime, 2026-08-17)
 
 | Container | CPU | RAM |
 | --- | --- | --- |
@@ -663,7 +586,7 @@ genuinely ~0.8–1.0 GB once the frontend is a static build and the DB is kept s
 **valuation write throttle and retention are existential for hosting**, not polish — at local
 rates the DB would blow through Railway's volume allowance in about a day.
 
-### 11.3 Railway: facts and the account verdict
+### 10.3 Railway constraints and cost model
 
 Account (checked in the browser, Aug 17): **Hobby plan** — $5/mo including $5 usage; the
 dashboard states the plan allows up to 8 GB RAM / 8 vCPU / 100 GB shared disk (current docs
@@ -711,28 +634,24 @@ Platform facts (official docs, verified 2026-08-17):
 Verdict: **Hobby suffices** — capacity is a non-issue at ~1 GB; the question is only tolerated
 overage. Expect roughly **$3–5/month extra** with sleeping working, ~$10–12 extra without.
 
-### 11.4 Decisions D17–D22
+### 10.4 Decisions D17–D22
 
-**D17 (deferred) — Smart demo trades = a thin strategy runner, not a random generator.**
-*Owner (2026-08-17): "for now skip generator" — this decision is recorded as the agreed design
-but its build moves to HW6 proper; only the deterministic `scenarios/demo.http` presentation
-storyline stays in Phase 8.*
-A new `strategy-service` (the HW6 opening) runs the teacher's own named
+**D17 (deferred) — Automated trades use a thin strategy runner, not a random generator.**
+A future `strategy-service` runs explicit
 signals on watchlist symbols: **SMA-crossover / trend-following** on Finnhub equities, and
 **fair-value-vs-market divergence** (pricing-service fair value vs market quote) where curves
 price the instrument. Small fixed notional, paced within API budgets, trades into a dedicated
 `STRATEGY` book, **every intent carries its signal rationale in the frozen terms** ("SMA(10/30)
-crossed up @ 189.20, FINNHUB") — provenance meets strategy. Closes on opposite signal; on/off +
-parameters in the UI (the familiar demo control, reborn). Alpha/beta vs SPY then answers his
-literal question — "did we beat the S&P 500". *Also:* a deterministic `scenarios/demo.http`
-storyline for live presentations. *Rejected:* resurrecting random flows (he himself said the
-generator switches off at this stage [kurs-5 00:07:17]).
+crossed up @ 189.20, FINNHUB") — provenance meets strategy. Closes occur on the opposite
+signal; on/off state and parameters remain visible in the technical UI. Alpha/beta versus SPY
+measures whether the strategy outperformed its benchmark. Random trade generation stays
+removed because it provides no explainable signal or execution provenance.
 
 **D18 (new) — One `DEPLOY_PROFILE`, two honest modes.**
 `local` (today's behavior) vs `hosted`: log level WARNING with structlog **writing JSON to
 stdout** (Railway's only capture) while each service also keeps a bounded **in-memory ring of
 recent log lines exposed via a `/logs/tail` endpoint — monitoring polls that instead of tailing
-files**, preserving the log panel the teacher praised with the same bounded-buffer semantics;
+files**, preserving the existing bounded-buffer semantics;
 relaxed poll cadences (tier-1 ~60 s); SSE heartbeats ~25 s; frontend poll intervals widened;
 IPv6 (`::`) binding + `PORT` contract everywhere (harmless locally); `python:slim` multi-stage
 images (~1.7 GB → ~200 MB, faster deploys). *Rejected:* a Railway-only fork of the logging
@@ -758,7 +677,7 @@ SSE), the DB keeps a sampled history — kills the 38 M-row failure mode at the 
 (2) **Nightly retention sweep as a Railway cron service** (quotes history, valuations, audit
 beyond their windows; VACUUM; clean exit).
 (3) **DB gauge on the dashboard**: allocated vs used volume, per-table sizes, days-to-full
-projection with a warning threshold — the teacher's exact wish [kurs-1 00:08:55, 00:09:07].
+projection and a warning threshold.
 (4) **Admin reset**: a token-guarded `POST /admin/reset-demo-data` truncating market history +
 valuations + audit (books/trades kept; option `full=true` reseeds everything) — the user's
 "reset full data" ask, safe behind auth.
@@ -767,21 +686,21 @@ valuations + audit (books/trades kept; option `full=true` reseeds everything) �
 Each service self-reports via stdlib only (`resource.getrusage`, `os.times` deltas,
 `threading.active_count`): RSS, CPU%, threads, uptime, plus domain gauges (SSE clients, queue
 depth, cache sizes, budget spend, RATE_LIMITED/IDLE states). Monitoring aggregates into
-`/system-load`; a new **System load** panel on SystemOverview renders it in his formula —
-visual overview, tabular deep-dive, click-through to the service's logs. Local `docker stats`
+`/system-load`; a new **System load** panel on SystemOverview provides a visual overview,
+tabular deep-dive and click-through to the service's logs. Local `docker stats`
 comparison goes into `performance.md` (Phase 7's stress-test numbers become this panel's
 baseline). *Rejected:* psutil (dependency for what stdlib provides) and Docker-API scraping
 (unavailable on Railway; self-reporting works in both worlds).
 
 **D22 (new) — Railway topology: one public door, everything else private.**
-Services: Caddy gateway (static Vite build + reverse proxy to private services + **basic-auth**
-— the off-localhost authorization he required), 8 backend services private-only (IPv6 mesh),
+Services: Caddy gateway (static Vite build + reverse proxy to private services + **basic-auth**),
+8 backend services private-only (IPv6 mesh),
 managed Postgres + volume, cron sweep service, preDeploy migration on market-data-service.
 EU West region. Egress ≈ one gateway's worth; internal traffic free. The old repo stays
 local-only; the fork deploys. *Rejected:* exposing each service publicly (8 auth surfaces, more
 egress, contradicts his security stance).
 
-### 11.5 Phase 8 plan (~3–4 days, after the Aug 31 session; 8.5 can land with Phase 7)
+### 10.5 Hosted-operation sequence (~3–4 days)
 
 - **8.1 Portability** *(~1 d)* — IPv6 bind + `PORT`, boot-time retries, `DEPLOY_PROFILE`,
   stdout JSON logs + `/logs/tail` ring, SSE heartbeats, slim images. All local-safe; lands in
@@ -794,52 +713,18 @@ egress, contradicts his security stance).
 - **8.4 Idle & ceilings** *(~1 d)* — D19 quiesce/wake, D20 throttle + sweep + gauge + admin
   reset; observe an actual sleep/wake cycle in Railway metrics.
 - **8.5 Load dashboard** *(~1 d)* — D21 end-to-end; baseline numbers into `performance.md`.
-- ~~**8.6 Strategy runner v0**~~ — **deferred to HW6** (owner: "for now skip generator");
-  D17 records the agreed design. The `scenarios/demo.http` presentation storyline stays.
-- **Exit demo:** send the teacher a link. The app wakes from sleep in front of him, the load
-  dashboard shows each container's RAM/CPU and the DB gauge live — and the monthly bill fits a
-  hobby plan.
+- ~~**8.6 Strategy runner v0**~~ — deferred until the hosted real-data system is stable; D17
+  records the intended design.
+- **Acceptance check:** the application wakes from sleep through the public gateway, the load
+  dashboard shows each container's RAM/CPU and the live database gauge, and measured monthly
+  usage fits the selected plan.
 
-### 11.6 New open questions
+### 10.6 Open deployment decisions
 
 8. **`adorable-cat`**: keep running (bill ~$8–10 with sleep) or pause/remove it (~$5–7)?
    It currently consumes the entire included credit.
-9. **Timing**: host after the Aug 31 session (recommended — Phases 0–7 have zero slack), or
-   pull 8.1–8.3 forward to demo a live link *at* the session?
-10. **Access**: is a single shared basic-auth credential acceptable for the hosted demo
-    (teacher + recruiters), or do you want per-person links?
+9. **Timing**: provision hosting after the local hardening sequence, or bring gateway and
+   provisioning work forward?
+10. **Access**: use one shared basic-auth credential or issue per-user credentials?
 11. **Serverless on Hobby**: if the toggle turns out to be plan-gated, accept ~$10–12/mo
-    overage always-on, or fall back to manually pausing the Railway project between demos?
-
----
-
-## 12. Recording-5 compliance audit (2026-08-17)
-
-The full raw transcript (`kurs-5.txt` + `.srt`) was swept for every instruction, and the plan
-adversarially cross-checked against it. Verdict: **compliant after the fixes below** — the
-majority of his instructions (real-data integration, NBP among sources, domain analysis over
-blind integration, UI reflection of imported data, projection/discount selection, the
-currency-consistency rule, import↔create coupling, Docker-level profiling, stress test,
-shared-solution consistency, HW6 deferral) were already anchored. The audit surfaced seven
-findings, all now folded in:
-
-1. **Tenor dimension on curves** (his verbatim WIBOR 3M/6M example) — was absent; now in D6
-   (`index_tenor` metadata, `floating_rate_index_tenor` term, tenor guard) plus a second PLN
-   curve (`PLN_NBP_BASE`) so projection-vs-discount is demonstrable on the PLN swap itself,
-   with the licensed-data limitation stated instead of silently narrowed.
-2. **"Przetestować" had no anchor** — D25 (as revised by the owner: no unit-test suite):
-   `scenarios/*.http` flows plus four scripted scenario load tests run in Phase 7 with
-   recorded `docker stats`.
-3. **Generator deletion vs "dostawić nowy mikroserwis"** — resolved by the verified in-session
-   exchange (§1); the plan no longer cites the HW6-stage "wyłączyłbym generator" remark as HW5
-   license (§11.1 corrected).
-4. **His prescribed write-contention log audit** [00:35:00] — now an explicit Phase 7 task on
-   the existing 3-day log corpus.
-5. **The Black–Scholes float boundary** vs "Nie korzystaliśmy z floatów" — the argued
-   justification is now a scheduled defense-prep deliverable, not an implicit stance.
-6. **AI-code consistency** [00:32:14] — one enforced module shape for all six provider clients
-   added to D24.
-7. **Aug 31 was structurally load-bearing** despite the transcript flagging that line as
-   attribution-uncertain — the budget now anchors on his ~2-week scope [00:04:52], with the
-   date explicitly non-load-bearing; and Phase 0 now verifies the archived demo actually boots
-   from a fresh clone before archiving (his "fajna forma graficzna" depends on it).
+    overage always-on, or fall back to manually pausing the Railway project when not in use?

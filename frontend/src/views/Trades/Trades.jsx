@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useValuationFeedContext } from '../../providers/feedContext.js'
+import { useMarketFeedContext, useValuationFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { STORAGE_KEYS } from '../../config/storage.js'
 import { usePolling } from '../../hooks/usePolling.js'
@@ -58,6 +58,7 @@ function emptyTableMessage({ snapshot, rows, lifecycleRows, lifecycle }) {
 
 export default function Trades() {
   const { valuations, status, seedStatus } = useValuationFeedContext()
+  const { instruments } = useMarketFeedContext()
   const { activePanel, openPanel, closePanel } = usePanelCoordinator()
   const { now } = useElapsedTime()
   const snapshot = usePolling(
@@ -104,7 +105,7 @@ export default function Trades() {
     () => tradesFromSnapshot(snapshot.data?.trades, bookNames),
     [snapshot.data?.trades, bookNames],
   )
-  const rows = tradeRowsOf(trades, valuations, now)
+  const rows = tradeRowsOf(trades, valuations, now, instruments)
   const summary = summarizeTradeRows(rows)
   const isBothLifecycles = lifecycle === 'BOTH'
   const lifecycleRows = isBothLifecycles ? rows : rows.filter((row) => row.lifecycle === lifecycle)
