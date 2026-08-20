@@ -302,7 +302,9 @@ sparse changes observed while this application was running, not a complete marke
 connecting those points or inserting previous close creates movement through unobserved
 time. Finnhub stock candles require Premium access, while using Twelve Data history only for
 one provider would make the comparison asymmetric. The UI therefore keeps the truthful
-summary: Last, Previous close/Change today, market state and quote age.
+summary: Last, change from the immediately previous accepted provider quote, Previous
+close/Change today, market state and quote age. The Last value briefly pulses on every
+accepted update, including a neutral pulse for an unchanged quote.
 
 ### Endpoints
 

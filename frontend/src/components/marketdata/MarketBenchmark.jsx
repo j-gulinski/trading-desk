@@ -23,7 +23,7 @@ function BenchmarkStat({ label, value, className }) {
 
 export default function MarketBenchmark({ row }) {
   if (!row) return null
-  const { instrument, todayChange } = row
+  const { instrument, tickChange, todayChange } = row
   const percent = formatPercentDelta(todayChange.percent)
 
   return (
@@ -46,6 +46,11 @@ export default function MarketBenchmark({ row }) {
           label="CHANGE TODAY"
           className={`delta delta--${row.todayDirection}`}
           value={`${formatDelta(instrument, todayChange.delta)}${percent ? ` (${percent})` : ''}`}
+        />
+        <BenchmarkStat
+          label="LAST TICK"
+          className={`delta delta--${row.tickDirection}`}
+          value={formatDelta(instrument, tickChange.delta)}
         />
         <BenchmarkStat label="QUOTE AGE" value={formatAge(row.providerAgeMs)} />
       </dl>

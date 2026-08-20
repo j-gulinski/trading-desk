@@ -49,9 +49,41 @@
   gap: var(--sp-2);
 }
 
+@keyframes market-price-tick-pos {
+  from { background: rgba(var(--pos-rgb), 0.24); }
+  to { background: transparent; }
+}
+@keyframes market-price-tick-neg {
+  from { background: rgba(var(--neg-rgb), 0.24); }
+  to { background: transparent; }
+}
+@keyframes market-price-tick-flat {
+  from { background: rgba(148, 163, 184, 0.16); }
+  to { background: transparent; }
+}
+.market-price-tick {
+  display: inline-block;
+  margin: -3px -5px;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  animation: market-price-tick-flat 0.6s ease-out;
+}
+.market-price-tick--pos {
+  animation-name: market-price-tick-pos;
+}
+.market-price-tick--neg {
+  animation-name: market-price-tick-neg;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .market-price-tick {
+    animation: none;
+  }
+}
+
 .market-benchmark {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(520px, 2fr) auto;
+  grid-template-columns: minmax(150px, 1fr) minmax(650px, 2fr) auto;
   align-items: center;
   gap: var(--sp-4);
   margin-bottom: var(--sp-4);
@@ -85,7 +117,7 @@
 }
 .market-benchmark__stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--sp-4);
   margin: 0;
 

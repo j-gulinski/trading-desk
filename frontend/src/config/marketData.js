@@ -55,6 +55,13 @@ export const MARKET_COLUMNS = [
     numeric: true,
   },
   {
+    id: 'tickChange',
+    label: 'Change',
+    sortable: false,
+    numeric: true,
+    headerNote: 'last tick',
+  },
+  {
     id: 'todayChange',
     label: 'Change',
     sortable: true,

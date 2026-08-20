@@ -186,6 +186,8 @@ agreement.
 
 Change today compares the latest normalized `mid` with the provider's `previous_close`.
 The board presents that comparison directly alongside Last, market state and quote age.
+Last tick is a separate, discrete comparison with the immediately previous accepted quote;
+it does not imply any values between provider responses.
 
 Snapshots remain an audit/provenance record of price changes observed while the service was
 running. They are not rendered as a trend: their coverage begins when ingestion starts and

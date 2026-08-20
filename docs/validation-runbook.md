@@ -16,7 +16,7 @@ open at http://localhost:3000.
 ### 1. Compare market quotes
 
 Open Market Data. The two NVDA rows are separate feeds for the same asset. Compare Last,
-Change, quote age and provider timestamps. Use the provider filter to isolate either feed.
+Last tick, Change today, quote age and provider timestamps. Use the provider filter to isolate either feed.
 The benchmark strip separately summarizes Last, Previous close, Change today and quote age.
 
 Interpret quote state as follows:

@@ -28,13 +28,25 @@ function ChangeValue({ instrument, change }) {
   )
 }
 
+function LastPrice({ instrument }) {
+  const hasPreviousTick = Number.isFinite(instrument.previousValue)
+  const className = hasPreviousTick
+    ? `market-price-tick market-price-tick--${instrument.lastDirection}`
+    : undefined
+  return (
+    <span key={instrument.eventTimeMs ?? instrument.polledAtMs} className={className}>
+      {formatUnitPrice(instrument.last, instrument.assetClass)}
+    </span>
+  )
+}
+
 export default function MarketCell({
   column,
   row,
   onRemove,
   busyKey,
 }) {
-  const { instrument, todayChange } = row
+  const { instrument, tickChange, todayChange } = row
 
   switch (column.id) {
     case 'symbol':
@@ -49,7 +61,9 @@ export default function MarketCell({
         </span>
       )
     case 'last':
-      return formatUnitPrice(instrument.last, instrument.assetClass)
+      return <LastPrice instrument={instrument} />
+    case 'tickChange':
+      return formatDelta(instrument, tickChange.delta)
     case 'todayChange':
       return <ChangeValue instrument={instrument} change={todayChange} />
     case 'age':

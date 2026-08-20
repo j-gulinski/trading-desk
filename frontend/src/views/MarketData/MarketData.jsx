@@ -241,7 +241,7 @@ export default function MarketData() {
             sortDisabledReason={sortDisabledReason}
             onRemove={handleRemove}
             busyKey={watchlist.busyKey}
-            caption="Watchlist quotes by provider with last price, daily change, freshness, and quote time"
+            caption="Watchlist quotes by provider with last price, last-tick change, daily change, freshness, and quote time"
           />
         ) : (
           <EmptyState message={boardEmptyMessage()} />

@@ -244,6 +244,18 @@ function todayChangeOf(instrument) {
   return { delta, percent }
 }
 
+function tickChangeOf(instrument) {
+  const previous = instrument.previousValue
+  const latest = instrument.value
+  if (!Number.isFinite(previous) || !Number.isFinite(latest)) {
+    return { delta: null, percent: null }
+  }
+
+  const delta = latest - previous
+  const percent = previous === 0 ? null : (delta / Math.abs(previous)) * 100
+  return { delta, percent }
+}
+
 function providerAgeMs(instrument, now) {
   if (!Number.isFinite(instrument.providerTimestampMs)) return null
   return Math.max(0, now - instrument.providerTimestampMs)
@@ -271,11 +283,14 @@ export function freshnessOf(instrument, now) {
 export function marketRowsOf(instruments, now) {
   return instruments.map((instrument) => {
     const todayChange = todayChangeOf(instrument)
+    const tickChange = tickChangeOf(instrument)
     const state = freshnessOf(instrument, now)
     return {
       instrument,
       todayChange,
       todayDirection: directionOf(todayChange.delta),
+      tickChange,
+      tickDirection: directionOf(tickChange.delta),
       providerAgeMs: providerAgeMs(instrument, now),
       state,
       live: state === 'LIVE',
