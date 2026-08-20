@@ -20,20 +20,9 @@ VALIDATED_ACTIONS = {
 
 QUEUED_ACTIONS = (*VALIDATED_ACTIONS, "REASSIGN_TRADES", "CLOSE_ALL")
 
-
-def route(*paths, **kwargs):
-    def decorate(handler):
-        for path in paths:
-            app.route(path, **kwargs)(handler)
-        return handler
-    return decorate
-
-
 def _normalize(body):
     intent = dict(body or {})
     intent.setdefault("action_type", "OPEN_TRADE")
-    if "client_seen_price" not in intent and intent.get("reference_price") is not None:
-        intent["client_seen_price"] = str(intent.pop("reference_price"))
     return intent
 
 
@@ -96,7 +85,7 @@ def term_schemas():
     return _json(public_term_schemas(underlying_choices))
 
 
-@route("/trade-actions", "/trades", method="POST")
+@app.route("/trade-actions", method="POST")
 def trade_action():
     intent = _normalize(request.json)
     error = _rejection(intent)

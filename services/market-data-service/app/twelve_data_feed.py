@@ -1,6 +1,5 @@
 import threading
 import time
-from datetime import timezone
 
 from shared.functions import utcnow
 from shared.logging_config import get_logger
@@ -18,6 +17,7 @@ from app.config import (
     ACTIVE_SET_REFRESH_SECONDS,
     AUTH_FAILURE_COOLDOWN_SECONDS,
     FRESHNESS_THRESHOLD_MULTIPLIER,
+    PROVIDER_ACTIVE_WINDOW_SECONDS,
     RATE_LIMIT_DEFAULT_COOLDOWN_SECONDS,
     SERVICE_NAME,
     TRANSIENT_ERROR_BACKOFF_SECONDS,
@@ -25,6 +25,8 @@ from app.config import (
     TWELVE_DATA_BUDGET_PER_MINUTE,
     TWELVE_DATA_DAILY_BUDGET,
     TWELVE_DATA_POLL_SECONDS,
+    TWELVE_DATA_PROVIDER_LIMIT_PER_DAY,
+    TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE,
 )
 from app.normalizer import normalize_twelve_data_quote
 from app.provider_runtime import ProviderRuntime
@@ -39,6 +41,8 @@ runtime = ProviderRuntime(
     TWELVE_DATA_BUDGET_PER_MINUTE,
     bool(TWELVE_DATA_API_KEY),
     daily_budget=TWELVE_DATA_DAILY_BUDGET,
+    provider_minute_limit=TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE,
+    provider_daily_limit=TWELVE_DATA_PROVIDER_LIMIT_PER_DAY,
 )
 _client = TwelveDataClient(TWELVE_DATA_API_KEY)
 _next_due = {}
@@ -49,7 +53,8 @@ _market_open = {}
 def paced_interval_seconds():
     symbols = max(1, len(runtime.pollable_entries()))
     return max(
-        TWELVE_DATA_POLL_SECONDS, round(86400 * symbols / TWELVE_DATA_DAILY_BUDGET)
+        TWELVE_DATA_POLL_SECONDS,
+        round(PROVIDER_ACTIVE_WINDOW_SECONDS * symbols / TWELVE_DATA_DAILY_BUDGET),
     )
 
 
@@ -78,12 +83,7 @@ def _record_market_open(symbol, payload):
 
 
 def _pacing_allows(credits_needed):
-    now = utcnow().astimezone(timezone.utc)
-    elapsed_fraction = (now.hour * 3600 + now.minute * 60 + now.second) / 86400
-    allowed_by_now = max(
-        TWELVE_DATA_DAILY_BUDGET * elapsed_fraction, TWELVE_DATA_BUDGET_PER_MINUTE
-    )
-    return runtime.ledger.credits_today() + credits_needed <= allowed_by_now
+    return runtime.ledger.credits_today() + credits_needed <= TWELVE_DATA_DAILY_BUDGET
 
 
 def _classifier(symbol):
@@ -192,6 +192,7 @@ def poll_loop():
         if runtime.cooldown_seconds_left() > 0:
             time.sleep(min(runtime.cooldown_seconds_left(), 5))
             continue
+        # reload the provider-specific slice of watchlist + positions + benchmark
         if not last_set_refresh or now - last_set_refresh >= ACTIVE_SET_REFRESH_SECONDS:
             try:
                 runtime.set_active(load_active_set())
@@ -206,6 +207,7 @@ def poll_loop():
              if _next_due.get(entry.symbol, 0) <= time.monotonic()),
             key=lambda entry: (entry.tier, entry.symbol),
         )
+        # poll due symbols in batches while both the minute and daily budgets allow
         for start in range(0, len(due), TWELVE_DATA_BUDGET_PER_MINUTE):
             chunk = due[start:start + TWELVE_DATA_BUDGET_PER_MINUTE]
             if runtime.cooldown_seconds_left() > 0 or not _pacing_allows(len(chunk)):
@@ -216,6 +218,7 @@ def poll_loop():
             interval = paced_interval_seconds()
             for entry in chunk:
                 _next_due[entry.symbol] = time.monotonic() + interval
+        # forget symbols that left this provider's active set
         _prune_next_due(pollable)
         time.sleep(1)
 
@@ -261,7 +264,8 @@ def poll_strategy():
     cadence = paced_interval_seconds()
     description = (
         f"batch of ≤{TWELVE_DATA_BUDGET_PER_MINUTE} every "
-        f"{cadence // 60} min · paced to {TWELVE_DATA_DAILY_BUDGET} credits/day"
+        f"{cadence // 60} min · {TWELVE_DATA_DAILY_BUDGET} credits over configured "
+        f"active window"
     )
     if not on_pace:
         description += " — holding for daily pace"

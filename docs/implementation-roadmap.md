@@ -185,7 +185,8 @@ numbers.
   thresholds). NBP gold is PLN per **gram**; XAU/USD is per troy ounce — the documented
   conversion (×31.1034768) is a nice cross-check detail.
 
-**D7 (concretized) — Scheduler = per-provider budget governor.** Token bucket at ~80% of the
+**D7 (concretized) — Scheduler = per-provider budget governor.** Token bucket at a configurable
+90% of the
 published budget; priority tiers (open-trade symbols + benchmark first, rest of watchlist
 second); provider cycles offset in time so the board refreshes rolling, not in synchronized
 bursts. Per provider: **Finnhub** round-robin — tier-1 ~15 s, tier-2 ~60 s, decaying to ~5 min
@@ -275,7 +276,7 @@ has no free FX anyway).
 **D24 (new) — Config is explained or it doesn't exist; code explains itself.** Every tunable is
 an env var whose line in `.env.example` carries a one-line rationale saying *why this value for
 this provider* — e.g. `ALPHA_VANTAGE_DAILY_BUDGET=20` (25/day free tier minus a 5-call
-manual-refresh reserve), `FINNHUB_TIER1_POLL_SECONDS=15` (60/min free tier at ~80% utilization
+manual-refresh reserve), `FINNHUB_TIER1_POLL_SECONDS=15` (60/min free tier below its safe utilization
 across a 25-symbol set), `TRADE_PRICE_TOLERANCE_PCT=1.0` (fills rejected beyond 1% of the seen
 price), `IDLE_PAUSE_MINUTES=12` (inside the 10–15 min window; above Railway's 10-min sleep
 threshold). `docs/configuration.md` mirrors the full table with per-profile defaults. The

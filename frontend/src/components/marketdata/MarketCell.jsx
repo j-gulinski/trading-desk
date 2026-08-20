@@ -29,7 +29,14 @@ function ChangeValue({ instrument, change }) {
   )
 }
 
-export default function MarketCell({ column, row, historyLabel, onRemove, busyKey }) {
+export default function MarketCell({
+  column,
+  row,
+  historyLabel,
+  onInspect,
+  onRemove,
+  busyKey,
+}) {
   const { instrument, todayChange } = row
 
   switch (column.id) {
@@ -44,16 +51,21 @@ export default function MarketCell({ column, row, historyLabel, onRemove, busyKe
           {instrument.assetClass}
         </span>
       )
-    case 'bid':
-      return formatUnitPrice(instrument.bid, instrument.assetClass)
-    case 'ask':
-      return formatUnitPrice(instrument.ask, instrument.assetClass)
     case 'last':
       return formatUnitPrice(instrument.last, instrument.assetClass)
     case 'todayChange':
       return <ChangeValue instrument={instrument} change={todayChange} />
     case 'trend':
-      return <Sparkline points={instrument.history} label={historyLabel} />
+      return (
+        <button
+          type="button"
+          className="market-trend-button"
+          title={`View ${instrument.symbol} intraday details`}
+          onClick={() => onInspect?.(row)}
+        >
+          <Sparkline points={instrument.history} label={historyLabel} />
+        </button>
+      )
     case 'age':
       return formatAge(row.providerAgeMs)
     case 'feed':

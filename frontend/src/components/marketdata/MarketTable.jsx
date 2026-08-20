@@ -35,6 +35,7 @@ export default function MarketTable({
   caption,
   historyLabel,
   sortDisabledReason,
+  onInspect,
   onRemove,
   busyKey,
 }) {
@@ -48,6 +49,7 @@ export default function MarketTable({
           column={column}
           row={row}
           historyLabel={historyLabel}
+          onInspect={onInspect}
           onRemove={onRemove}
           busyKey={busyKey}
         />

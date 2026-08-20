@@ -118,14 +118,18 @@ function ProviderCard({ provider, now }) {
         label="Rate limit"
         used={minuteUsed}
         capacity={budget.capacity ?? 0}
-        detail={`${budget.tokens_available ?? 0} of ${budget.capacity ?? 0} ${budgetUnit} available`}
+        detail={`${budget.tokens_available ?? 0} of ${budget.capacity ?? 0} safe ${budgetUnit} available${
+          budget.provider_minute_limit
+            ? ` · ${budget.usage_percent}% of ${budget.provider_minute_limit}/min`
+            : ''
+        }`}
       />
       {budget.daily_budget != null && (
         <BudgetGauge
           label="Credits today"
           used={budget.credits_today ?? 0}
           capacity={budget.daily_budget}
-          detail={`${formatNumber(budget.credits_today ?? 0)} counted · ${formatNumber(budget.daily_budget)}/day${
+          detail={`${formatNumber(budget.credits_today ?? 0)} counted · ${formatNumber(budget.daily_budget)} safe of ${formatNumber(budget.provider_daily_limit)}/day · ${budget.active_window_hours}h window${
             strategy.on_pace === false ? ' · ahead of pace' : ''
           }`}
         />

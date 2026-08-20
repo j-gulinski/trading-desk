@@ -5,7 +5,11 @@ from shared.audit import write_audit
 from shared.functions import get_iso_timestamp
 from shared.logging_config import get_logger
 from app.budget import DailyLedger, TokenBucket
-from app.config import SERVICE_NAME
+from app.config import (
+    PROVIDER_ACTIVE_WINDOW_HOURS,
+    PROVIDER_BUDGET_USAGE_PERCENT,
+    SERVICE_NAME,
+)
 
 log = get_logger(SERVICE_NAME)
 
@@ -13,11 +17,20 @@ DEGRADED_STATUSES = ("RATE_LIMITED", "AUTH_FAILED", "ERROR")
 
 
 class ProviderRuntime:
-    def __init__(self, provider, budget_per_minute, api_key_present, daily_budget=None):
+    def __init__(
+        self,
+        provider,
+        budget_per_minute,
+        api_key_present,
+        daily_budget=None,
+        provider_minute_limit=None,
+        provider_daily_limit=None,
+    ):
         self.provider = provider
         self.bucket = TokenBucket(budget_per_minute, budget_per_minute / 60)
-        self.ledger = DailyLedger(daily_budget)
+        self.ledger = DailyLedger(daily_budget, provider_daily_limit)
         self._budget_per_minute = budget_per_minute
+        self._provider_minute_limit = provider_minute_limit
         self._lock = threading.Lock()
         self._status = "STARTING" if api_key_present else "DISABLED"
         self._last_error = None if api_key_present else "API key is not set"
@@ -147,6 +160,9 @@ class ProviderRuntime:
             "budget": {
                 **self.bucket.state(),
                 "budget_per_minute": self._budget_per_minute,
+                "provider_minute_limit": self._provider_minute_limit,
+                "usage_percent": PROVIDER_BUDGET_USAGE_PERCENT,
+                "active_window_hours": PROVIDER_ACTIVE_WINDOW_HOURS,
                 **self.ledger.state(),
             },
             "active_symbols": active_symbols,

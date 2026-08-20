@@ -34,8 +34,9 @@ class TokenBucket:
 
 
 class DailyLedger:
-    def __init__(self, daily_budget=None):
+    def __init__(self, daily_budget=None, provider_limit=None):
         self._daily_budget = daily_budget
+        self._provider_limit = provider_limit
         self._day = utcnow().date()
         self._requests = 0
         self._credits = 0
@@ -66,4 +67,5 @@ class DailyLedger:
             if self._daily_budget is not None:
                 state["credits_today"] = self._credits
                 state["daily_budget"] = self._daily_budget
+                state["provider_daily_limit"] = self._provider_limit
             return state

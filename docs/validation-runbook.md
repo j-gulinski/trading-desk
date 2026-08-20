@@ -15,9 +15,9 @@ open at http://localhost:3000.
 
 ### 1. Compare market quotes
 
-Open Market Data. The two NVDA rows are separate feeds for the same asset. Compare Bid,
-Ask, Last, Change, quote age and the provider timestamps. Empty Bid or Ask fields mean the
-provider did not supply a spread; the Last value remains identifiable as Last.
+Open Market Data. The two NVDA rows are separate feeds for the same asset. Compare Last,
+Change, quote age and provider timestamps. Use the provider filter to isolate either feed,
+then click Trend to inspect high/low and the actual intraday observations.
 
 Interpret quote state as follows:
 
@@ -44,7 +44,7 @@ row, so it cannot be removed from active polling through the watchlist control.
 ### 3. Open a provider-bound trade
 
 Open New trade, select the equity book and NVDA. The provider choices update from the live
-market stream and show Bid, Ask, Last, freshness, time and age. Select one feed, enter the
+market stream and show the executable price, freshness, time and age. Select one feed, enter the
 quantity and submit.
 
 Both LIVE and confirmed-CLOSED rows are eligible when they have a usable price. CLOSED is

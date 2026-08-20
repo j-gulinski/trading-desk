@@ -18,23 +18,13 @@ from app.config import (
 from shared.active_set import load_active_set
 from shared.freshness import classify
 from shared.functions import utcnow
-from shared.providers import supports_quotes
 from shared.serialization import to_json
 from shared.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
 app = bottle.Bottle()
 
-
-def route(*paths, **kwargs):
-    def decorate(handler):
-        for path in paths:
-            app.route(path, **kwargs)(handler)
-        return handler
-    return decorate
-
-
-@route("/stream", "/market-data/stream")
+@app.route("/stream")
 def stream():
     response.content_type = "text/event-stream"
     response.set_header("Cache-Control", "no-cache")
@@ -58,48 +48,6 @@ def stream():
 
     return generate_events()
 
-
-@route("/stream/<provider>", "/market-data/stream/<provider>")
-def provider_stream(provider):
-    provider = provider.upper()
-    response.content_type = "text/event-stream"
-    response.set_header("Cache-Control", "no-cache")
-    with clients_lock:
-        client_q = queue.Queue(maxsize=500)
-        client_event_queues.add(client_q)
-    log.info("stream_client_connected", provider=provider)
-
-    def matches(message):
-        data = message["data"]
-        if message["event"] == "market_remove":
-            return any(row["provider"] == provider for row in data.get("rows", []))
-        return data.get("provider") == provider
-
-    def generate_events():
-        yield ": connected\n\n"
-        try:
-            while True:
-                message = client_q.get()
-                if not matches(message):
-                    continue
-                data = message["data"]
-                if message["event"] == "market_remove":
-                    data = {
-                        **data,
-                        "rows": [row for row in data.get("rows", [])
-                                 if row["provider"] == provider],
-                    }
-                yield f"event: {message['event']}\ndata: {to_json(data)}\n\n"
-        except Exception as exc:
-            log.debug("stream_client_error", error=type(exc).__name__)
-        finally:
-            with clients_lock:
-                client_event_queues.discard(client_q)
-            log.info("stream_client_disconnected", provider=provider)
-
-    return generate_events()
-
-
 def _board_payload():
     active = load_active_set()
     rows = [
@@ -112,9 +60,9 @@ def _board_payload():
     return rows
 
 
-def _classify_row(row, now, supported=True):
+def _classify_row(row, now):
     return classify(
-        supported,
+        True,
         row["provider_timestamp"],
         row["received_at"],
         now,
@@ -124,50 +72,15 @@ def _classify_row(row, now, supported=True):
     )
 
 
-def _placeholder_row(provider, symbol, entry):
-    return {
-        "provider": provider,
-        "symbol": symbol,
-        "asset_class": entry.asset_class,
-        "currency": entry.currency,
-        "bid": None,
-        "ask": None,
-        "last": None,
-        "mid": None,
-        "price_basis": None,
-        "quote_grade": None,
-        "previous_close": None,
-        "provider_timestamp": None,
-        "received_at": None,
-        "event_time": None,
-        "latest_snapshot_id": None,
-        "market_open": scheduler.market_open(provider, symbol),
-        "stale_after_seconds": scheduler.stale_after_seconds(provider, symbol),
-        "closed_stale_after_seconds": scheduler.closed_stale_after_seconds(provider, symbol),
-        **entry.origin(provider),
-    }
-
-
 def _quote_rows():
     now = utcnow()
     rows = _board_payload()
     for row in rows:
         row["freshness"] = _classify_row(row, now)
-    have = {(row["provider"], row["symbol"]) for row in rows}
-    for symbol, entry in load_active_set().items():
-        for provider in scheduler.wired_quote_providers():
-            if (provider, symbol) in have:
-                continue
-            supported = supports_quotes(provider, entry.asset_class)
-            if supported and not entry.serves(provider):
-                continue
-            row = _placeholder_row(provider, symbol, entry)
-            row["freshness"] = _classify_row(row, now, supported=supported)
-            rows.append(row)
     return rows
 
 
-@route("/snapshot", "/market-data/snapshot")
+@app.route("/snapshot")
 def get_snapshot():
     response.content_type = "application/json"
     rows = _board_payload()
@@ -179,7 +92,7 @@ def get_snapshot():
     })
 
 
-@route("/quotes", "/market-data/quotes")
+@app.route("/quotes")
 def get_quotes():
     response.content_type = "application/json"
     symbol = (request.query.symbol or "").strip().upper() or None
@@ -192,18 +105,6 @@ def get_quotes():
         and (provider is None or row["provider"] == provider)
     ]
     return to_json(rows)
-
-
-@route("/quotes/<provider>/<symbol>", "/market-data/quotes/<provider>/<symbol>")
-def get_quote(provider, symbol):
-    response.content_type = "application/json"
-    provider, symbol = provider.upper(), symbol.upper()
-    for row in _quote_rows():
-        if row["provider"] == provider and row["symbol"] == symbol:
-            return to_json(row)
-    response.status = 404
-    return to_json({"error": f"{provider} does not quote {symbol}"})
-
 
 @app.route("/watchlist")
 def get_watchlist():
@@ -268,7 +169,7 @@ def search_symbols():
     return to_json({"query": query.upper(), "results": symbol_search.search(query)})
 
 
-@route("/history", "/market-data/history")
+@app.route("/history")
 def get_history():
     response.content_type = "application/json"
     return to_json({
@@ -296,7 +197,7 @@ def get_provider_health(name):
     return to_json(detail)
 
 
-@route("/refresh", "/market-data/refresh", method="POST")
+@app.route("/refresh", method="POST")
 def refresh():
     response.content_type = "application/json"
     symbol = (request.query.symbol or "").strip().upper()

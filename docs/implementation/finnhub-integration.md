@@ -130,7 +130,7 @@ business-facing subset.
    polling.** The last trade cannot move overnight. *(4.4)*
 4. **Freshness threshold = 3× the open-market cadence (45 s / 180 s) and never stretches
    at night.** Age stays honest — which is why overnight rows read STALE. *(4.4)*
-5. **Budget = 80% of the provider's limit (48 of 60/min), and every call spends a token**
+5. **Budget = the configured 90% safety share (54 of 60/min), and every call spends a token**
    — quotes, the status check, manual refreshes. The margin keeps the provider's own
    limiter untriggered. *(Step 2)*
 6. **An empty budget is not a pause** — the round ends, symbols stay due, next second
@@ -221,7 +221,7 @@ provider client adds only its endpoints and its own body rules.
 ## Step 2 — the request budget
 
 **Needed:** Finnhub's free tier allows 60 requests per minute. House rule: never run at the
-limit — run at ~80%, so scheduled polls plus manual refreshes can never trip the provider's
+limit — run at the configured 90%, so scheduled polls plus manual refreshes do not trip the provider's
 own limiter and get the key blocked (plan D7). The standard tool for "at most N per minute,
 spent one at a time" is a token bucket.
 
@@ -256,7 +256,8 @@ spent one at a time" is a token bucket.
   scheduler just stops the round; symbols stay due and the next pass retries. One bucket is
   shared by the scheduler thread and HTTP refresh handlers, hence the lock.
 - **Every request spends one token** — quotes, the market-status check, manual refreshes.
-  Capacity 48 = 80% of 60, refilling at 48/60 per second (`FINNHUB_BUDGET_PER_MINUTE`).
+  Capacity 54 = 90% of 60, refilling at 54/60 per second. The capacity is derived from
+  `FINNHUB_PROVIDER_LIMIT_PER_MINUTE` and `PROVIDER_BUDGET_USAGE_PERCENT`.
   - Why `time.monotonic()` and not `datetime.now()`: monotonic time is a stopwatch — it
     only moves forward, immune to NTP corrections and DST. A wall clock can jump backwards,
     which would make `now - refilled_at` negative and *drain* the bucket. C# analogy:
@@ -450,7 +451,12 @@ of the file:
 
 ```python
 PROVIDER = FINNHUB
-runtime = ProviderRuntime(FINNHUB, FINNHUB_BUDGET_PER_MINUTE, bool(FINNHUB_API_KEY))
+runtime = ProviderRuntime(
+    FINNHUB,
+    FINNHUB_BUDGET_PER_MINUTE,
+    bool(FINNHUB_API_KEY),
+    provider_minute_limit=FINNHUB_PROVIDER_LIMIT_PER_MINUTE,
+)
 _client = FinnhubClient(FINNHUB_API_KEY)
 _next_due = {}
 ```
@@ -671,7 +677,7 @@ What each failure does, spelled out:
 | network failure / 5xx | `ERROR` | 10 s | log only — transient noise |
 | next successful quote | `OK` | — | `PROVIDER_RECOVERED` |
 
-The 429 row should never actually fire — the bucket runs at 80% of the allowance exactly
+The 429 row should rarely fire — the bucket runs below the provider allowance
 so we never hit the provider's own limiter. The state exists in case it happens anyway.
 
 Two details keep the trail honest:

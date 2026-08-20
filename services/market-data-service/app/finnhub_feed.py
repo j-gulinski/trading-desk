@@ -17,6 +17,7 @@ from app.config import (
     AUTH_FAILURE_COOLDOWN_SECONDS,
     FINNHUB_API_KEY,
     FINNHUB_BUDGET_PER_MINUTE,
+    FINNHUB_PROVIDER_LIMIT_PER_MINUTE,
     FINNHUB_CLOSED_POLL_SECONDS,
     FINNHUB_TIER1_POLL_SECONDS,
     FINNHUB_TIER2_POLL_SECONDS,
@@ -35,7 +36,12 @@ from app.quote_audit import audit_first_quote
 log = get_logger(SERVICE_NAME)
 
 PROVIDER = FINNHUB
-runtime = ProviderRuntime(FINNHUB, FINNHUB_BUDGET_PER_MINUTE, bool(FINNHUB_API_KEY))
+runtime = ProviderRuntime(
+    FINNHUB,
+    FINNHUB_BUDGET_PER_MINUTE,
+    bool(FINNHUB_API_KEY),
+    provider_minute_limit=FINNHUB_PROVIDER_LIMIT_PER_MINUTE,
+)
 _client = FinnhubClient(FINNHUB_API_KEY)
 _next_due = {}
 

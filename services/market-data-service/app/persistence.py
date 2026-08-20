@@ -141,7 +141,6 @@ def today_history_series(bucket_seconds, max_points):
                 MarketDataSpotPrice.symbol,
                 MarketDataSpotPrice.received_at,
                 MarketDataSpotPrice.mid,
-                MarketDataSpotPrice.previous_close,
             )
             .filter(
                 tuple_(MarketDataSpotPrice.provider, MarketDataSpotPrice.symbol)
@@ -155,22 +154,17 @@ def today_history_series(bucket_seconds, max_points):
         bucket = int(received_at.timestamp()) // bucket_seconds
         buckets_by_pair.setdefault((provider, symbol), {})[bucket] = (received_at, mid)
 
-    cutoff_ms = int(cutoff.timestamp() * 1000)
     series = {}
-    for provider, symbol, received_at, mid, previous_close in board:
+    for provider, symbol, received_at, mid in board:
         observations = sorted(
             ([int(at.timestamp() * 1000), value]
              for at, value in buckets_by_pair.get((provider, symbol), {}).values()),
             key=lambda point: point[0],
         )
-        current = [max(cutoff_ms + 1, int(received_at.timestamp() * 1000)), mid]
+        current = [int(received_at.timestamp() * 1000), mid]
         if not observations or observations[-1] != current:
             observations.append(current)
-        if previous_close is not None:
-            observations = [[cutoff_ms, previous_close], *observations[-(max_points - 1):]]
-        else:
-            observations = observations[-max_points:]
-        series[f"{provider}:{symbol}"] = observations
+        series[f"{provider}:{symbol}"] = observations[-max_points:]
     return series
 
 

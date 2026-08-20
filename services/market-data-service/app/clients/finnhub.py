@@ -11,7 +11,9 @@ class FinnhubClient(ProviderClient):
 
     def classify_body(self, payload):
         if isinstance(payload, dict) and payload.get("error"):
-            raise ProviderDataError(self.provider, str(payload["error"]))
+            raise ProviderDataError(
+                self.provider, str(payload["error"]), response=payload
+            )
 
     def quote(self, symbol):
         return self.get("/quote", {"symbol": symbol})

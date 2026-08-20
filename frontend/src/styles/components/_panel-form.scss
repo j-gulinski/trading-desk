@@ -92,7 +92,7 @@
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: 'provider state' 'legs legs' 'meta meta';
+  grid-template-areas: 'provider state' 'price price' 'meta meta';
   align-items: center;
   gap: 4px var(--sp-3);
   padding: var(--sp-2) var(--sp-3);
@@ -125,24 +125,10 @@
   font-weight: 600;
   letter-spacing: 0.04em;
 }
-.quote-option__legs {
-  grid-area: legs;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
+.quote-option__price {
+  grid-area: price;
   font-family: var(--font-mono);
   font-size: 13px;
-  color: var(--text-secondary);
-}
-.quote-leg__label {
-  margin-right: 5px;
-  color: var(--text-muted);
-  font-family: var(--font-sans);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.quote-leg--filled {
   color: var(--text-primary);
   font-weight: 600;
 }

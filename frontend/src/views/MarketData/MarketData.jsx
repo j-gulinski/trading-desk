@@ -31,6 +31,9 @@ import SortCaptureStatus from '../../components/tables/SortCaptureStatus.jsx'
 import MarketTable from '../../components/marketdata/MarketTable.jsx'
 import WatchlistSearch from '../../components/marketdata/WatchlistSearch.jsx'
 import ProviderStrategyStrip from '../../components/marketdata/ProviderStrategyStrip.jsx'
+import MarketBenchmark from '../../components/marketdata/MarketBenchmark.jsx'
+import MarketTrendPanel from '../../components/marketdata/MarketTrendPanel.jsx'
+import { providerLabel } from '../../config/providers.js'
 
 const marketColumnById = new Map(MARKET_COLUMNS.map((column) => [column.id, column]))
 
@@ -62,7 +65,9 @@ export default function MarketData() {
   const { now } = useElapsedTime()
 
   const [activeClass, setActiveClass] = useState(null)
+  const [activeProvider, setActiveProvider] = useState(null)
   const [query, setQuery] = useState('')
+  const [inspectedId, setInspectedId] = useState(null)
 
   async function handleRemove(symbol, provider) {
     const removal = await watchlist.remove(symbol, provider)
@@ -78,6 +83,8 @@ export default function MarketData() {
     !watchlist.loading,
   )
   const rows = marketRowsOf(board, now)
+  const benchmarkRow = rows.find((row) => row.instrument.benchmark) ?? null
+  const quoteRows = rows.filter((row) => !row.instrument.benchmark)
 
   function sortDisabledReason(column) {
     return column?.requiresClass && !activeClass ? SORT_REQUIRES_CLASS_HINT : null
@@ -90,7 +97,7 @@ export default function MarketData() {
     defaultSort: DEFAULT_MARKET_SORT,
     fallbackSort: MARKET_FALLBACK_SORT,
     captureSnapshot: (column, capturedAt) =>
-      captureMarketSnapshot(rows, column, capturedAt),
+      captureMarketSnapshot(quoteRows, column, capturedAt),
     isSortable: (column) => Boolean(column?.sortable) && !sortDisabledReason(column),
   })
 
@@ -106,19 +113,23 @@ export default function MarketData() {
 
   const search = query.trim().toLowerCase()
   const visibleRows = sortMarketRows(
-    rows.filter(
+    quoteRows.filter(
       (row) =>
         (!activeClass || row.instrument.assetClass === activeClass) &&
+        (!activeProvider || row.instrument.provider === activeProvider) &&
         matchesSearch(row, search),
     ),
     marketTable.sort,
   )
 
-  const summary = summarizeFeed(board, now)
+  const summary = summarizeFeed(quoteRows.map((row) => row.instrument), now)
   const historyLabel = 'today'
+  const providerOptions = countOptions(quoteRows, (row) => row.instrument.provider)
+    .map((option) => ({ ...option, label: providerLabel(option.value) }))
+  const inspectedRow = rows.find((row) => row.instrument.id === inspectedId) ?? null
 
   function boardEmptyMessage() {
-    if (rows.length > 0) return 'No board rows match these filters.'
+    if (quoteRows.length > 0) return 'No board rows match these filters.'
     if (seedStatus === 'error') {
       return 'Could not load the market snapshot — retrying on reconnect.'
     }
@@ -160,10 +171,12 @@ export default function MarketData() {
         />
       </div>
 
+      <MarketBenchmark row={benchmarkRow} onInspect={(row) => setInspectedId(row.instrument.id)} />
+
       <FilterBar
         label="CLASS"
         ariaLabel="Filter market instruments by asset class"
-        options={countOptions(rows, (row) => row.instrument.assetClass)}
+        options={countOptions(quoteRows, (row) => row.instrument.assetClass)}
         value={activeClass}
         onChange={handleClassChange}
         search={{
@@ -173,6 +186,22 @@ export default function MarketData() {
           placeholder: 'Filter board…',
         }}
       >
+        <label className="filter-bar__select-field">
+          <span className="filter-bar__label">PROVIDER</span>
+          <select
+            className="filter-bar__select"
+            aria-label="Filter watchlist by provider"
+            value={activeProvider ?? ''}
+            onChange={(event) => setActiveProvider(event.target.value || null)}
+          >
+            <option value="">All providers</option>
+            {providerOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label} ({option.count})
+              </option>
+            ))}
+          </select>
+        </label>
         <ColumnPicker
           ariaLabel="Watchlist board columns"
           columns={MARKET_COLUMNS}
@@ -216,14 +245,19 @@ export default function MarketData() {
             rows={visibleRows}
             historyLabel={historyLabel}
             sortDisabledReason={sortDisabledReason}
+            onInspect={(row) => setInspectedId(row.instrument.id)}
             onRemove={handleRemove}
             busyKey={watchlist.busyKey}
-            caption="Market quotes by provider with bid, ask, last, daily change, freshness, and quote time"
+            caption="Watchlist quotes by provider with last price, daily change, intraday history, freshness, and quote time"
           />
         ) : (
           <EmptyState message={boardEmptyMessage()} />
         )}
       </section>
+
+      {inspectedRow && (
+        <MarketTrendPanel row={inspectedRow} onClose={() => setInspectedId(null)} />
+      )}
     </section>
   )
 }

@@ -403,8 +403,6 @@ function structuralValueOf(instrument, column) {
 
 function snapshotValueOf(instrument, column, now) {
   if (!instrument) return null
-  if (column === 'bid') return instrument.bid
-  if (column === 'ask') return instrument.ask
   if (column === 'last') return instrument.last
   if (column === 'todayChange') {
     const { percent } = todayChangeOf(instrument)

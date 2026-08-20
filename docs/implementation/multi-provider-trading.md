@@ -97,6 +97,35 @@ sequenceDiagram
     API-->>UI: current provider membership
 ```
 
+Search runs in these steps:
+
+1. The UI waits for two characters and debounces typing, so it does not spend a provider
+   request for every keypress.
+2. The API normalizes the query once, then asks the two feeds in parallel. Parallelism only
+   removes stacked network latency; each feed still checks and spends its own token/credit.
+3. Each provider payload is converted at the edge to the same result shape. Provider notation
+   such as `XAU/USD` becomes the internal `XAUUSD`; invalid internal symbols are discarded.
+4. Each provider slice is deduplicated and ranked exact match, prefix, then shorter symbol.
+   The merged list uses the same ranking, so an exact result is not buried by one provider's
+   broader catalogue.
+5. A provider data error or 404 contributes an empty slice and a structured log line; it does
+   not fail the other provider's results or change provider-wide health. The merged answer is
+   cached for ten minutes to conserve both budgets.
+
+The watchlist write then runs in these steps:
+
+1. The UI groups results by internal symbol, shows provider toggles, and posts only the
+   selected providers.
+2. `watchlist.py` validates symbol, class, currency, provider identity/capability and the
+   watchlist size before writing.
+3. One transaction inserts a symbol or merges new providers into its existing membership and
+   writes the matching audit event.
+4. The API reloads every feed's active-set view immediately. The board can show a MISSING
+   placeholder until the first quote arrives; the normal poll then replaces it.
+5. Removal deletes only the requested membership. If no trade or benchmark still needs that
+   pair, `market_remove` tells every open tab to drop the row; otherwise `still_polled`
+   explains why the quote remains.
+
 `watchlist_items` has one row per symbol and a JSON object containing only the chosen
 providers. Capabilities are derived from `shared/providers.py`; they are not stored as user
 choices. Adding Twelve Data later merges it into the same symbol row. Removing
@@ -155,17 +184,15 @@ agreement.
 
 ### Today change and Today trend
 
-Both UI fields now use the same provider baseline:
-
-- start: the provider's `previous_close`;
-- end: the latest normalized `mid`;
-- middle: actual price changes stored since UTC midnight, reduced to the last observation in
-  each five-minute bucket.
+Change today compares the latest normalized `mid` with the provider's `previous_close`.
+Trend today is intentionally different: it plots only actual price changes stored since UTC
+midnight, reduced to the last observation in each five-minute bucket, and ends at the latest
+normalized `mid`.
 
 `persistence.today_history_series()` uses normal SQLAlchemy queries and small Python grouping;
 there is no PostgreSQL-specific `DISTINCT ON`/`unnest` query. It always includes the current
-board value. This means a closed market still shows the previous-session move instead of a
-flat browser-only line.
+board value. Previous close is shown in the detail view but is not inserted as a midnight
+observation; doing so would draw movement through time the service did not observe.
 
 The middle of the line contains only quotes this application collected. It does not pretend
 to be vendor-backfilled intraday history from before the service started.
@@ -243,9 +270,10 @@ flowchart LR
 ```
 
 `ProviderClient` logs once after each completed response or error. The entry includes the
-provider, public endpoint, safe symbol/search context, HTTP status, duration, result count and
-outcome. Authentication parameters are added only when constructing the URL and are never
-included in log fields.
+provider, public endpoint, safe symbol/search context, HTTP status, duration, result count,
+outcome and the provider body as `response_json`. The Logs view pretty-prints that JSON.
+Authentication parameters are added only when constructing the URL and are never included
+in log fields.
 
 Provider cards link to the existing Logs view with filters in the hash URL. No second log
 store was added; provider inspection reuses the central log reader and SSE flow already
@@ -267,7 +295,8 @@ An upstream failure changes only that provider runtime:
 - 401/403: `AUTH_FAILED` cooldown;
 - 429: `RATE_LIMITED`, honoring `Retry-After` when present;
 - network/5xx: short `ERROR` backoff;
-- one bad symbol in a Twelve Data batch: warning for that symbol while valid batch rows continue.
+- HTTP 404 or one bad symbol in a Twelve Data batch: warning for that symbol while valid
+  batch rows continue and provider health stays unchanged.
 
 Provider health is returned by `/providers` and `/providers/<name>/health`. The UI renders
 configured feeds with cadence, market session, last success and budgets. Unwired future
@@ -280,21 +309,20 @@ providers render only `NOT AVAILABLE`.
 | `GET /symbols/search?q=` | normalized, provider-tagged discovery |
 | `GET/POST /watchlist` | list or merge provider membership |
 | `DELETE /watchlist/<symbol>?provider=` | remove one provider membership |
-| `GET /quotes` and `/quotes/<provider>/<symbol>` | current normalized board |
-| `GET /history` | previous-close-anchored Today series |
+| `GET /quotes` | current stored normalized board, filterable by provider/symbol/class |
+| `GET /history` | locally observed Today series; previous close stays separate |
 | `GET /snapshot` + `GET /stream` | seed and live normalized quote updates |
 | `GET /providers` + `/providers/<name>/health` | provider runtime and budgets |
 | `POST /refresh?symbol=&provider=` | immediate budgeted poll |
 | `GET /instruments` | tradeable symbols and their provider choices |
 | `POST /trade-actions` | provider-bound open/close intent |
 
-The service also accepts the assignment-style `/market-data/...` aliases. The frontend uses
-`/api/market-data/...`; Vite removes the `/api/market-data` prefix before proxying to the
-service-root routes.
+The frontend uses `/api/market-data/...`; Vite removes that prefix before proxying to the
+single service-root route for each endpoint.
 
 ## Data model additions
 
-The migration adds only state needed by these flows:
+The single development migration adds only state needed by these flows:
 
 - watchlist provider choices;
 - board freshness/session fields, previous close and latest snapshot reference;
@@ -310,8 +338,8 @@ Run [provider-trading.http](../../scenarios/provider-trading.http) and verify in
 
 1. Search AAPL and add Finnhub only, then Twelve Data.
 2. Confirm two independent board rows and remove only one provider.
-3. Confirm Change today and Trend today start at the same previous close and end at the same
-   current mid, including when the venue is closed.
+3. Confirm Change today uses previous close while Trend today plots only real intraday
+   observations and ends at the current mid, including when the venue is closed.
 4. Open the ticket, compare provider rows and submit one usable LIVE or CLOSED quote.
 5. Confirm Trades shows the chosen provider, quote time and server execution price.
 6. Confirm valuation and close retain that provider.

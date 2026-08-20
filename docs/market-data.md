@@ -202,7 +202,8 @@ reload.
 
 ### Budget and the error state machine
 
-A token bucket caps requests at `FINNHUB_BUDGET_PER_MINUTE` (48 = ~80% of the free 60/min);
+A token bucket caps requests at 90% of `FINNHUB_PROVIDER_LIMIT_PER_MINUTE`
+(54 of the default free 60/min);
 every request — quote, market status, search, manual refresh — spends one token, and a daily ledger
 counts spend for the ops surface. Errors classify into a provider state machine, never
 generic failures:
@@ -212,7 +213,7 @@ generic failures:
 | HTTP 429 | `RATE_LIMITED` | cooldown = `Retry-After` (default 60 s), audit `PROVIDER_RATE_LIMITED` |
 | HTTP 401/403 | `AUTH_FAILED` | 5-minute cooldown, audit `PROVIDER_AUTH_FAILED` |
 | network/timeout, 5xx | `ERROR` | 10 s backoff, log only |
-| body-level error (`{"error": …}`, `c: 0`) | per-symbol data error | log, symbol skipped this round — provider state untouched |
+| body-level error (`{"error": …}`, `c: 0`) or HTTP 404 | per-symbol data error | log, symbol skipped this round — provider state untouched |
 | next success after any of the above | `OK` | audit `PROVIDER_RECOVERED` |
 
 Cooldowns are scoped to the provider that tripped them (D7) and are visible as
@@ -227,16 +228,15 @@ one `scheduler.py` registry line. What differs from Finnhub is exactly what the 
 would differ:
 
 - **Batching.** One `/quote?symbol=A,B,…` call quotes many symbols at one credit each; the
-  feed polls the whole due set in chunks of `TWELVE_DATA_BUDGET_PER_MINUTE` (6), so a full
+  feed polls the whole due set in chunks of the derived safe minute budget (7 by default), so a full
   chunk fits the minute bucket. A single-symbol call returns the quote object bare; a batch
   returns a dict keyed by provider symbol — the feed normalizes both, and a per-symbol error
   object inside a batch is a data error for that symbol only, never provider state.
-- **The daily-ledger governor (D7).** The binding constraint is 800 credits/*day*, so beside
-  the minute bucket the feed keeps a daily credit ledger and compares spend against the
-  elapsed fraction of the UTC day: a poll (or manual refresh) only runs while
-  `credits_today + cost ≤ 640 × fraction-of-day-elapsed`. The budget provably spreads across
-  the day; the ledger and its budget are surfaced on `/providers` (`credits_today`,
-  `daily_budget`). A symbol-search call also reserves and records one credit.
+- **The daily-ledger governor (D7).** The binding constraint is 800 credits/*day*. The
+  shared 90% safety setting derives a 720-credit hard ledger, and cadence spreads that
+  allowance across the configured 12-hour active window. A poll or manual refresh only runs
+  while `credits_today + cost ≤ safe daily budget`; the ledger and both provider/safe limits
+  are surfaced on `/providers`. A symbol-search call also reserves and records one credit.
 - **Symbol notation is the client's concern.** Internal `EURUSD`/`XAUUSD` map to the wire's
   `EUR/USD`/`XAU/USD` inside the client (6-letter FX/COMMODITY symbols split 3/3); nothing
   outside the client ever sees provider notation.
@@ -257,13 +257,13 @@ the same rate.
 
 ## Watchlist self-service and discovery
 
-The board shows the **active set** — watchlist ∪ open-trade symbols ∪ benchmark — and every
-row carries server-truth origin flags (`watched` / `held` / `benchmark`) saying why it is
-there: watched rows get the remove control, held rows a POS tag (a position anchors them),
-the benchmark a BMK tag. Rows with data classify LIVE/CLOSED/STALE; a watched pair with no
-data yet renders MISSING. A pair whose provider cannot serve the class is served by
-`GET /quotes` as an UNSUPPORTED row (the API keeps the full matrix) but is **not rendered on
-the board**. Capability facts appear where a decision is made: as toggles in search results
+The quote table shows watchlist/open-position rows; the configured benchmark has its own
+summary strip above the filters instead of appearing as another quote row. Every row carries
+server-truth origin flags (`watched` / `held` / `benchmark`) saying why it is there: watched
+rows get the remove control and held rows a POS tag (a position anchors them). Rows with data
+classify LIVE/CLOSED/STALE; a watched pair with no data yet renders MISSING. Provider
+capability remains available in the watchlist metadata, but incapable provider/class pairs
+are **not rendered on the board**. Capability facts appear where a decision is made: as toggles in search results
 and as an N/A row on the ticket's provider comparison, not as permanent dash rows on the
 board. `_board_payload` filters to the active set on every read and a
 daily sweep deletes stray spot rows, so a symbol that leaves the active set by any route — a
@@ -294,11 +294,14 @@ closed trade, a poll racing a removal — leaves the board with it.
   for 10 minutes per query so typing doesn't drain budgets. The UI groups them one row per
   *symbol* with the capable providers as **toggles**: providers already on the board are
   ticked and disabled, the rest are the choice, and the Add button counts what it will
-  create.
+  create. A provider filter beside the board search narrows the watchlist without changing
+  provider membership.
 
-`GET /history` anchors Today's trend at the provider's `previous_close`, adds the current
-UTC day's locally observed changes (the latest point in each five-minute bucket), and ends
-at the current board value. It is filtered to the active set and capped at 300
+`GET /history` returns the current UTC day's locally observed changes (the latest point in
+each five-minute bucket) and ends at the current board value. Previous close remains the
+separate basis for Change today; plotting it at midnight created a false diagonal through
+hours with no observation. The compact trend opens a detail panel with observation times,
+high/low, previous close, and recent values. History is filtered to the active set and capped at 300
 `[epoch_ms, mid]` points per (provider, symbol). There is no provider backfill or multi-day
 selector.
 
@@ -308,11 +311,10 @@ selector.
 | --- | --- |
 | `GET /snapshot` | the board read from the DB (warm after restart) + `stream_id` — the UI's seed |
 | SSE `/stream` | `market_tick` per successful poll, provider-tagged, with `stream_id`/`event_id` |
-| `GET /quotes` | the full board matrix (active set × wired providers) + computed freshness state; filterable by `symbol`, `asset_class`, `provider` |
-| `GET /quotes/<provider>/<symbol>` | one cell of that matrix |
+| `GET /quotes` | stored active-set quotes + computed freshness state; filterable by `symbol`, `asset_class`, `provider` |
 | `GET /watchlist` · `POST /watchlist` · `DELETE /watchlist/<symbol>?provider=` | the symbol master, self-service and per provider |
 | `GET /symbols/search?q=` | provider-tagged discovery, cached 10 min |
-| `GET /history` | previous-close-anchored Today mid series per (provider, symbol) |
+| `GET /history` | observed Today mid series per (provider, symbol) |
 | `GET /providers` | all six registry entries (capabilities, wired flag) + runtime for wired ones: status, budget + daily ledger, market session, active symbols, and the current poll `strategy` (mode, cadences, server-composed description — what the board strip and the ops card display) |
 | `GET /providers/<p>/health` | one provider's runtime detail |
 | `POST /refresh?symbol=&provider=` | targeted poll within budget (provider defaults to FINNHUB) — 404 unknown symbol, 422 unsupported class, 429 budget/pace exhausted, 503 disabled/cooldown |
@@ -322,6 +324,11 @@ Every tick carries the full normalized quote (bid/ask/last/mid, basis, grade, bo
 `stale_after_seconds`, `closed_stale_after_seconds`, `market_open`, and the origin flags,
 so any consumer can classify freshness without asking the server. SSE also carries
 `market_remove` (symbols leaving the board) alongside `market_tick`.
+
+Each provider HTTP call writes one `provider_http_response` line containing request metadata,
+outcome, latency, and `response_json`. The Logs view formats that raw JSON on expansion. A
+404 returned for one searched/watched symbol remains a data error and does not change the
+provider-wide health state.
 
 ### Valuation provenance — provider bound at the ticket
 

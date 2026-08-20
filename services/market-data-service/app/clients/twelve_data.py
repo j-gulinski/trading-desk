@@ -29,10 +29,10 @@ class TwelveDataClient(ProviderClient):
         code = payload.get("code")
         message = str(payload.get("message") or f"error code {code}")
         if code == 429:
-            raise ProviderRateLimited(self.provider, message)
+            raise ProviderRateLimited(self.provider, message, response=payload)
         if code in (401, 403):
-            raise ProviderAuthError(self.provider, message)
-        raise ProviderDataError(self.provider, message)
+            raise ProviderAuthError(self.provider, message, response=payload)
+        raise ProviderDataError(self.provider, message, response=payload)
 
     def quotes(self, provider_symbols):
         return self.get("/quote", {"symbol": ",".join(provider_symbols)})
