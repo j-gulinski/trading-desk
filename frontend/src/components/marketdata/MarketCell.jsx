@@ -34,8 +34,13 @@ function LastPrice({ instrument }) {
     ? `market-price-tick market-price-tick--${instrument.lastDirection}`
     : undefined
   return (
-    <span key={instrument.eventTimeMs ?? instrument.polledAtMs} className={className}>
-      {formatUnitPrice(instrument.last, instrument.assetClass)}
+    <span className="market-mark">
+      <span key={instrument.eventTimeMs ?? instrument.polledAtMs} className={className}>
+        {formatUnitPrice(instrument.value, instrument.assetClass)}
+      </span>
+      {instrument.priceBasis && (
+        <span className="market-mark__basis">{instrument.priceBasis.replaceAll('_', ' ')}</span>
+      )}
     </span>
   )
 }
@@ -63,7 +68,7 @@ export default function MarketCell({
     case 'last':
       return <LastPrice instrument={instrument} />
     case 'tickChange':
-      return formatDelta(instrument, tickChange.delta)
+      return <ChangeValue instrument={instrument} change={tickChange} />
     case 'todayChange':
       return <ChangeValue instrument={instrument} change={todayChange} />
     case 'age':
@@ -79,7 +84,7 @@ export default function MarketCell({
       )
     case 'watch':
       if (instrument.watchlisted && onRemove) {
-        const label = `Stop watching ${instrument.symbol} on ${instrument.provider}`
+        const label = `Stop watching ${instrument.symbol} on ${providerLabel(instrument.provider)}`
         return (
           <button
             type="button"
@@ -87,7 +92,10 @@ export default function MarketCell({
             title={label}
             aria-label={label}
             disabled={busyKey === instrument.id}
-            onClick={() => onRemove(instrument.symbol, instrument.provider)}
+            onClick={(event) => {
+              event.stopPropagation()
+              onRemove(instrument.symbol, instrument.provider)
+            }}
           >
             ✕
           </button>

@@ -75,6 +75,38 @@
   animation-name: market-price-tick-neg;
 }
 
+.market-mark {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.market-mark__basis {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.data-table td.market-symbol-cell {
+  min-width: 110px;
+  border-right: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.012);
+  vertical-align: top;
+}
+
+.market-provider-row--first:not(:first-child) td {
+  border-top: 1px solid var(--border-strong);
+}
+
+.market-provider-row:not(.market-provider-row--last) td:not(.market-symbol-cell) {
+  border-bottom-color: rgba(57, 68, 85, 0.55);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .market-price-tick {
     animation: none;

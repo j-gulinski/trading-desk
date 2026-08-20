@@ -67,8 +67,8 @@ Read one vertical flow instead of reading directories alphabetically.
 | Vendor HTTP | `clients/base.py`, `clients/finnhub.py`, `clients/twelve_data.py` |
 | Vendor payload mapping | `services/market-data-service/app/normalizer.py` |
 | Polling and budgets | `finnhub_feed.py`, `twelve_data_feed.py`, `provider_runtime.py`, `budget.py` |
-| Board, snapshot and Today series | `persistence.py`, `publisher.py`, `api.py` |
-| Market UI | `useMarketFeed.js`, `useWatchlist.js`, `MarketData.jsx` |
+| Board, snapshots and observed-history API | `persistence.py`, `publisher.py`, `api.py` |
+| Market UI | `useMarketFeed.js`, `useQuoteHistory.js`, `useWatchlist.js`, `MarketData.jsx` |
 | Ticket comparison | `domain/tradeActions.js`, `NewTradePanel.jsx`, `ProviderQuoteOption.jsx` |
 | Server execution | `trade-action-service/app/trade_processor.py`, `market_state.py`, `repository.py` |
 | Provider-bound valuation | `pricing-service/app/cache.py`, `valuation_engine.py` |
@@ -126,10 +126,19 @@ The watchlist write then runs in these steps:
    pair, `market_remove` tells every open tab to drop the row; otherwise `still_polled`
    explains why the quote remains.
 
+`market_remove` is an internal cache-invalidation message, not a request to the quote
+provider and not another business deletion. It is retained because browser sessions and
+pricing hold the streamed board in memory; without it, a removed pair could remain cached
+until reconnect even though the database row was already gone.
+
 `watchlist_items` has one row per symbol and a JSON object containing only the chosen
 providers. Capabilities are derived from `shared/providers.py`; they are not stored as user
 choices. Adding Twelve Data later merges it into the same symbol row. Removing
 `?provider=TWELVE_DATA` leaves Finnhub untouched.
+
+The quote board uses the same visual hierarchy: one symbol group with provider subrows in a
+stable order. Selecting or removing a subrow still targets its exact `(provider, symbol)`;
+grouping changes presentation, not data identity.
 
 The active set combines three reasons to keep polling:
 
@@ -190,11 +199,15 @@ Last tick is a separate, discrete comparison with the immediately previous accep
 it does not imply any values between provider responses.
 
 Snapshots remain an audit/provenance record of price changes observed while the service was
-running. They are not rendered as a trend: their coverage begins when ingestion starts and
-can contain long gaps, so connecting them would imply a complete intraday market series.
-Previous close is likewise not inserted as a synthetic chart point. Finnhub stock candles
-require Premium access, and Twelve Data history alone would make equivalent provider rows
-show different kinds of data.
+running. Selecting a board row reads the latest 60 snapshots for exactly that
+`(provider, symbol)` and presents them newest-first as discrete observations. The initial
+read is lazy, and subsequent reads are triggered only when the selected row receives a
+price-field change. There is no timer and this path never calls a quote provider.
+
+The tape is not rendered as a connected trend: coverage begins when ingestion starts and can
+contain long gaps, so a line would imply a complete intraday market series. Previous close is
+not inserted as a synthetic history point. Finnhub stock candles require Premium access, and
+Twelve Data history alone would make equivalent provider rows show different kinds of data.
 
 ## Flow 3: selected provider to trade, valuation and close
 
@@ -309,6 +322,7 @@ providers render only `NOT AVAILABLE`.
 | `GET/POST /watchlist` | list or merge provider membership |
 | `DELETE /watchlist/<symbol>?provider=` | remove one provider membership |
 | `GET /quotes` | current stored normalized board, filterable by provider/symbol/class |
+| `GET /quotes/<provider>/<symbol>/history?limit=60` | latest change-only observations for one board row; database-only |
 | `GET /snapshot` + `GET /stream` | seed and live normalized quote updates |
 | `GET /providers` + `/providers/<name>/health` | provider runtime and budgets |
 | `POST /refresh?symbol=&provider=` | immediate budgeted poll |
@@ -336,8 +350,8 @@ Run [provider-trading.http](../../scenarios/provider-trading.http) and verify in
 
 1. Search AAPL and add Finnhub only, then Twelve Data.
 2. Confirm two independent board rows and remove only one provider.
-3. Confirm the board shows Last, Change today, market state and quote age without an
-   incomplete trend or chart action.
+3. Confirm the board shows Mark, last-tick and daily moves, market state and quote age; select
+   either provider row and inspect its separate newest-first observation tape.
 4. Open the ticket, compare provider rows and submit one usable LIVE or CLOSED quote.
 5. Confirm Trades shows the chosen provider, quote time and server execution price.
 6. Confirm valuation and close retain that provider.

@@ -1,7 +1,6 @@
 import { directionOf } from './formatting.js'
-import { sortRows } from './tableSort.js'
 
-const MARKET_STATE_STORAGE_VERSION = 8
+const MARKET_STATE_STORAGE_VERSION = 9
 const MAX_STORED_INSTRUMENTS = 100
 
 function toNum(value) {
@@ -43,6 +42,7 @@ function spotInstrument(tick, snapshotStreamId = null) {
     ask: toNum(tick.ask),
     last: toNum(tick.last),
     previousClose: toNum(tick.previous_close),
+    priceBasis: typeof tick.price_basis === 'string' ? tick.price_basis : null,
     grade: tick.quote_grade ?? null,
     providerTimestampMs: Number.isFinite(providerTimestampMs) ? providerTimestampMs : null,
     polledAtMs: Number.isFinite(polledAtMs) ? polledAtMs : null,
@@ -192,6 +192,7 @@ function restoreInstrument(candidate) {
     ask: toNum(candidate.ask),
     last: toNum(candidate.last),
     previousClose: toNum(candidate.previousClose),
+    priceBasis: typeof candidate.priceBasis === 'string' ? candidate.priceBasis : null,
     grade: typeof candidate.grade === 'string' ? candidate.grade : null,
     providerTimestampMs: Number.isFinite(candidate.providerTimestampMs)
       ? candidate.providerTimestampMs
@@ -344,6 +345,7 @@ function placeholderInstrument(id, provider, item) {
     ask: null,
     last: null,
     previousClose: null,
+    priceBasis: null,
     grade: null,
     providerTimestampMs: null,
     polledAtMs: null,
@@ -373,55 +375,6 @@ export function boardInstruments(instruments, watchlistItems, watchlistReady = t
     }
   }
   return annotated
-}
-
-const STATE_SORT_RANK = { LIVE: 0, CLOSED: 1, STALE: 2, MISSING: 3 }
-
-function structuralValueOf(instrument, column) {
-  if (column === 'symbol') return instrument.symbol
-  if (column === 'provider') return instrument.provider
-  if (column === 'assetClass') return instrument.assetClass
-  return undefined
-}
-
-function snapshotValueOf(instrument, column, now) {
-  if (!instrument) return null
-  if (column === 'last') return instrument.last
-  if (column === 'todayChange') {
-    const { percent } = todayChangeOf(instrument)
-    return Number.isFinite(percent) ? percent : null
-  }
-  if (column === 'age') return providerAgeMs(instrument, now)
-  if (column === 'feed') return STATE_SORT_RANK[freshnessOf(instrument, now)] ?? 9
-  if (column === 'updated') return instrument.eventTimeMs ?? null
-  return null
-}
-
-function compareInstruments(a, b) {
-  const classDiff = a.assetClass.localeCompare(b.assetClass)
-  if (classDiff !== 0) return classDiff
-  const symbolDiff = a.symbol.localeCompare(b.symbol)
-  return symbolDiff || a.id.localeCompare(b.id)
-}
-
-export function captureMarketSnapshot(rows, column, now) {
-  const values = {}
-  for (const row of rows) {
-    values[row.instrument.id] = snapshotValueOf(row.instrument, column, now)
-  }
-  return values
-}
-
-export function sortMarketRows(rows, sort) {
-  return sortRows(rows, sort, {
-    valueOf: (row) => {
-      const structural = structuralValueOf(row.instrument, sort.column)
-      return structural === undefined
-        ? (sort.snapshot?.[row.instrument.id] ?? null)
-        : structural
-    },
-    tieBreak: (a, b) => compareInstruments(a.instrument, b.instrument),
-  })
 }
 
 export function providerScheduleText(provider) {

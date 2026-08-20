@@ -10,8 +10,9 @@ synthetic feed with two real quote providers: Finnhub for US equities/ETFs and T
 for equities, FX and metals.
 
 Each symbol is watched per provider, so the same asset can be compared on both feeds and
-either membership can be removed independently. The Market Data board shows provider-specific
-quotes, a structured benchmark summary, and market-aware LIVE/CLOSED/STALE/MISSING states.
+either membership can be removed independently. The Market Data board groups provider feeds
+under each symbol and shows a structured benchmark summary, a discrete tape of observed
+price changes, and market-aware LIVE/CLOSED/STALE/MISSING states.
 The trade ticket compares selected feeds and stores the
 provider used for execution; pricing and closing continue to use that same provider. See
 [docs/implementation/multi-provider-trading.md](docs/implementation/multi-provider-trading.md)
@@ -41,12 +42,13 @@ the implementation guides; knob values are in
 | Provider failure | Provider responses drive a per-provider state machine: 429 → RATE_LIMITED (cooldown = `Retry-After`, default 60 s); 401/403 → AUTH_FAILED (300 s); network/5xx → ERROR (10 s). Audits are written on state transitions only. Per-symbol data errors do not change provider state. | Failures are visible, scoped to the provider that caused them, and one symbol cannot stop the feed. |
 | Storage | `market_data_spot_prices`: one row per (provider, symbol), updated in place. `market_data_snapshots`: append only when the price changed, with the raw provider payload. | Bounded board size; history records price changes, not polling activity. |
 | Retention | Snapshots older than 90 days are deleted daily, except rows referenced by a trade's entry or close snapshot ID. | Hosted database storage stays bounded while trade provenance survives retention. |
-| Intraday chart | Not displayed. The stored snapshots are sparse application observations, not complete provider history; Finnhub candles require Premium access while Twelve Data history would make the two provider rows inconsistent. | A polished line through incomplete points implies market movement and coverage the application does not have. The board instead shows Last, change from the previous accepted tick, Previous close/Change today, market state and quote age. |
+| Quote history | Selecting a board row loads the latest 60 change-only snapshots for that provider-symbol. A price-changing `market_tick` refreshes the selected tape; unchanged ticks do not. No connected intraday chart or vendor backfill is shown. | Sparse application observations are useful as a discrete audit trail, but connecting them would imply movement and coverage the application does not have. The history read is database-only and spends no provider budget. |
 | Quote audit volume | `QUOTE_WRITTEN` is audited on the **first** stored quote per (provider, symbol); every later tick is in the structured log only. | Auditing every tick is ~8 000 rows a day of noise at these cadences; AuditLogs is the business record, not the poll log. |
 | Registration | The watchlist stores a **provider choice per symbol**, not a capability. Search results list capable providers as toggles; the board can be filtered by provider. Adding a provider merges. `DELETE /watchlist/<symbol>?provider=` drops one feed and leaves the others ticking; `market_remove` tells every tab which row left. The configured benchmark is shown in its own strip rather than mixed into watchlist quotes. | Each feed must be addable/removable and comparable independently; benchmark context is not watchlist membership. |
 | Tradeable universe | `GET /instruments` serves the active set minus the benchmark: a symbol is tradeable if it is watched or already held. A held symbol keeps alive only the provider frozen on its trade. | SPY is polled to compute the return series, not to be bought; pinning every capable provider for a held symbol spends budget nobody reads. |
 | Streams vs. database | SSE streams deliver updates; the database is the source of truth. Every consumer seeds from the database (or `/snapshot`) and reconciles against it. | SSE has no replay; reconciliation recovers events lost during disconnects. |
 | Valuation source | A valuation uses exactly one provider's quote: the one frozen on the trade at the ticket. Legacy rows without a recorded provider resolve to `DEFAULT_QUOTE_PROVIDER` (FINNHUB). Benchmark sampling accepts only (`BENCHMARK_PROVIDER`, `BENCHMARK_SYMBOL`) ticks. | PnL must be attributable to a single quote source; the benchmark return series must not be double-sampled. |
+| Capital invested | The Valuations summary and each open row show gross entry value: `abs(quantity) × entry price × multiplier`. A mixed-currency portfolio does not display one combined capital total. | The portfolio total stays traceable to its rows, while unlike currencies are not added without an FX conversion policy. |
 | Price handling | `bid`/`ask`/`last` are stored as received; missing fields stay NULL. `mid` is derived (bid/ask → reference → last) and drives valuation and display. Every quote carries `price_basis` and `quote_grade`. | Derived and end-of-day prices are identifiable as such. |
 | Tradeability | Only watchlisted symbols are tradeable; the watchlist is the symbol master. | The tradeable universe is user-defined, not hardcoded. |
 
@@ -94,6 +96,7 @@ streams only — never through each other's APIs.
 | Finnhub + Twelve Data → market-data | HTTP search calls | on watchlist search, cached 10 min per query | Symbol discovery; each upstream search is budgeted and Twelve Data records one request credit. |
 | market-data → Postgres | upsert + conditional insert | per successful poll | Board update; a history row only when the price changed. |
 | market-data → pricing, browser | SSE `market_tick`; `GET /snapshot` seed | per successful poll | Quote distribution; the snapshot provides full state at connect and after restart. |
+| browser ← market-data history | REST `GET /quotes/<provider>/<symbol>/history?limit=60` | when a board row is selected; again only after a price-changing tick for that selected row | Latest stored observations for the detail tape; database read only, with no timer and no provider request. |
 | `trades` table → pricing | DB poll | 2 s | Detects new ACTIVE trades (valued from the cached quote) and CLOSED trades (one final valuation with realized PnL). |
 | pricing → Postgres; → blotter, browser | valuation insert + SSE valuation stream | per revaluation | Valuation persistence and distribution; the `final: true` event propagates a close. |
 | `trades` table → blotter | DB poll (reconcile) | 5 s; full load at boot | Adds ACTIVE trades that have no valuations yet; removes trades no longer ACTIVE if the final event was missed. |

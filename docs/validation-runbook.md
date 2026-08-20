@@ -15,9 +15,12 @@ open at http://localhost:3000.
 
 ### 1. Compare market quotes
 
-Open Market Data. The two NVDA rows are separate feeds for the same asset. Compare Last,
-Last tick, Change today, quote age and provider timestamps. Use the provider filter to isolate either feed.
+Open Market Data. NVDA appears once with separate Finnhub and Twelve Data provider subrows.
+Compare Mark, last-tick move, daily move and quote age. Use the provider filter to isolate
+either feed.
 The benchmark strip separately summarizes Last, Previous close, Change today and quote age.
+Select each NVDA provider subrow in turn. Its side panel must show the matching provider, current quote
+fields and a newest-first tape of observed price changes.
 
 Interpret quote state as follows:
 
@@ -26,13 +29,15 @@ Interpret quote state as follows:
 - STALE means an expected provider update is overdue.
 - NO DATA means the selected feed has not supplied its first usable quote.
 
-No trend line or chart action should appear. Sparse application snapshots are retained for
-audit provenance, but are not presented as complete provider history.
+No trend line, manual Refresh button or repeated quality label should appear in the tape.
+Leave one Finnhub panel open through a price change and confirm the newest observation
+appears automatically. Opening the panel and receiving a changed tick may read stored
+history; neither action makes an upstream provider request.
 
 ### 2. Add and remove one provider
 
 Search for an equity. Select a provider and add it. Search for the same symbol again and add
-the other provider. The board creates the second feed row without duplicating the symbol's
+the other provider. The board creates the second provider subrow without duplicating the symbol's
 master data.
 
 Remove one row with its × action. Only that provider membership disappears; the other feed
@@ -51,7 +56,8 @@ DATA rows remain blocked.
 
 Open the created trade in Trades. Its detail names the pricing provider and quote time.
 Valuations continue to use that provider rather than switching to whichever feed most
-recently changed.
+recently changed. Open Valuations and confirm Capital invested equals the sum of the visible
+open rows' entry values.
 
 ### 4. Inspect provider operations
 

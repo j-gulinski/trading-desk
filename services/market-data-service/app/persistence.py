@@ -97,6 +97,38 @@ def board_rows():
         ]
 
 
+def quote_history(provider, symbol, limit):
+    with session_scope() as session:
+        rows = (
+            session.query(MarketDataSnapshot)
+            .filter_by(provider=provider, symbol=symbol)
+            .order_by(MarketDataSnapshot.received_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return {
+            "provider": provider,
+            "symbol": symbol,
+            "mode": "observed_changes",
+            "rows": [
+                {
+                    "snapshot_id": row.snapshot_id,
+                    "asset_class": row.asset_class,
+                    "currency": row.currency,
+                    "bid": row.bid,
+                    "ask": row.ask,
+                    "last": row.last,
+                    "mid": row.mid,
+                    "price_basis": row.price_basis,
+                    "quote_grade": row.quote_grade,
+                    "provider_timestamp": row.provider_timestamp,
+                    "received_at": row.received_at,
+                }
+                for row in rows
+            ],
+        }
+
+
 def delete_board_rows(symbol, providers=None):
     with session_scope() as session:
         query = session.query(MarketDataSpotPrice).filter_by(symbol=symbol)

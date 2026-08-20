@@ -1,5 +1,6 @@
 import StatusPill from '../status/StatusPill.jsx'
 import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
+import { providerLabel } from '../../config/providers.js'
 import {
   formatAmount,
   formatClockTime,
@@ -44,7 +45,7 @@ export default function TradeCell({ column, row, onSelect }) {
     case 'entry':
       return formatUnitPrice(trade.entryPrice, trade.assetClass)
     case 'provider':
-      return trade.provider ?? '—'
+      return trade.provider ? providerLabel(trade.provider) : '—'
     case 'price':
       return formatUnitPrice(valuation?.price, trade.assetClass)
     case 'fairValue':

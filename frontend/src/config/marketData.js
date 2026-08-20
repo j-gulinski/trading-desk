@@ -43,54 +43,40 @@ export const MARKET_COLUMNS = [
     defaultDirection: 'asc',
     cellClass: 'data-table__cell--key',
   },
-  { id: 'provider', label: 'Provider', sortable: true, defaultDirection: 'asc' },
-  { id: 'assetClass', label: 'Class', sortable: true, defaultDirection: 'asc' },
+  { id: 'provider', label: 'Provider' },
+  { id: 'assetClass', label: 'Class' },
   {
     id: 'last',
-    label: 'Last',
-    sortable: true,
-    requiresClass: true,
-    snapshot: true,
-    defaultDirection: 'desc',
+    label: 'Mark',
     numeric: true,
+    headerNote: 'normalized',
   },
   {
     id: 'tickChange',
-    label: 'Change',
+    label: 'Move',
     sortable: false,
     numeric: true,
     headerNote: 'last tick',
   },
   {
     id: 'todayChange',
-    label: 'Change',
-    sortable: true,
-    snapshot: true,
-    defaultDirection: 'desc',
+    label: 'Move',
     numeric: true,
     headerNote: 'today',
   },
   {
     id: 'feed',
-    label: 'Market',
-    sortable: true,
-    snapshot: true,
-    defaultDirection: 'asc',
+    label: 'Feed',
   },
   {
     id: 'age',
-    label: 'Quote age',
-    sortable: true,
-    snapshot: true,
-    defaultDirection: 'asc',
+    label: 'Age',
     numeric: true,
+    headerNote: 'provider',
   },
   {
     id: 'updated',
     label: 'Received',
-    sortable: true,
-    snapshot: true,
-    defaultDirection: 'desc',
     numeric: true,
     headerClass: 'data-table__cell--time',
     cellClass: 'data-table__cell--time',
@@ -113,6 +99,3 @@ export const DEFAULT_MARKET_COLUMNS = MARKET_COLUMNS.filter(
 export const DEFAULT_MARKET_SORT = { column: 'symbol', direction: 'asc' }
 
 export const MARKET_FALLBACK_SORT = { column: 'symbol', direction: 'asc' }
-
-export const SORT_REQUIRES_CLASS_HINT =
-  'Choose one asset class before sorting this column'

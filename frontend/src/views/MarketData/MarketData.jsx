@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMarketFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { useTableState } from '../../hooks/useTableState.js'
@@ -8,14 +8,11 @@ import {
   DEFAULT_MARKET_SORT,
   MARKET_COLUMNS,
   MARKET_FALLBACK_SORT,
-  SORT_REQUIRES_CLASS_HINT,
 } from '../../config/marketData.js'
 import {
   boardInstruments,
-  captureMarketSnapshot,
   instrumentId,
   marketRowsOf,
-  sortMarketRows,
   summarizeFeed,
 } from '../../domain/marketData.js'
 import { formatMarketSymbol } from '../../domain/marketFormat.js'
@@ -27,22 +24,29 @@ import FilterBar from '../../components/filters/FilterBar.jsx'
 import { STORAGE_KEYS } from '../../config/storage.js'
 import EmptyState from '../../components/EmptyState.jsx'
 import ColumnPicker from '../../components/tables/ColumnPicker.jsx'
-import SortCaptureStatus from '../../components/tables/SortCaptureStatus.jsx'
 import MarketTable from '../../components/marketdata/MarketTable.jsx'
 import WatchlistSearch from '../../components/marketdata/WatchlistSearch.jsx'
 import ProviderStrategyStrip from '../../components/marketdata/ProviderStrategyStrip.jsx'
 import MarketBenchmark from '../../components/marketdata/MarketBenchmark.jsx'
+import QuoteHistoryPanel from '../../components/marketdata/QuoteHistoryPanel.jsx'
 import { providerLabel } from '../../config/providers.js'
-
-const marketColumnById = new Map(MARKET_COLUMNS.map((column) => [column.id, column]))
 
 function matchesSearch(row, search) {
   if (!search) return true
   return (
     row.instrument.symbol.toLowerCase().includes(search) ||
-    row.instrument.provider?.toLowerCase().includes(search) ||
     formatMarketSymbol(row.instrument).toLowerCase().includes(search)
   )
+}
+
+function sortGroupedRows(rows, direction) {
+  const symbolDirection = direction === 'desc' ? -1 : 1
+  return [...rows].sort((left, right) => {
+    const symbol = left.instrument.symbol.localeCompare(right.instrument.symbol)
+    if (symbol !== 0) return symbol * symbolDirection
+    const provider = left.instrument.provider.localeCompare(right.instrument.provider)
+    return provider || left.instrument.id.localeCompare(right.instrument.id)
+  })
 }
 
 function watchedProvidersOf(items) {
@@ -66,12 +70,17 @@ export default function MarketData() {
   const [activeClass, setActiveClass] = useState(null)
   const [activeProvider, setActiveProvider] = useState(null)
   const [query, setQuery] = useState('')
+  const [selectedId, setSelectedId] = useState(null)
   async function handleRemove(symbol, provider) {
     const removal = await watchlist.remove(symbol, provider)
     if (!removal) return
     const stillPolled = new Set(removal.still_polled ?? [])
     const gone = (removal.removed_providers ?? []).filter((name) => !stillPolled.has(name))
-    if (gone.length > 0) dropRows(gone.map((name) => instrumentId(name, symbol)))
+    if (gone.length > 0) {
+      const ids = gone.map((name) => instrumentId(name, symbol))
+      dropRows(ids)
+      if (selectedId && ids.includes(selectedId)) setSelectedId(null)
+    }
   }
 
   const board = boardInstruments(
@@ -82,10 +91,11 @@ export default function MarketData() {
   const rows = marketRowsOf(board, now)
   const benchmarkRow = rows.find((row) => row.instrument.benchmark) ?? null
   const quoteRows = rows.filter((row) => !row.instrument.benchmark)
+  const selectedRow = quoteRows.find((row) => row.instrument.id === selectedId) ?? null
 
-  function sortDisabledReason(column) {
-    return column?.requiresClass && !activeClass ? SORT_REQUIRES_CLASS_HINT : null
-  }
+  useEffect(() => {
+    if (selectedId && selectedRow == null) setSelectedId(null)
+  }, [selectedId, selectedRow])
 
   const marketTable = useTableState({
     columns: MARKET_COLUMNS,
@@ -93,33 +103,24 @@ export default function MarketData() {
     defaultVisibleColumns: DEFAULT_MARKET_COLUMNS,
     defaultSort: DEFAULT_MARKET_SORT,
     fallbackSort: MARKET_FALLBACK_SORT,
-    captureSnapshot: (column, capturedAt) =>
-      captureMarketSnapshot(quoteRows, column, capturedAt),
-    isSortable: (column) => Boolean(column?.sortable) && !sortDisabledReason(column),
   })
 
-  function handleClassChange(nextClass) {
-    setActiveClass(nextClass)
-    const sortedColumn = marketColumnById.get(marketTable.sort.column)
-    if (!sortedColumn?.requiresClass) return
-    if (!nextClass) marketTable.applyDefaultSort()
-    else if (sortedColumn.snapshot) {
-      marketTable.applySort(marketTable.sort.column, marketTable.sort.direction)
-    }
-  }
-
   const search = query.trim().toLowerCase()
-  const visibleRows = sortMarketRows(
+  const visibleRows = sortGroupedRows(
     quoteRows.filter(
       (row) =>
         (!activeClass || row.instrument.assetClass === activeClass) &&
         (!activeProvider || row.instrument.provider === activeProvider) &&
         matchesSearch(row, search),
     ),
-    marketTable.sort,
+    marketTable.sort.direction,
   )
+  const visibleSymbols = new Set(visibleRows.map((row) => row.instrument.symbol)).size
 
   const summary = summarizeFeed(quoteRows.map((row) => row.instrument), now)
+  const symbolRows = Array.from(
+    new Map(quoteRows.map((row) => [row.instrument.symbol, row])).values(),
+  )
   const providerOptions = countOptions(quoteRows, (row) => row.instrument.provider)
     .map((option) => ({ ...option, label: providerLabel(option.value) }))
 
@@ -171,9 +172,9 @@ export default function MarketData() {
       <FilterBar
         label="CLASS"
         ariaLabel="Filter market instruments by asset class"
-        options={countOptions(quoteRows, (row) => row.instrument.assetClass)}
+        options={countOptions(symbolRows, (row) => row.instrument.assetClass)}
         value={activeClass}
-        onChange={handleClassChange}
+        onChange={setActiveClass}
         search={{
           label: 'SYMBOL',
           value: query,
@@ -211,10 +212,11 @@ export default function MarketData() {
         <div className="market-section__head">
           <div>
             <h2 id="market-board-title">Market quotes</h2>
-            <p>Watchlist by symbol and provider</p>
+            <p>Provider feeds grouped by symbol</p>
           </div>
           <div className="market-section__actions">
-            <span>{visibleRows.length} rows</span>
+            <span>Select a row for observed history</span>
+            <span>{visibleSymbols} symbols · {visibleRows.length} feeds</span>
           </div>
         </div>
         <ProviderStrategyStrip />
@@ -233,20 +235,24 @@ export default function MarketData() {
             </button>
           </p>
         )}
-        <SortCaptureStatus sort={marketTable.sort} />
         {visibleRows.length > 0 ? (
           <MarketTable
             table={marketTable}
             rows={visibleRows}
-            sortDisabledReason={sortDisabledReason}
             onRemove={handleRemove}
             busyKey={watchlist.busyKey}
-            caption="Watchlist quotes by provider with last price, last-tick change, daily change, freshness, and quote time"
+            selectedId={selectedId}
+            onSelect={(row) => setSelectedId(row.instrument.id)}
+            caption="Watchlist symbols with provider subrows for normalized mark, last-tick move, daily move, freshness, and quote time. Select a provider row for observed change history."
           />
         ) : (
           <EmptyState message={boardEmptyMessage()} />
         )}
       </section>
+
+      {selectedRow && (
+        <QuoteHistoryPanel row={selectedRow} onClose={() => setSelectedId(null)} />
+      )}
     </section>
   )
 }

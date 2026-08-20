@@ -162,6 +162,9 @@ export default function WatchlistSearch({
   return (
     <div className="watchlist-search" ref={containerRef}>
       <div className="watchlist-search__controls">
+        <label className="watchlist-search__label" htmlFor="watchlist-search-input">
+          ADD SYMBOL
+        </label>
         <input
           id="watchlist-search-input"
           className="watchlist-search__input"
@@ -169,7 +172,7 @@ export default function WatchlistSearch({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onFocus={() => results != null && setOpen(true)}
-          placeholder="Search for assets..."
+          placeholder="Search provider catalogs…"
           autoComplete="off"
         />
         <span className="watchlist-search__hint" aria-live="polite">

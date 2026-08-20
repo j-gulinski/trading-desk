@@ -55,6 +55,16 @@ export const VALUATION_COLUMNS = [
     numeric: true,
   },
   {
+    id: 'notional',
+    label: 'Invested',
+    required: true,
+    sortable: true,
+    snapshot: true,
+    defaultDirection: 'desc',
+    numeric: true,
+    headerNote: 'entry value',
+  },
+  {
     id: 'unrealized',
     label: 'Unrealized',
     required: true,

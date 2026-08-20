@@ -40,6 +40,7 @@ export default function SidePanel({
             type="button"
             className="side-panel__close"
             onClick={onClose}
+            aria-label="Close panel"
           >
             ×
           </button>

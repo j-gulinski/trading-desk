@@ -426,7 +426,8 @@ Phase 3 is split by dependency. **3a** completes the core two-provider workflow 
 5. **Intraday chart deliberately omitted**: `market_data_snapshots` is sparse application
    observation history, not a complete market series. Finnhub candles require Premium
    access and Twelve Data history alone would make provider rows asymmetric, so the board
-   shows a structured quote summary instead of drawing an incomplete trend.
+   shows a structured quote summary and a discrete selected-row observation tape instead of
+   drawing an incomplete trend.
 
 Validation fixtures: NVDA searched + added live; EURUSD and XAUUSD on Twelve Data with
 UNSUPPORTED under Finnhub — board display only, FX/commodity *trade valuation* stays out of

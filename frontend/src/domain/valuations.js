@@ -232,6 +232,7 @@ function accumulate(target, row) {
   if (valuation.closed) target.closed += 1
   else {
     target.open += 1
+    target.notional += valuation.notional ?? 0
     target.unrealized += valuation.unrealizedPnl ?? 0
   }
   target.realized += valuation.realizedPnl ?? 0
@@ -248,6 +249,7 @@ export function summarizeValuations(rows) {
     live: 0,
     marketClosed: 0,
     stale: 0,
+    notional: 0,
     unrealized: 0,
     realized: 0,
     books: new Set(),
@@ -289,6 +291,7 @@ export function bookRisksOf(rows, riskMetrics = {}) {
         live: 0,
         marketClosed: 0,
         stale: 0,
+        notional: 0,
         unrealized: 0,
         realized: 0,
         alpha: null,
@@ -347,6 +350,7 @@ function snapshotValueOf(row, column) {
   const { valuation } = row
   if (column === 'price') return valuation.price
   if (column === 'fairValue') return valuation.fairValue
+  if (column === 'notional') return valuation.notional
   if (column === 'return') return valuation.closed ? null : valuation.returnPercent
   if (column === 'unrealized') return valuation.closed ? null : valuation.unrealizedPnl
   if (column === 'realized') return valuation.realizedPnl

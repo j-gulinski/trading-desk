@@ -19,6 +19,11 @@ export const endpoints = {
     stream: '/api/market-data/stream',
     snapshot: '/api/market-data/snapshot',
     providers: '/api/market-data/providers',
+    quoteHistory: (provider, symbol, limit = 60) =>
+      withQuery(
+        `/api/market-data/quotes/${encodeURIComponent(provider)}/${encodeURIComponent(symbol)}/history`,
+        { limit },
+      ),
     watchlist: '/api/market-data/watchlist',
     watchlistItem: (symbol, provider) =>
       withQuery(`/api/market-data/watchlist/${encodeURIComponent(symbol)}`, { provider }),

@@ -67,6 +67,7 @@ export default function DataTable({
   rowClassName = () => null,
   cellClassName = () => null,
   cellTitle = () => undefined,
+  cellProps = () => null,
   onRowClick = null,
   caption,
 }) {
@@ -90,7 +91,7 @@ export default function DataTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {rows.map((row, rowIndex) => {
             const rowClass = classes(
               rowClassName(row),
               onRowClick && 'data-table__row--interactive',
@@ -100,23 +101,36 @@ export default function DataTable({
                 key={rowKey(row)}
                 className={rowClass || undefined}
                 data-panel-trigger={onRowClick ? '' : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onKeyDown={onRowClick ? (event) => {
+                  if (event.target !== event.currentTarget) return
+                  if (event.key !== 'Enter' && event.key !== ' ') return
+                  event.preventDefault()
+                  onRowClick(row)
+                } : undefined}
               >
-                {columns.map((column) => (
-                  <td
-                    key={column.id}
-                    className={
-                      classes(
-                        column.numeric && 'data-table__cell--num',
-                        column.cellClass,
-                        cellClassName(column, row),
-                      ) || undefined
-                    }
-                    title={cellTitle(column, row)}
-                  >
-                    {renderCell(column, row)}
-                  </td>
-                ))}
+                {columns.map((column) => {
+                  const props = cellProps(column, row, rowIndex) ?? {}
+                  if (props.skip) return null
+                  return (
+                    <td
+                      key={column.id}
+                      rowSpan={props.rowSpan}
+                      className={
+                        classes(
+                          column.numeric && 'data-table__cell--num',
+                          column.cellClass,
+                          props.className,
+                          cellClassName(column, row),
+                        ) || undefined
+                      }
+                      title={cellTitle(column, row)}
+                    >
+                      {renderCell(column, row)}
+                    </td>
+                  )
+                })}
               </tr>
             )
           })}

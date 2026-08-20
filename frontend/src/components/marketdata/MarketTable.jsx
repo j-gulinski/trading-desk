@@ -8,9 +8,37 @@ function rowKey(row) {
   return row.instrument.id
 }
 
-function rowClassName(row) {
+function groupedRowsOf(rows) {
+  const groups = new Map()
+  for (const row of rows) {
+    const symbol = row.instrument.symbol
+    const group = groups.get(symbol) ?? []
+    group.push(row)
+    groups.set(symbol, group)
+  }
+
+  const metadata = new Map()
+  for (const group of groups.values()) {
+    group.forEach((row, index) => {
+      metadata.set(row.instrument.id, {
+        first: index === 0,
+        last: index === group.length - 1,
+        rowSpan: group.length,
+      })
+    })
+  }
+  return metadata
+}
+
+function rowClassName(row, selectedId, group) {
   const muted = row.state === 'STALE' || row.state === 'MISSING'
-  return muted ? 'data-table__row--muted' : ''
+  return [
+    'market-provider-row',
+    group?.first ? 'market-provider-row--first' : '',
+    group?.last ? 'market-provider-row--last' : '',
+    muted ? 'data-table__row--muted' : '',
+    row.instrument.id === selectedId ? 'data-table__row--selected' : '',
+  ].filter(Boolean).join(' ')
 }
 
 function cellClassName(column, row) {
@@ -29,10 +57,13 @@ export default function MarketTable({
   table,
   rows,
   caption,
-  sortDisabledReason,
   onRemove,
   busyKey,
+  selectedId,
+  onSelect,
 }) {
+  const groupedRows = groupedRowsOf(rows)
+
   return (
     <DataTable
       columns={table.columns}
@@ -48,11 +79,17 @@ export default function MarketTable({
       )}
       sort={table.sort}
       onSort={table.toggleSort}
-      sortDisabledReason={sortDisabledReason}
-      rowClassName={rowClassName}
+      rowClassName={(row) => rowClassName(row, selectedId, groupedRows.get(row.instrument.id))}
       cellClassName={cellClassName}
       cellTitle={cellTitle}
+      cellProps={(column, row) => {
+        if (column.id !== 'symbol') return null
+        const group = groupedRows.get(row.instrument.id)
+        if (!group?.first) return { skip: true }
+        return { rowSpan: group.rowSpan, className: 'market-symbol-cell' }
+      }}
       caption={caption}
+      onRowClick={onSelect}
     />
   )
 }

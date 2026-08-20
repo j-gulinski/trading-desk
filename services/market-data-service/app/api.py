@@ -102,6 +102,28 @@ def get_quotes():
     ]
     return to_json(rows)
 
+
+@app.route("/quotes/<provider>/<symbol>/history")
+def get_quote_history(provider, symbol):
+    response.content_type = "application/json"
+    normalized_provider = provider.strip().upper()
+    normalized_symbol = symbol.strip().upper()
+    try:
+        limit = int(request.query.limit or 60)
+    except (TypeError, ValueError):
+        response.status = 400
+        return to_json({"error": "limit must be an integer between 1 and 200"})
+    if not 1 <= limit <= 200:
+        response.status = 400
+        return to_json({"error": "limit must be between 1 and 200"})
+    if normalized_provider not in scheduler.wired_quote_providers():
+        response.status = 404
+        return to_json({"error": f"unknown or unwired provider: {normalized_provider}"})
+    return to_json(persistence.quote_history(
+        normalized_provider, normalized_symbol, limit
+    ))
+
+
 @app.route("/watchlist")
 def get_watchlist():
     response.content_type = "application/json"

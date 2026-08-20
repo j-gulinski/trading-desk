@@ -301,10 +301,18 @@ The board deliberately does not draw an intraday trend. `market_data_snapshots` 
 sparse changes observed while this application was running, not a complete market series;
 connecting those points or inserting previous close creates movement through unobserved
 time. Finnhub stock candles require Premium access, while using Twelve Data history only for
-one provider would make the comparison asymmetric. The UI therefore keeps the truthful
-summary: Last, change from the immediately previous accepted provider quote, Previous
-close/Change today, market state and quote age. The Last value briefly pulses on every
-accepted update, including a neutral pulse for an unchanged quote.
+one provider would make the comparison asymmetric.
+
+Selecting a provider-symbol row opens a newest-first tape of its latest 60 stored changes.
+The selection performs one database-only history read. While it remains selected, only an
+SSE tick whose bid, ask, last or normalized mark changed triggers another read; unchanged
+confirmation ticks do not. This adds no polling timer and spends no provider credits. The
+board itself shows Mark, the immediately previous accepted tick move, Previous close/Change
+today, market state and quote age.
+
+The board renders one symbol group with stable provider subrows. The symbol is shown once;
+each provider line remains its own history and unwatch target. Symbol groups sort
+alphabetically, while the provider filter can reduce each group to one feed.
 
 ### Endpoints
 
@@ -313,6 +321,7 @@ accepted update, including a neutral pulse for an unchanged quote.
 | `GET /snapshot` | the board read from the DB (warm after restart) + `stream_id` — the UI's seed |
 | SSE `/stream` | `market_tick` per successful poll, provider-tagged, with `stream_id`/`event_id` |
 | `GET /quotes` | stored active-set quotes + computed freshness state; filterable by `symbol`, `asset_class`, `provider` |
+| `GET /quotes/<provider>/<symbol>/history?limit=` | latest stored change observations for one provider-symbol; limit 1–200 |
 | `GET /watchlist` · `POST /watchlist` · `DELETE /watchlist/<symbol>?provider=` | the symbol master, self-service and per provider |
 | `GET /symbols/search?q=` | provider-tagged discovery, cached 10 min |
 | `GET /providers` | all six registry entries (capabilities, wired flag) + runtime for wired ones: status, budget + daily ledger, market session, active symbols, and the current poll `strategy` (mode, cadences, server-composed description — what the board strip and the ops card display) |

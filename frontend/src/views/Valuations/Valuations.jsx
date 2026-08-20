@@ -174,6 +174,11 @@ export default function Valuations() {
 
       <div className="valuation-summary">
         <StatCard
+          label={`CAPITAL INVESTED · ${currency}`}
+          value={summary.currency == null ? '—' : formatAmount(summary.notional)}
+          sub="gross entry value of open positions"
+        />
+        <StatCard
           label={`UNREALIZED PNL · ${currency}`}
           value={formatSignedAmount(summary.unrealized)}
           sub={`${summary.open} open positions · ${summary.books} books`}
