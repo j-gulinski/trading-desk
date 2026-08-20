@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiGet } from '../services/apiClient.js'
 import { endpoints } from '../services/endpoints.js'
 import { useBufferedUpdates } from './useBufferedUpdates.js'
@@ -7,13 +7,15 @@ import { STORAGE_KEYS } from '../config/storage.js'
 import { useStreamSeed } from './useStreamSeed.js'
 import { STREAM_EVENTS } from '../config/marketData.js'
 import {
+  dropInstruments,
+  instrumentId,
   instrumentsForStorage,
   instrumentsFromEvent,
   mergeInstruments,
   reconcileSnapshotInstruments,
   restoreInstruments,
+  seedInstrumentHistories,
 } from '../domain/marketData.js'
-
 
 function readStoredTickCount() {
   try {
@@ -55,7 +57,6 @@ function storeInstruments(instruments) {
 export function useMarketFeed() {
   const [instruments, setInstruments] = useState(readStoredInstruments)
   const [tickCount, setTickCount] = useState(readStoredTickCount)
-
   const receivedTicksRef = useRef(tickCount)
 
   useEffect(() => {
@@ -68,9 +69,20 @@ export function useMarketFeed() {
     storeTickCount(receivedTicksRef.current)
   })
 
+  const dropRows = useCallback((ids) => {
+    setInstruments((previous) => dropInstruments(previous, ids))
+  }, [])
+
   const { status } = useSseStream(endpoints.marketData.stream, {
     events: STREAM_EVENTS,
     onEvent: (name, data) => {
+      if (name === 'market_remove') {
+        const rows = Array.isArray(data?.rows) ? data.rows : []
+        if (rows.length > 0) {
+          dropRows(rows.map((row) => instrumentId(row.provider, row.symbol)))
+        }
+        return
+      }
       const receivedAtMs = Date.now()
       const updates = instrumentsFromEvent(name, data)
       if (updates.length === 0) return
@@ -81,14 +93,40 @@ export function useMarketFeed() {
     },
   })
 
-  const seedStatus = useStreamSeed(status, (signal) =>
-    apiGet(endpoints.marketData.snapshot, { signal }).then((snapshot) => {
-      setInstruments((previous) => reconcileSnapshotInstruments(previous, snapshot))
-    }),
-  )
+  const seedStatus = useStreamSeed(status, (signal) => {
+    const seedStartedMs = Date.now()
+    return apiGet(endpoints.marketData.snapshot, { signal }).then((snapshot) => {
+      setInstruments((previous) =>
+        reconcileSnapshotInstruments(previous, snapshot, seedStartedMs),
+      )
+    })
+  })
+
+  const activePairs = Object.keys(instruments).sort().join('|')
+
+  useEffect(() => {
+    if (seedStatus !== 'ready') return undefined
+    const controller = new AbortController()
+    apiGet(endpoints.marketData.history, {
+      signal: controller.signal,
+    })
+      .then((history) => {
+        setInstruments((previous) => seedInstrumentHistories(previous, history?.series))
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return
+      })
+    return () => controller.abort()
+  }, [seedStatus, activePairs])
 
   return useMemo(
-    () => ({ instruments, tickCount, status, seedStatus }),
-    [instruments, tickCount, status, seedStatus],
+    () => ({
+      instruments,
+      tickCount,
+      status,
+      seedStatus,
+      dropRows,
+    }),
+    [instruments, tickCount, status, seedStatus, dropRows],
   )
 }

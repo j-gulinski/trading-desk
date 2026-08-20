@@ -1,17 +1,18 @@
 import DataTable from '../tables/DataTable.jsx'
 import MarketCell from './MarketCell.jsx'
 
-const LAST_TICK_TITLE = 'Latest accepted value compared with the previous accepted value'
+const TODAY_TITLE = 'Latest accepted value compared with the previous session close'
 
 function rowKey(row) {
-  return `${row.instrument.id}:${row.instrument.updateSeq}`
+  return row.instrument.id
 }
 
 function rowClassName(row) {
   const { lastDirection } = row.instrument
   const flashing = row.live && lastDirection !== 'flat'
+  const muted = row.state === 'STALE' || row.state === 'MISSING'
   return [
-    !row.live && 'data-table__row--muted',
+    muted && 'data-table__row--muted',
     flashing && `data-table__row--tick-${lastDirection}`,
   ]
     .filter(Boolean)
@@ -19,27 +20,38 @@ function rowClassName(row) {
 }
 
 function cellClassName(column, row) {
-  if (column.id === 'observedChange') return `delta delta--${row.observedDirection}`
-  if (column.id === 'lastTickChange') return `delta delta--${row.lastTickDirection}`
+  if (column.id === 'todayChange') return `delta delta--${row.todayDirection}`
   return null
 }
 
-function cellTitle(column, row) {
-  if (column.id === 'observedChange') {
-    const { observations } = row.observedChange
-    return `Since loaded · ${observations} observed ${observations === 1 ? 'value' : 'values'}`
-  }
-  if (column.id === 'lastTickChange') return LAST_TICK_TITLE
+function cellTitle(column) {
+  if (column.id === 'todayChange') return TODAY_TITLE
   return undefined
 }
 
-export default function MarketTable({ table, rows, caption, sortDisabledReason }) {
+export default function MarketTable({
+  table,
+  rows,
+  caption,
+  historyLabel,
+  sortDisabledReason,
+  onRemove,
+  busyKey,
+}) {
   return (
     <DataTable
       columns={table.columns}
       rows={rows}
       rowKey={rowKey}
-      renderCell={(column, row) => <MarketCell column={column} row={row} />}
+      renderCell={(column, row) => (
+        <MarketCell
+          column={column}
+          row={row}
+          historyLabel={historyLabel}
+          onRemove={onRemove}
+          busyKey={busyKey}
+        />
+      )}
       sort={table.sort}
       onSort={table.toggleSort}
       sortDisabledReason={sortDisabledReason}

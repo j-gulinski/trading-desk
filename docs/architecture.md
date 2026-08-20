@@ -1,9 +1,9 @@
 # Architecture — the base system
 
 Six Python services, one Postgres, one React frontend, started by `docker compose up --build`.
-This is the base the provider build ([hw5-plan-v2.md](hw5-plan-v2.md)) lands on: the synthetic
-flows of the forked repo are gone, and market data comes from real providers — Finnhub first
-(Phase 2), the rest landing phase by phase per the plan.
+Synthetic flows from the forked repository are gone, and market data comes from configured
+real providers. Future capability sequencing lives in the
+[implementation roadmap](implementation-roadmap.md).
 
 ## The system in seven steps
 
@@ -56,16 +56,17 @@ deployment-independent.
 - **`books`** — `book_id`, name, expected asset class, `is_active` (retirement is a soft
   delete).
 - **`trades`** — identity, book, side, quantity, prices, lifecycle status, and `metadata JSONB`
-  holding the frozen terms; `asset_class` is `TEXT`, not a database enum. Phase 1 added the
-  provenance columns (D2): `market_data_provider`, `entry_price_timestamp`,
-  `entry_snapshot_id` (FK to the quote-history row used at execution), `client_seen_price`,
-  `created_by_service` — present in the schema; nothing writes them at execution yet.
+  holding the frozen terms; `asset_class` is `TEXT`, not a database enum. Provenance columns
+  (D2) are `market_data_provider`, `entry_price_timestamp`,
+  optional `entry_snapshot_id` (FK when the exact board observation has a change snapshot),
+  `client_seen_price`, `created_by_service`, plus matching close timestamp/snapshot fields —
+  written by the execution gate on every trade the ticket creates.
 - **`valuations`** — one row per repricing, plus the terminal row written at close; stamped
-  with `market_data_provider` + `market_data_timestamp` from Phase 2 on.
+  with `market_data_provider` + `market_data_timestamp`.
 - **`audit_logs`** — service, event type, severity, message, entity, `correlation_id`,
   timestamp. The audit trail is the business record; rotating log files plus monitoring's
   bounded in-memory buffers are the technical one.
-- **The market store** (reshaped by the Phase 1 migration; details in
+- **The market store** (details in
   [market-data.md](market-data.md)): `market_data_spot_prices` — the latest quote board,
   unique (provider, symbol), upserted; `market_data_snapshots` — change-only quote history
   with raw payloads; `market_data_curves` / `market_data_curve_points` — curve sets with
@@ -75,7 +76,7 @@ deployment-independent.
 Migrations live in `db/versions/` (Alembic) and run as the one-shot `db-migrations` container
 before any service starts.
 
-## Runtime shape (Phase 0)
+## Shared runtime
 
 - Every service boots through `shared/service_runtime.py`:
   `run_service(name, app, port, startup=…, background=…)` — startup hooks run to completion
@@ -100,5 +101,5 @@ before any service starts.
 - **Honest UI over fake data** — unavailable values render as real states (`PENDING`, `n/a`,
   `INSUFFICIENT_DATA`), never invented zeros.
 - **Bounded everything** — every queue, buffer, and rendered table has an explicit cap.
-- **Docs are produced per phase** ([README.md](README.md)) — a document describes the system
-  as it is now, or it does not exist.
+- **Docs describe maintained capabilities** ([README.md](README.md)) — a document describes
+  current behavior, its boundaries and how to validate it, or it does not exist.

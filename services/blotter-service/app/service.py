@@ -50,6 +50,12 @@ def _trade_to_dict(trade) -> dict:
         "closed_at": trade.closed_at,
         "close_price": trade.close_price,
         "close_reason": trade.close_reason,
+        "market_data_provider": trade.market_data_provider,
+        "entry_price_timestamp": trade.entry_price_timestamp,
+        "entry_snapshot_id": trade.entry_snapshot_id,
+        "close_price_timestamp": trade.close_price_timestamp,
+        "close_snapshot_id": trade.close_snapshot_id,
+        "client_seen_price": trade.client_seen_price,
     }
 
 

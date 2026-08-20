@@ -5,7 +5,8 @@ import { sortRows } from './tableSort.js'
 import { statusOf as liveValuationStatusOf } from './valuations.js'
 
 const VALUATION_STATUS_RANK = {
-  LIVE: 4,
+  LIVE: 5,
+  MARKET_CLOSED: 4,
   STALE: 3,
   PENDING: 2,
   CLOSED: 1,
@@ -74,6 +75,10 @@ function tradeOf(data, bookNames = new Map()) {
     side,
     quantity: Number.isFinite(quantity) ? Math.abs(quantity) : null,
     entryPrice: toNum(data.trade_price),
+    provider: data.market_data_provider ?? null,
+    entryPriceAtMs: toTime(data.entry_price_timestamp),
+    closePriceAtMs: toTime(data.close_price_timestamp),
+    clientSeenPrice: toNum(data.client_seen_price),
     currency: data.currency ?? null,
     status,
     openedAtMs: toTime(data.opened_at),
@@ -124,20 +129,20 @@ function lifecycleOf(trade, valuation) {
   return trade.status === 'ACTIVE' && !valuation?.closed ? 'OPEN' : 'CLOSED'
 }
 
-function valuationStatusOf(trade, valuation, source, now) {
+function valuationStatusOf(trade, valuation, source, now, instruments) {
   if (trade.status === 'CANCELLED') return 'CANCELLED'
   if (trade.status !== 'ACTIVE' || valuation?.closed) return 'CLOSED'
   if (!valuation) return 'PENDING'
-  if (source === 'feed') return liveValuationStatusOf(valuation, now)
+  if (source === 'feed') return liveValuationStatusOf(valuation, now, instruments)
   if (!Number.isFinite(valuation.valuationTimeMs)) return 'STALE'
   return now - valuation.valuationTimeMs > VALUATION_STALE_AFTER_MS ? 'STALE' : 'LIVE'
 }
 
-export function tradeRowsOf(trades, liveValuations, now) {
+export function tradeRowsOf(trades, liveValuations, now, instruments = null) {
   return trades.map((trade) => {
     const { valuation, source } = latestValuationOf(trade, liveValuations[trade.id])
     const lifecycle = lifecycleOf(trade, valuation)
-    const valuationStatus = valuationStatusOf(trade, valuation, source, now)
+    const valuationStatus = valuationStatusOf(trade, valuation, source, now, instruments)
     return {
       trade,
       valuation,
@@ -167,7 +172,7 @@ export function tradeBookOptionsOf(rows) {
   )
 }
 
-const SEARCHED_FIELDS = ['tradeRef', 'id', 'bookName', 'symbol', 'assetClass']
+const SEARCHED_FIELDS = ['tradeRef', 'id', 'bookName', 'symbol', 'assetClass', 'provider']
 
 export function matchesTradeFilters(row, { book, assetClass, search }) {
   const { trade } = row
@@ -186,6 +191,7 @@ function structuralValueOf(row, column) {
   if (column === 'side') return trade.side
   if (column === 'quantity') return trade.quantity
   if (column === 'entry') return trade.entryPrice
+  if (column === 'provider') return trade.provider
   if (column === 'opened') return trade.openedAtMs
   return undefined
 }

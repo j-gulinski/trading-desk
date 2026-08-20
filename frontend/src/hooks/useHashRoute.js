@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 function readPath() {
-  return window.location.hash.replace(/^#\/?/, '')
+  return window.location.hash.replace(/^#\/?/, '').split('?')[0]
 }
 
 export function useHashRoute() {

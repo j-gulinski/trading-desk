@@ -2,6 +2,7 @@ import queue
 import threading
 import uuid
 
+from shared.functions import utcnow
 from shared.logging_config import get_logger
 from app.config import SERVICE_NAME
 
@@ -40,4 +41,16 @@ def publish_tick(event_type, tick):
 def publish_quote(tick):
     publish_tick(
         "market_tick", {**tick, "stream_id": stream_id, "event_id": _next_event_id()}
+    )
+
+
+def publish_removal(rows):
+    publish_tick(
+        "market_remove",
+        {
+            "rows": list(rows),
+            "stream_id": stream_id,
+            "event_id": _next_event_id(),
+            "event_time": utcnow(),
+        },
     )

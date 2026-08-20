@@ -1,14 +1,11 @@
 from shared.config import env_float, env_int, env_str
 from shared.pricing_math import MINIMUM_OBSERVATIONS
-from shared.providers import FINNHUB
 
 SERVICE_NAME = "pricing-service"
 PORT = 8002
 
 TRADE_REFRESH_SECONDS = 2
 VALUATION_STREAM_QUEUE_SIZE = 5000
-
-DEFAULT_QUOTE_PROVIDER = FINNHUB
 
 MARKET_DATA_STREAM_URL = env_str("MARKET_DATA_STREAM_URL")
 

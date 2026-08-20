@@ -10,7 +10,8 @@ from shared.term_schemas import DEFAULT_CURVE
 from shared.models import Book, Trade, Valuation
 from shared.functions import utcnow, get_iso_timestamp
 from shared.logging_config import get_logger
-from app.config import DEFAULT_QUOTE_PROVIDER, SERVICE_NAME
+from app.config import SERVICE_NAME
+from shared.config import DEFAULT_QUOTE_PROVIDER
 from app.pnl import signed_quantity
 
 log = get_logger(SERVICE_NAME)
@@ -54,6 +55,12 @@ def get_spot(provider, symbol):
         return spots.get((provider, symbol))
 
 
+def drop_spots(rows):
+    with data_lock:
+        for row in rows:
+            spots.pop((row.get("provider"), row.get("symbol")), None)
+
+
 def has_spots():
     with data_lock:
         return len(spots) > 0
@@ -65,7 +72,12 @@ def get_curve(name):
 
 
 def trade_provider(trade):
-    return trade.get("market_data_provider") or DEFAULT_QUOTE_PROVIDER
+    provider = trade.get("market_data_provider")
+    if provider:
+        return provider
+    log.warning("trade_provider_defaulted", trade_id=trade.get("trade_id"),
+                symbol=trade.get("symbol"), provider=DEFAULT_QUOTE_PROVIDER)
+    return DEFAULT_QUOTE_PROVIDER
 
 
 def trades_for_quote(provider, symbol):
@@ -268,6 +280,11 @@ def finalize_closed_trades():
                 "unrealized_pnl": Decimal("0"),
                 "realized_pnl": realized,
                 "total_pnl": realized,
+                "market_data_provider": t.market_data_provider,
+                "market_data_timestamp": (
+                    t.close_price_timestamp.isoformat()
+                    if t.close_price_timestamp is not None else None
+                ),
                 "valuation_time": get_iso_timestamp(),
                 "valuation_payload": payload,
             }
@@ -283,6 +300,8 @@ def finalize_closed_trades():
                 realized_pnl=realized,
                 total_pnl=realized,
                 currency=t.trade_currency,
+                market_data_provider=t.market_data_provider,
+                market_data_timestamp=t.close_price_timestamp,
                 valuation_payload=valuation["valuation_payload"],
                 created_at=utcnow(),
             ))

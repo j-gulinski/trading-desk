@@ -18,12 +18,17 @@ export const endpoints = {
   marketData: {
     stream: '/api/market-data/stream',
     snapshot: '/api/market-data/snapshot',
+    history: '/api/market-data/history',
+    providers: '/api/market-data/providers',
+    watchlist: '/api/market-data/watchlist',
+    watchlistItem: (symbol, provider) =>
+      withQuery(`/api/market-data/watchlist/${encodeURIComponent(symbol)}`, { provider }),
+    symbolSearch: (q) => withQuery('/api/market-data/symbols/search', { q }),
   },
   pricing: {
     stream: '/api/pricing/valuation-stream',
     valuations: '/api/pricing/valuations',
     bookRisk: '/api/pricing/book-risk',
-    price: '/api/pricing/price',
   },
   books: {
     list: '/api/books/books',
@@ -41,6 +46,5 @@ export const endpoints = {
     submit: '/api/trade-action/trade-actions',
     queueStatus: '/api/trade-action/queue/status',
     instruments: '/api/trade-action/instruments',
-    termSchemas: '/api/trade-action/instruments/term-schemas',
   },
 }

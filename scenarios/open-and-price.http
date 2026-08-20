@@ -1,0 +1,76 @@
+###############################################################################
+# Scenario: open and price the spot classes served by the wired providers
+#
+# Prerequisites: AAPL is watched on FINNHUB; EURUSD and XAUUSD are watched on
+# TWELVE_DATA; each row has a usable LIVE or CLOSED quote.
+###############################################################################
+
+@marketData = http://localhost:8001
+@books      = http://localhost:8004
+@actions    = http://localhost:8008
+@pricing    = http://localhost:8002
+
+### Current provider rows
+# @name equityQuote
+GET {{marketData}}/quotes/FINNHUB/AAPL
+
+###
+# @name fxQuote
+GET {{marketData}}/quotes/TWELVE_DATA/EURUSD
+
+###
+# @name metalQuote
+GET {{marketData}}/quotes/TWELVE_DATA/XAUUSD
+
+### One matching book per asset class
+# @name equityBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "EQUITY_{{$timestamp}}", "expected_asset_class": "EQUITY" }
+
+###
+# @name fxBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "FX_{{$timestamp}}", "expected_asset_class": "FX" }
+
+###
+# @name metalBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "METAL_{{$timestamp}}", "expected_asset_class": "COMMODITY" }
+
+### Open with the provider and price the user saw; execution is resolved again server-side
+# @name equityTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "equity-{{$timestamp}}", "book_id": "{{equityBook.response.body.$.book_id}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "FINNHUB", "client_seen_price": "{{equityQuote.response.body.$.mid}}" }
+
+###
+# @name fxTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "fx-{{$timestamp}}", "book_id": "{{fxBook.response.body.$.book_id}}", "asset_class": "FX", "symbol": "EURUSD", "side": "BUY", "quantity": 1000, "market_data_provider": "TWELVE_DATA", "client_seen_price": "{{fxQuote.response.body.$.mid}}" }
+
+###
+# @name metalTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "metal-{{$timestamp}}", "book_id": "{{metalBook.response.body.$.book_id}}", "asset_class": "COMMODITY", "symbol": "XAUUSD", "side": "BUY", "quantity": 1, "market_data_provider": "TWELVE_DATA", "client_seen_price": "{{metalQuote.response.body.$.mid}}" }
+
+# Wait about 3 seconds for the pricing reconciliation loop.
+
+### Every valuation retains the provider selected at entry
+GET {{pricing}}/valuations/{{equityTrade.response.body.$.trade_id}}
+
+###
+GET {{pricing}}/valuations/{{fxTrade.response.body.$.trade_id}}
+
+###
+GET {{pricing}}/valuations/{{metalTrade.response.body.$.trade_id}}

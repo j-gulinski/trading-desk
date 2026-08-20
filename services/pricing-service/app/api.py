@@ -4,10 +4,12 @@ from bottle import request, response
 
 from app import cache
 from app.config import SERVICE_NAME, VALUATION_STREAM_QUEUE_SIZE
+from shared.config import DEFAULT_QUOTE_PROVIDER
 from app.schemas import ScenarioRequest
 from app.valuation_engine import price_instrument
 from shared.db import session_scope
-from shared.symbols import watchlist_item, watchlist_spot_symbols
+from shared.active_set import load_active_set
+from shared.symbols import SPOT_ASSET_CLASSES, watchlist_spot_symbols
 from shared.term_schemas import validate_terms
 from app.scenario import run_scenario
 from shared.serialization import to_json
@@ -46,28 +48,35 @@ def price_preview():
             return to_json({"error": error, "symbol": symbol})
     else:
         with session_scope() as session:
-            item = watchlist_item(session, symbol)
-            terms = (
-                {"asset_class": item.asset_class, "currency": item.currency}
-                if item is not None else None
-            )
+            entry = load_active_set(session).get((symbol or "").strip().upper())
+        terms = (
+            {"asset_class": entry.asset_class, "currency": entry.currency}
+            if entry is not None else None
+        )
         if terms is None:
             log.warning("price_preview_rejected", symbol=symbol, reason="instrument not found")
             response.status = 404
             return to_json({"error": "instrument not found", "symbol": symbol})
-    priced = price_instrument(terms["asset_class"], symbol, terms)
+    provider = (body.get("market_data_provider") or "").strip().upper() or None
+    priced = price_instrument(terms["asset_class"], symbol, terms, provider)
     if priced is None:
         log.warning("price_preview_unavailable", symbol=symbol,
-                    asset_class=terms["asset_class"])
+                    asset_class=terms["asset_class"], provider=provider)
         response.status = 503
-        return to_json({"error": "required market data is not available", "symbol": symbol})
+        return to_json({
+            "error": f"{provider or DEFAULT_QUOTE_PROVIDER} has no current quote for {symbol}"
+            if terms["asset_class"] in SPOT_ASSET_CLASSES
+            else f"no curve source is wired for {terms['asset_class']}",
+            "symbol": symbol,
+        })
     price, multiplier = priced
     log.info("price_preview", symbol=symbol, asset_class=terms["asset_class"],
-             price=str(price))
+             provider=provider, price=str(price))
     return to_json({
         "symbol": symbol,
         "asset_class": terms["asset_class"],
         "currency": terms.get("currency", "USD"),
+        "market_data_provider": provider or DEFAULT_QUOTE_PROVIDER,
         "price": price,
         "multiplier": multiplier,
     })

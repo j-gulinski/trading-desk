@@ -1,24 +1,14 @@
-
-import {
-  HISTORY_LENGTH,
-  MARKET_STALE_AFTER_MS,
-  BOND_CURVE_TENORS,
-} from '../config/marketData.js'
-import { formatTenor } from './marketFormat.js'
+import { HISTORY_POINT_CAP } from '../config/marketData.js'
 import { directionOf } from './formatting.js'
 import { sortRows } from './tableSort.js'
 
-const MARKET_STATE_STORAGE_VERSION = 2
+const MARKET_STATE_STORAGE_VERSION = 8
 const MAX_STORED_INSTRUMENTS = 100
 
 function toNum(value) {
   if (value == null || value === '') return null
   const n = Number(value)
   return Number.isFinite(n) ? n : null
-}
-
-function pickSpotValue(tick) {
-  return toNum(tick.mid ?? tick.last ?? tick.spot)
 }
 
 function eventIdOf(tick) {
@@ -32,75 +22,61 @@ function eventTimeOf(tick) {
   return Number.isFinite(eventTime) ? eventTime : null
 }
 
+export function instrumentId(provider, symbol) {
+  return `${provider}:${symbol}`
+}
+
 function spotInstrument(tick, snapshotStreamId = null) {
   if (!tick || typeof tick.symbol !== 'string' || tick.symbol.length === 0) return null
   const provider = typeof tick.provider === 'string' ? tick.provider : null
   const providerTimestampMs = Date.parse(tick.provider_timestamp ?? '')
+  const polledAtMs = Date.parse(tick.received_at ?? '')
   const staleAfterSeconds = toNum(tick.stale_after_seconds)
+  const closedStaleAfterSeconds = toNum(tick.closed_stale_after_seconds)
   return {
-    id: provider ? `${provider}:${tick.symbol}` : tick.symbol,
+    id: provider ? instrumentId(provider, tick.symbol) : tick.symbol,
     symbol: tick.symbol,
     provider,
     assetClass: tick.asset_class ?? 'UNKNOWN',
     currency: tick.currency ?? null,
-    value: pickSpotValue(tick),
+    value: toNum(tick.mid ?? tick.last),
     bid: toNum(tick.bid),
     ask: toNum(tick.ask),
+    last: toNum(tick.last),
+    previousClose: toNum(tick.previous_close),
     grade: tick.quote_grade ?? null,
     providerTimestampMs: Number.isFinite(providerTimestampMs) ? providerTimestampMs : null,
+    polledAtMs: Number.isFinite(polledAtMs) ? polledAtMs : null,
     staleAfterMs: staleAfterSeconds != null ? staleAfterSeconds * 1000 : null,
-    unit: 'price',
-    tenor: null,
+    closedStaleAfterMs:
+      closedStaleAfterSeconds != null ? closedStaleAfterSeconds * 1000 : null,
+    marketOpen: typeof tick.market_open === 'boolean' ? tick.market_open : null,
+    watched: tick.watched === true,
+    held: tick.held === true,
+    benchmark: tick.benchmark === true,
     sourceStreamId: tick.stream_id ?? snapshotStreamId,
     sourceEventId: eventIdOf(tick),
     eventTimeMs: eventTimeOf(tick),
   }
 }
 
-function curveInstruments(curve, snapshotStreamId = null) {
-  if (!curve || typeof curve.curve_name !== 'string' || curve.curve_name.length === 0) {
-    return []
-  }
-  const tenors = curve.tenors ?? []
-  const rates = curve.rates ?? []
-  const eventTimeMs = eventTimeOf(curve)
-  return tenors.flatMap((tenor, i) =>
-    BOND_CURVE_TENORS.includes(Number(tenor))
-      ? [
-          {
-            id: `${curve.curve_name}@${tenor}`,
-            symbol: `${curve.curve_name} · ${formatTenor(tenor)}`,
-            assetClass: 'RATE',
-            currency: curve.currency ?? null,
-            value: toNum(rates[i]),
-            bid: null,
-            ask: null,
-            unit: 'rate',
-            tenor,
-            sourceStreamId: curve.stream_id ?? snapshotStreamId,
-            sourceEventId: eventIdOf(curve),
-            eventTimeMs,
-          },
-        ]
-      : [],
-  )
-}
-
 export function instrumentsFromEvent(name, data) {
-  if (name === 'curve_tick') return curveInstruments(data)
-  if (name === 'market_tick') return [spotInstrument(data)].filter(Boolean)
-  return []
+  if (name !== 'market_tick') return []
+  return [spotInstrument(data)].filter(Boolean)
 }
 
 function instrumentsFromSnapshot(snapshot) {
   const streamId = snapshot?.stream_id ?? null
-  const spots = Object.values(snapshot?.spots ?? {})
+  return Object.values(snapshot?.spots ?? {})
     .map((spot) => spotInstrument(spot, streamId))
     .filter(Boolean)
-  const curves = Object.values(snapshot?.curves ?? {}).flatMap((curve) =>
-    curveInstruments(curve, streamId),
-  )
-  return [...spots, ...curves]
+}
+
+function appendPoint(history, atMs, value) {
+  if (!Number.isFinite(value) || !Number.isFinite(atMs)) return history
+  const last = history[history.length - 1]
+  if (last && last[0] === atMs && last[1] === value) return history
+  return [...history, [atMs, value]].slice(-HISTORY_POINT_CAP)
 }
 
 function mergeInstrument(prev, update) {
@@ -132,33 +108,24 @@ function mergeInstrument(prev, update) {
     }
   }
 
-  const previous = sourceRestarted ? null : prev
-  const prevHistory = previous?.history ?? []
-  const hasValue = Number.isFinite(update.value)
-  const history = hasValue
-    ? [...prevHistory, update.value].slice(-HISTORY_LENGTH)
-    : prevHistory
-  const observedOpen = Number.isFinite(previous?.observedOpen)
-    ? previous.observedOpen
-    : (prevHistory.find(Number.isFinite) ?? update.value)
-  const observationCount =
-    (previous?.observationCount ?? prevHistory.length) + (hasValue ? 1 : 0)
+  const previous = sourceRestarted ? { history: prev.history } : prev
+  const history = appendPoint(
+    previous?.history ?? [],
+    update.eventTimeMs ?? update.receivedAtMs,
+    update.value,
+  )
   const previousValue =
-    previous && hasValue && Number.isFinite(previous.value) ? previous.value : null
-  let lastDirection = 'flat'
-  if (Number.isFinite(previousValue)) {
-    if (update.value > previousValue) lastDirection = 'pos'
-    else if (update.value < previousValue) lastDirection = 'neg'
-  }
+    previous && Number.isFinite(update.value) && Number.isFinite(previous.value)
+      ? previous.value
+      : null
 
   return {
     ...update,
     history,
-    observedOpen,
-    observationCount,
     previousValue,
-    lastDirection,
-    updateSeq: (previous?.updateSeq ?? 0) + 1,
+    lastDirection: directionOf(
+      Number.isFinite(previousValue) ? update.value - previousValue : null,
+    ),
   }
 }
 
@@ -178,7 +145,14 @@ export function mergeInstruments(previous, updates) {
   return accepted ? instruments : previous
 }
 
-export function reconcileSnapshotInstruments(previous, snapshot) {
+export function dropInstruments(previous, ids) {
+  const dropped = new Set(ids)
+  const kept = Object.entries(previous).filter(([id]) => !dropped.has(id))
+  if (kept.length === Object.keys(previous).length) return previous
+  return Object.fromEntries(kept)
+}
+
+export function reconcileSnapshotInstruments(previous, snapshot, seedStartedMs = null) {
   const receivedAtMs = Date.now()
   const updates = instrumentsFromSnapshot(snapshot).map((instrument) => ({
     ...instrument,
@@ -189,8 +163,13 @@ export function reconcileSnapshotInstruments(previous, snapshot) {
 
   const snapshotIds = new Set(updates.map((instrument) => instrument.id))
   const retained = Object.fromEntries(
-    Object.entries(previous).filter(([id, instrument]) =>
-      snapshotIds.has(id) || instrument.sourceStreamId === snapshotStreamId,
+    Object.entries(previous).filter(
+      ([id, instrument]) =>
+        snapshotIds.has(id) ||
+        (instrument.sourceStreamId === snapshotStreamId &&
+          seedStartedMs != null &&
+          instrument.receivedAtMs != null &&
+          instrument.receivedAtMs >= seedStartedMs),
     ),
   )
   return mergeInstruments(retained, updates)
@@ -216,61 +195,40 @@ function restoreInstrument(candidate) {
     return null
   }
 
-  const tenor = Number(candidate.tenor)
-  if (candidate.assetClass === 'RATE' && !BOND_CURVE_TENORS.includes(tenor)) {
-    return null
-  }
-
-  const value = toNum(candidate.value)
-  const history = (Array.isArray(candidate.history) ? candidate.history : [])
-    .map(toNum)
-    .filter(Number.isFinite)
-    .slice(-HISTORY_LENGTH)
-  if (Number.isFinite(value) && history[history.length - 1] !== value) {
-    history.push(value)
-    if (history.length > HISTORY_LENGTH) history.shift()
-  }
-
-  const observedOpen = Number.isFinite(candidate.observedOpen)
-    ? candidate.observedOpen
-    : (history[0] ?? value)
-  const storedObservationCount = Number(candidate.observationCount)
-  const observationCount = Number.isSafeInteger(storedObservationCount)
-    ? Math.max(storedObservationCount, history.length)
-    : history.length
-  const storedUpdateSeq = Number(candidate.updateSeq)
-
   return {
     id: candidate.id,
     symbol: candidate.symbol,
     provider: typeof candidate.provider === 'string' ? candidate.provider : null,
     assetClass: candidate.assetClass,
     currency: typeof candidate.currency === 'string' ? candidate.currency : null,
-    value,
+    value: toNum(candidate.value),
     bid: toNum(candidate.bid),
     ask: toNum(candidate.ask),
+    last: toNum(candidate.last),
+    previousClose: toNum(candidate.previousClose),
     grade: typeof candidate.grade === 'string' ? candidate.grade : null,
     providerTimestampMs: Number.isFinite(candidate.providerTimestampMs)
       ? candidate.providerTimestampMs
       : null,
+    polledAtMs: Number.isFinite(candidate.polledAtMs) ? candidate.polledAtMs : null,
     staleAfterMs: Number.isFinite(candidate.staleAfterMs) ? candidate.staleAfterMs : null,
-    unit: candidate.unit === 'rate' ? 'rate' : 'price',
-    tenor: Number.isFinite(tenor) ? tenor : null,
+    closedStaleAfterMs: Number.isFinite(candidate.closedStaleAfterMs)
+      ? candidate.closedStaleAfterMs
+      : null,
+    marketOpen: typeof candidate.marketOpen === 'boolean' ? candidate.marketOpen : null,
+    watched: candidate.watched === true,
+    held: candidate.held === true,
+    benchmark: candidate.benchmark === true,
     sourceStreamId:
       typeof candidate.sourceStreamId === 'string' ? candidate.sourceStreamId : null,
     sourceEventId: eventIdOf({ event_id: candidate.sourceEventId }),
     eventTimeMs: Number.isFinite(candidate.eventTimeMs) ? candidate.eventTimeMs : null,
-    receivedAtMs: Number.isFinite(candidate.receivedAtMs)
-      ? candidate.receivedAtMs
-      : null,
+    receivedAtMs: Number.isFinite(candidate.receivedAtMs) ? candidate.receivedAtMs : null,
     previousValue: toNum(candidate.previousValue),
-    history,
-    observedOpen,
-    observationCount,
+    history: [],
     lastDirection: ['pos', 'neg', 'flat'].includes(candidate.lastDirection)
       ? candidate.lastDirection
       : 'flat',
-    updateSeq: Number.isSafeInteger(storedUpdateSeq) ? Math.max(0, storedUpdateSeq) : 0,
   }
 }
 
@@ -289,35 +247,15 @@ export function restoreInstruments(payload) {
   return Object.fromEntries(restored.map((instrument) => [instrument.id, instrument]))
 }
 
-function observedChangeOf(instrument) {
-  const history = instrument.history ?? []
-  const observations = instrument.observationCount ?? history.length
-  const first = Number.isFinite(instrument.observedOpen)
-    ? instrument.observedOpen
-    : history[0]
-  const last = Number.isFinite(instrument.value)
-    ? instrument.value
-    : history[history.length - 1]
-
-  if (observations < 2 || !Number.isFinite(first) || !Number.isFinite(last)) {
-    return { delta: null, percent: null, observations }
-  }
-
-  const delta = last - first
-  const percent = first === 0 ? null : (delta / Math.abs(first)) * 100
-
-  return { delta, percent, observations }
-}
-
-function lastTickChangeOf(instrument) {
-  const previous = instrument.previousValue
+function todayChangeOf(instrument) {
+  const previousClose = instrument.previousClose
   const latest = instrument.value
-  if (!Number.isFinite(previous) || !Number.isFinite(latest)) {
+  if (!Number.isFinite(previousClose) || !Number.isFinite(latest)) {
     return { delta: null, percent: null }
   }
 
-  const delta = latest - previous
-  const percent = previous === 0 ? null : (delta / Math.abs(previous)) * 100
+  const delta = latest - previousClose
+  const percent = previousClose === 0 ? null : (delta / Math.abs(previousClose)) * 100
   return { delta, percent }
 }
 
@@ -326,80 +264,154 @@ function providerAgeMs(instrument, now) {
   return Math.max(0, now - instrument.providerTimestampMs)
 }
 
-function isStale(instrument, now) {
-  const age = providerAgeMs(instrument, now)
-  if (age != null && Number.isFinite(instrument.staleAfterMs)) {
-    return age > instrument.staleAfterMs
+export function freshnessOf(instrument, now) {
+  const polledAt = Number.isFinite(instrument.polledAtMs) ? instrument.polledAtMs : null
+  const hasProviderTime = Number.isFinite(instrument.providerTimestampMs)
+  if (!hasProviderTime && polledAt == null) return 'MISSING'
+  if (
+    instrument.marketOpen === false &&
+    polledAt != null &&
+    Number.isFinite(instrument.closedStaleAfterMs) &&
+    instrument.closedStaleAfterMs > 0
+  ) {
+    return now - polledAt <= instrument.closedStaleAfterMs ? 'CLOSED' : 'STALE'
   }
-  if (instrument.receivedAtMs == null) return true
-  return now - instrument.receivedAtMs > MARKET_STALE_AFTER_MS
+  if (!hasProviderTime) return 'MISSING'
+  if (!Number.isFinite(instrument.staleAfterMs)) return 'MISSING'
+  return now - instrument.providerTimestampMs <= instrument.staleAfterMs
+    ? 'LIVE'
+    : 'STALE'
 }
 
 export function marketRowsOf(instruments, now) {
   return instruments.map((instrument) => {
-    const observedChange = observedChangeOf(instrument)
-    const lastTickChange = lastTickChangeOf(instrument)
+    const todayChange = todayChangeOf(instrument)
+    const state = freshnessOf(instrument, now)
     return {
       instrument,
-      observedChange,
-      lastTickChange,
-      observedDirection: directionOf(observedChange.delta),
-      lastTickDirection: directionOf(lastTickChange.delta),
+      todayChange,
+      todayDirection: directionOf(todayChange.delta),
       providerAgeMs: providerAgeMs(instrument, now),
-      live: !isStale(instrument, now),
+      state,
+      live: state === 'LIVE',
     }
   })
 }
 
 export function summarizeFeed(instruments, now) {
-  let live = 0
-  let stale = 0
-  let lastUpdateMs = null
+  const summary = {
+    rows: instruments.length,
+    symbols: new Set(instruments.map((instrument) => instrument.symbol)).size,
+    live: 0,
+    stale: 0,
+    closed: 0,
+    missing: 0,
+    lastUpdateMs: null,
+  }
   for (const instrument of instruments) {
-    if (isStale(instrument, now)) stale += 1
-    else live += 1
-    const seenAt = instrument.receivedAtMs ?? instrument.eventTimeMs
-    if (seenAt != null && (lastUpdateMs == null || seenAt > lastUpdateMs)) {
-      lastUpdateMs = seenAt
+    const state = freshnessOf(instrument, now)
+    if (state === 'LIVE') summary.live += 1
+    else if (state === 'CLOSED') summary.closed += 1
+    else if (state === 'MISSING') summary.missing += 1
+    else summary.stale += 1
+    const seenAt = instrument.polledAtMs ?? instrument.eventTimeMs
+    if (seenAt != null && (summary.lastUpdateMs == null || seenAt > summary.lastUpdateMs)) {
+      summary.lastUpdateMs = seenAt
     }
   }
-  return { total: instruments.length, live, stale, lastUpdateMs }
+  return summary
 }
+
+function watchedIdsOf(watchlistItems) {
+  const ids = new Set()
+  for (const item of watchlistItems) {
+    for (const [provider, chosen] of Object.entries(item.providers ?? {})) {
+      if (chosen) ids.add(instrumentId(provider, item.symbol))
+    }
+  }
+  return ids
+}
+
+function placeholderInstrument(id, provider, item) {
+  return {
+    id,
+    symbol: item.symbol,
+    provider,
+    assetClass: item.asset_class ?? 'UNKNOWN',
+    currency: item.currency ?? null,
+    value: null,
+    bid: null,
+    ask: null,
+    last: null,
+    previousClose: null,
+    grade: null,
+    providerTimestampMs: null,
+    polledAtMs: null,
+    staleAfterMs: null,
+    closedStaleAfterMs: null,
+    marketOpen: null,
+    watched: true,
+    held: false,
+    benchmark: false,
+    history: [],
+    watchlisted: true,
+  }
+}
+
+export function boardInstruments(instruments, watchlistItems, watchlistReady = true) {
+  const watchedIds = watchedIdsOf(watchlistItems)
+  const isWatchlisted = (instrument) =>
+    watchlistReady ? watchedIds.has(instrument.id) : watchedIds.has(instrument.id) || instrument.watched
+  const annotated = instruments.map((instrument) =>
+    isWatchlisted(instrument) ? { ...instrument, watchlisted: true } : instrument,
+  )
+  const presentIds = new Set(annotated.map((instrument) => instrument.id))
+  for (const item of watchlistItems) {
+    for (const [provider, chosen] of Object.entries(item.providers ?? {})) {
+      const id = instrumentId(provider, item.symbol)
+      if (!chosen || presentIds.has(id)) continue
+      annotated.push(placeholderInstrument(id, provider, item))
+    }
+  }
+  return annotated
+}
+
+export function seedInstrumentHistories(previous, series) {
+  if (!series || typeof series !== 'object') return previous
+  const instruments = {}
+  for (const [id, current] of Object.entries(previous)) {
+    const rawPoints = series[id]
+    const points = (Array.isArray(rawPoints) ? rawPoints : [])
+      .map((point) => [toNum(point?.[0]), toNum(point?.[1])])
+      .filter(([atMs, value]) => atMs != null && value != null)
+    instruments[id] = {
+      ...current,
+      history: appendPoint(points, current.eventTimeMs, current.value),
+    }
+  }
+  return instruments
+}
+
+const STATE_SORT_RANK = { LIVE: 0, CLOSED: 1, STALE: 2, MISSING: 3 }
 
 function structuralValueOf(instrument, column) {
   if (column === 'symbol') return instrument.symbol
   if (column === 'provider') return instrument.provider
   if (column === 'assetClass') return instrument.assetClass
-  if (column === 'tenor') return instrument.tenor
   return undefined
 }
 
 function snapshotValueOf(instrument, column, now) {
   if (!instrument) return null
-  if (column === 'marketLevel') return instrument.value
-  if (column === 'observedChange' || column === 'lastTickChange') {
-    const change =
-      column === 'observedChange'
-        ? observedChangeOf(instrument)
-        : lastTickChangeOf(instrument)
-    if (instrument.unit === 'rate') {
-      return Number.isFinite(change.delta) ? change.delta * 10000 : null
-    }
-    return Number.isFinite(change.percent) ? change.percent : null
-  }
-  if (column === 'quote') {
-    if (
-      !Number.isFinite(instrument.bid) ||
-      !Number.isFinite(instrument.ask) ||
-      !Number.isFinite(instrument.value) ||
-      instrument.value === 0
-    ) {
-      return null
-    }
-    return ((instrument.ask - instrument.bid) / Math.abs(instrument.value)) * 10000
+  if (column === 'bid') return instrument.bid
+  if (column === 'ask') return instrument.ask
+  if (column === 'last') return instrument.last
+  if (column === 'todayChange') {
+    const { percent } = todayChangeOf(instrument)
+    return Number.isFinite(percent) ? percent : null
   }
   if (column === 'age') return providerAgeMs(instrument, now)
-  if (column === 'feed') return isStale(instrument, now) ? 0 : 1
+  if (column === 'feed') return STATE_SORT_RANK[freshnessOf(instrument, now)] ?? 9
   if (column === 'updated') return instrument.eventTimeMs ?? null
   return null
 }
@@ -407,9 +419,6 @@ function snapshotValueOf(instrument, column, now) {
 function compareInstruments(a, b) {
   const classDiff = a.assetClass.localeCompare(b.assetClass)
   if (classDiff !== 0) return classDiff
-  if (a.tenor != null && b.tenor != null && a.tenor !== b.tenor) {
-    return a.tenor - b.tenor
-  }
   const symbolDiff = a.symbol.localeCompare(b.symbol)
   return symbolDiff || a.id.localeCompare(b.id)
 }
@@ -426,8 +435,14 @@ export function sortMarketRows(rows, sort) {
   return sortRows(rows, sort, {
     valueOf: (row) => {
       const structural = structuralValueOf(row.instrument, sort.column)
-      return structural === undefined ? (sort.snapshot?.[row.instrument.id] ?? null) : structural
+      return structural === undefined
+        ? (sort.snapshot?.[row.instrument.id] ?? null)
+        : structural
     },
     tieBreak: (a, b) => compareInstruments(a.instrument, b.instrument),
   })
+}
+
+export function providerScheduleText(provider) {
+  return provider?.runtime?.strategy?.description ?? '—'
 }

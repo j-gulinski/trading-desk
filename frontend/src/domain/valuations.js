@@ -1,9 +1,12 @@
 import { VALUATION_STALE_AFTER_MS } from '../config/valuations.js'
 import { groupOptions } from './filters.js'
 import { formatShortId } from './formatting.js'
+import { freshnessOf } from './marketData.js'
 import { sortRows } from './tableSort.js'
 
-const STATUS_RANK = { LIVE: 2, STALE: 1, CLOSED: 0 }
+const STATUS_RANK = { LIVE: 3, MARKET_CLOSED: 2, STALE: 1, CLOSED: 0 }
+
+const DEFAULT_QUOTE_PROVIDER = 'FINNHUB'
 
 function toNum(value) {
   if (value == null || value === '') return null
@@ -50,6 +53,8 @@ export function valuationOf(data) {
         : null,
     price: toNum(payload.current_price ?? payload.close_price),
     closed: payload.final === true,
+    marketDataProvider: data.market_data_provider ?? null,
+    marketDataTimestampMs: toTime(data.market_data_timestamp),
     valuationTimeMs: Number.isFinite(valuationTime) ? valuationTime : null,
   }
 }
@@ -60,6 +65,7 @@ export function bookRiskOf(data) {
     id: data.book_id,
     bookName: data.book_name ?? null,
     benchmark: data.benchmark ?? null,
+    benchmarkProvider: data.benchmark_provider ?? null,
     benchmarkLevel: toNum(data.benchmark_level),
     benchmarkWindowReturn: toNum(data.benchmark_window_return),
     alpha: toNum(data.alpha),
@@ -95,11 +101,22 @@ export function benchmarkOf(riskMetrics) {
   if (!chosen) return null
   return {
     symbol: chosen.benchmark,
+    provider: chosen.benchmarkProvider ?? DEFAULT_QUOTE_PROVIDER,
     level: chosen.benchmarkLevel,
     windowReturn: chosen.benchmarkWindowReturn,
     observations: chosen.observations,
     window: chosen.window,
   }
+}
+
+export function benchmarkDayChangeOf(instruments, benchmark) {
+  if (benchmark?.symbol == null) return null
+  const provider = benchmark.provider ?? DEFAULT_QUOTE_PROVIDER
+  const instrument = instruments?.[`${provider}:${benchmark.symbol}`]
+  const previousClose = toNum(instrument?.previousClose)
+  const value = toNum(instrument?.value)
+  if (previousClose == null || previousClose === 0 || value == null) return null
+  return ((value - previousClose) / previousClose) * 100
 }
 
 export function bookRisksFromSeed(seed) {
@@ -160,14 +177,43 @@ export function mergeValuations(previous, updates) {
   return accepted ? valuations : previous
 }
 
-export function statusOf(valuation, now) {
-  if (valuation.closed) return 'CLOSED'
-  if (valuation.receivedAtMs == null) return 'STALE'
-  return now - valuation.receivedAtMs > VALUATION_STALE_AFTER_MS ? 'STALE' : 'LIVE'
+function feedInstrumentOf(valuation, instruments) {
+  if (valuation.symbol == null) return null
+  const provider = valuation.marketDataProvider ?? DEFAULT_QUOTE_PROVIDER
+  return instruments?.[`${provider}:${valuation.symbol}`] ?? null
 }
 
-export function valuationRowsOf(valuations, now) {
-  return valuations.map((valuation) => ({ valuation, status: statusOf(valuation, now) }))
+function keepsUpWith(valuation, instrument, now) {
+  const window = Number.isFinite(instrument.staleAfterMs)
+    ? instrument.staleAfterMs
+    : VALUATION_STALE_AFTER_MS
+  if (
+    Number.isFinite(valuation.marketDataTimestampMs) &&
+    Number.isFinite(instrument.providerTimestampMs)
+  ) {
+    return valuation.marketDataTimestampMs >= instrument.providerTimestampMs - window
+  }
+  return valuation.receivedAtMs != null && now - valuation.receivedAtMs <= window
+}
+
+export function statusOf(valuation, now, instruments = null) {
+  if (valuation.closed) return 'CLOSED'
+  const instrument = feedInstrumentOf(valuation, instruments)
+  if (instrument == null) {
+    if (valuation.receivedAtMs == null) return 'STALE'
+    return now - valuation.receivedAtMs > VALUATION_STALE_AFTER_MS ? 'STALE' : 'LIVE'
+  }
+  const feedState = freshnessOf(instrument, now)
+  if (feedState === 'CLOSED') return 'MARKET_CLOSED'
+  if (feedState !== 'LIVE') return 'STALE'
+  return keepsUpWith(valuation, instrument, now) ? 'LIVE' : 'STALE'
+}
+
+export function valuationRowsOf(valuations, now, instruments = null) {
+  return valuations.map((valuation) => ({
+    valuation,
+    status: statusOf(valuation, now, instruments),
+  }))
 }
 
 function singleCurrencyOf(rows) {
@@ -190,6 +236,7 @@ function accumulate(target, row) {
   }
   target.realized += valuation.realizedPnl ?? 0
   if (row.status === 'LIVE') target.live += 1
+  else if (row.status === 'MARKET_CLOSED') target.marketClosed += 1
   else if (row.status === 'STALE') target.stale += 1
 }
 
@@ -199,6 +246,7 @@ export function summarizeValuations(rows) {
     open: 0,
     closed: 0,
     live: 0,
+    marketClosed: 0,
     stale: 0,
     unrealized: 0,
     realized: 0,
@@ -239,6 +287,7 @@ export function bookRisksOf(rows, riskMetrics = {}) {
         open: 0,
         closed: 0,
         live: 0,
+        marketClosed: 0,
         stale: 0,
         unrealized: 0,
         realized: 0,
@@ -290,6 +339,7 @@ function structuralValueOf(valuation, column) {
   if (column === 'book') return valuation.bookName ?? valuation.bookId
   if (column === 'assetClass') return valuation.assetClass
   if (column === 'symbol') return valuation.symbol
+  if (column === 'provider') return valuation.marketDataProvider
   return undefined
 }
 

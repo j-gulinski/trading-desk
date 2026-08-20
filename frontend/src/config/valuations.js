@@ -7,10 +7,16 @@ export const MAX_RENDERED_ROWS = 100
 
 export const VALUATION_STATUS_LEVEL = {
   LIVE: 'info',
+  MARKET_CLOSED: 'closed',
   STALE: 'stale',
-  CLOSED: 'unknown',
+  CLOSED: 'final',
   PENDING: 'unknown',
   CANCELLED: 'warning',
+}
+
+export const VALUATION_STATUS_LABEL = {
+  MARKET_CLOSED: 'MKT CLOSED',
+  CLOSED: 'FINAL',
 }
 
 export const VALUATION_COLUMNS = [
@@ -26,13 +32,18 @@ export const VALUATION_COLUMNS = [
   { id: 'assetClass', label: 'Class', sortable: true, defaultDirection: 'asc' },
   { id: 'symbol', label: 'Symbol', sortable: true, defaultDirection: 'asc' },
   {
+    id: 'provider',
+    label: 'Provider',
+    sortable: true,
+    defaultDirection: 'asc',
+  },
+  {
     id: 'price',
     label: 'Mark',
     sortable: true,
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerNote: 'valuation input',
   },
   {
     id: 'fairValue',

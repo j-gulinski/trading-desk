@@ -4,15 +4,12 @@ from decimal import Decimal
 from app import cache
 from app.pnl import compute_pnl, signed_quantity
 from app.valuation_publisher import publish_valuation
-from app.config import DEFAULT_QUOTE_PROVIDER, TRADE_REFRESH_SECONDS, SERVICE_NAME
+from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
+from shared.config import DEFAULT_QUOTE_PROVIDER
 from shared.term_schemas import DEFAULT_CURVE, DEFAULT_VOLATILITY
 from shared.functions import first_present, get_iso_timestamp
-from shared.pricing_math import (
-    bond_pv,
-    european_option_pv,
-    fx_forward,
-    irs_pv,
-)
+from shared.pricing_math import bond_pv, european_option_pv, irs_pv
+from shared.symbols import SPOT_ASSET_CLASSES
 from shared.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
@@ -21,7 +18,7 @@ log = get_logger(SERVICE_NAME)
 def market_inputs(asset_class, symbol, meta, provider=None):
     provider = provider or DEFAULT_QUOTE_PROVIDER
     inputs = {}
-    if asset_class in ("EQUITY", "COMMODITY", "FX"):
+    if asset_class in SPOT_ASSET_CLASSES:
         inputs["spot"] = cache.get_spot(provider, symbol)
     elif asset_class == "EUROPEAN_OPTION":
         inputs["spot"] = cache.get_spot(provider, meta["underlying_symbol"])
@@ -35,22 +32,13 @@ def price_from_inputs(asset_class, meta, inputs):
     spot = inputs.get("spot")
     curve = inputs.get("curve")
 
-    if asset_class in ("EQUITY", "COMMODITY"):
+    if asset_class in SPOT_ASSET_CLASSES:
         if not spot:
             return None
-        price = first_present(spot, ("mid", "last", "spot"))
+        price = first_present(spot, ("mid", "last"))
         if price is None:
             return None
         return Decimal(str(price)), 1
-
-    if asset_class == "FX":
-        if not spot or spot.get("spot") is None:
-            return None
-        s = Decimal(str(spot["spot"]))
-        rd = Decimal(str(spot.get("domestic_rate", 0.0)))
-        rf = Decimal(str(spot.get("foreign_rate", 0.0)))
-        T = Decimal(str(meta.get("tenor_years", 1.0)))
-        return fx_forward(s, rd, rf, T), 1
 
     if asset_class == "BOND":
         if not curve:
@@ -60,7 +48,7 @@ def price_from_inputs(asset_class, meta, inputs):
     if asset_class == "EUROPEAN_OPTION":
         if not spot or not curve:
             return None
-        underlying = first_present(spot, ("mid", "last", "spot"))
+        underlying = first_present(spot, ("mid", "last"))
         if underlying is None:
             return None
         volatility = meta.get("volatility", DEFAULT_VOLATILITY)

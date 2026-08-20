@@ -5,6 +5,7 @@ import { endpoints } from '../../services/endpoints.js'
 import { normalizeAuditEvents } from '../../domain/auditEvents.js'
 import { tradeDetailOf } from '../../domain/trades.js'
 import { buildCloseTradeIntent } from '../../domain/tradeActions.js'
+import { describeApiError } from '../../domain/apiErrors.js'
 import { BLOTTER_POLL_INTERVAL_MS } from '../../config/trades.js'
 import TradeDetailPanel from '../../components/trades/TradeDetailPanel.jsx'
 
@@ -40,14 +41,19 @@ export default function TradeDetail({ row, bookNames, onClose }) {
     try {
       await apiPost(
         endpoints.tradeAction.submit,
-        buildCloseTradeIntent(row.trade.id, row.valuation?.price),
+        buildCloseTradeIntent(row.trade.id),
       )
       stallTimer.current = setTimeout(() => {
         setCloseNote('Close pending — awaiting confirmation.')
       }, CLOSE_STALL_MS)
-    } catch {
+    } catch (err) {
       setClosing(false)
-      setCloseNote('Close request failed — try again.')
+      setCloseNote(
+        describeApiError(err, {
+          service: 'Trade action service',
+          outcome: 'the trade is still open.',
+        }),
+      )
     }
   }
 

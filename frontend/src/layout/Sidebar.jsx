@@ -11,9 +11,9 @@ export default function Sidebar({ activePath, collapsed, onToggleCollapse }) {
       <div className="sidebar__brand">
         <div className="sidebar__brand-mark">
           <div className="sidebar__brand-title">TRADING</div>
-          <div className="sidebar__brand-sub">Microservices</div>
+          <div className="sidebar__brand-sub">Desk</div>
         </div>
-        <span className="sidebar__brand-compact" aria-hidden="true">TM</span>
+        <span className="sidebar__brand-compact" aria-hidden="true">TD</span>
         <button
           type="button"
           className="sidebar__collapse"

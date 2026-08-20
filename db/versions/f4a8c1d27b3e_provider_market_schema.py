@@ -1,6 +1,6 @@
 """provider market schema
 
-Phase 1 reshape for the six-provider world (docs/hw5-plan-v2.md §5–6). Drops and
+Phase 1 reshape for the six-provider world (docs/implementation-roadmap.md §5–6). Drops and
 recreates the market tables — the pre-fork rows are synthetic and a fresh DB is the
 deployment path.
 

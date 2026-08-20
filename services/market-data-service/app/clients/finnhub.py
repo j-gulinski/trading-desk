@@ -16,5 +16,8 @@ class FinnhubClient(ProviderClient):
     def quote(self, symbol):
         return self.get("/quote", {"symbol": symbol})
 
+    def search(self, query):
+        return self.get("/search", {"q": query, "exchange": "US"})
+
     def market_status(self):
         return self.get("/stock/market-status", {"exchange": "US"})

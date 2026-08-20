@@ -4,7 +4,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from app.config import REQUEST_TIMEOUT_SECONDS
+from app.config import REQUEST_TIMEOUT_SECONDS, SERVICE_NAME
+from shared.logging_config import get_logger
+
+
+log = get_logger(SERVICE_NAME)
 
 
 class ProviderError(Exception):
@@ -54,20 +58,78 @@ class ProviderClient:
         pass
 
     def get(self, path, params=None):
-        query = urllib.parse.urlencode({**(params or {}), **self.auth_params()})
-        body = self._fetch(f"{self.base_url}{path}?{query}")
+        public_params = params or {}
+        request_fields = self._request_fields(path, public_params)
+        started = time.monotonic()
+        query = urllib.parse.urlencode({**public_params, **self.auth_params()})
+        status = None
         try:
+            body, status = self._fetch(f"{self.base_url}{path}?{query}")
             payload = json.loads(body)
-        except ValueError:
-            raise ProviderDataError(self.provider, "response body is not JSON")
-        self.classify_body(payload)
+            self.classify_body(payload)
+        except ValueError as error:
+            provider_error = ProviderDataError(self.provider, "response body is not JSON")
+            self._log_response(request_fields, started, status, error=provider_error)
+            raise provider_error from error
+        except ProviderError as error:
+            self._log_response(request_fields, started, status, error=error)
+            raise
+        self._log_response(
+            request_fields,
+            started,
+            status,
+            result_count=self._result_count(path, public_params, payload),
+        )
         return payload
 
-    def _fetch(self, url, retries=1):
+    def _request_fields(self, path, params):
+        fields = {"provider": self.provider, "method": "GET", "endpoint": path}
+        if path in ("/search", "/symbol_search"):
+            fields["query"] = params.get("q") or params.get("symbol")
+        elif params.get("symbol"):
+            symbols = [symbol for symbol in str(params["symbol"]).split(",") if symbol]
+            fields["symbols"] = symbols
+            fields["symbol_count"] = len(symbols)
+        return fields
+
+    @staticmethod
+    def _result_count(path, params, payload):
+        if path in ("/search", "/symbol_search"):
+            key = "result" if path == "/search" else "data"
+            results = payload.get(key) if isinstance(payload, dict) else None
+            return len(results) if isinstance(results, list) else 0
+        if path == "/quote":
+            requested = [value for value in str(params.get("symbol") or "").split(",") if value]
+            if len(requested) <= 1:
+                return 1 if isinstance(payload, dict) and payload else 0
+            return sum(
+                isinstance(payload.get(symbol), dict)
+                for symbol in requested
+            ) if isinstance(payload, dict) else 0
+        return None
+
+    @staticmethod
+    def _log_response(request_fields, started, status, result_count=None, error=None):
+        fields = {
+            **request_fields,
+            "http_status": status,
+            "duration_ms": round((time.monotonic() - started) * 1000),
+            "outcome": "error" if error else "ok",
+        }
+        if result_count is not None:
+            fields["result_count"] = result_count
+        if error is not None:
+            fields["error_type"] = type(error).__name__
+            fields["error"] = error.detail
+            log.warning("provider_http_response", **fields)
+        else:
+            log.info("provider_http_response", **fields)
+
+    def _fetch(self, url, retries=0):
         for attempt in range(retries + 1):
             try:
                 with urllib.request.urlopen(url, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-                    return response.read()
+                    return response.read(), response.status
             except urllib.error.HTTPError as error:
                 self._raise_for_status(error)
             except (urllib.error.URLError, TimeoutError, OSError) as error:

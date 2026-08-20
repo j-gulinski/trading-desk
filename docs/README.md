@@ -1,20 +1,34 @@
 # Documentation
 
-Cleared to a starter set at the fork (Phase 0) and **produced phase by phase from here**: each
-phase ships the documentation for what it built, in the same change — a document describes the
-system as it is now, or it does not exist. The pre-fork docs live in the archived
-[trading-microservices](https://github.com/j-gulinski/trading-microservices) repo.
+Start with the current system and follow one feature end to end. Reference material and
+future plans come afterwards.
 
-| Document | Read it for |
-| --- | --- |
-| [architecture.md](architecture.md) | The base system: services, the three rules, data model, runtime shape |
-| [configuration.md](configuration.md) | Every environment knob — default, consumer, rationale |
-| [market-data.md](market-data.md) | The six providers (probed facts), quote/curve/freshness contracts, market store |
-| [hw5-plan-v2.md](hw5-plan-v2.md) | The plan of record: providers, decisions D1–D25, phases |
-| [phase-reports/](phase-reports/) | One report per phase — what was needed, what was chosen, what landed |
+## Reading order
 
-Further documents appear as their phases land; [hw5-plan-v2.md](hw5-plan-v2.md) says what
-and when.
+1. [Root README](../README.md) - run the stack, see the services and learn the operating
+   rules.
+2. [architecture.md](architecture.md) - understand service ownership, database handoffs and
+   SSE boundaries.
+3. [implementation/multi-provider-trading.md](implementation/multi-provider-trading.md) -
+   follow the implemented search -> watchlist -> quote -> ticket -> valuation -> logs flow,
+   including code maps and diagrams.
+4. [market-data.md](market-data.md) - look up normalized fields, provider facts, endpoints
+   and persistence contracts.
+5. [configuration.md](configuration.md) - look up each runtime knob, default and rationale.
+6. [validation-runbook.md](validation-runbook.md) and
+   [provider-trading.http](../scenarios/provider-trading.http) - verify the complete feature
+   and clean up test data.
+7. [implementation-roadmap.md](implementation-roadmap.md) - read last; it describes future
+   work, not current behavior.
 
-The root [README.md](../README.md) is the operational entry point: what the system is and how
-to run and test it.
+## Earlier implementation background
+
+These are useful only when tracing how the current foundation evolved:
+
+- [implementation/foundation.md](implementation/foundation.md)
+- [implementation/provider-domain.md](implementation/provider-domain.md)
+- [implementation/finnhub-integration.md](implementation/finnhub-integration.md)
+
+The feature guide is the primary explanation of current multi-provider behavior. The root
+README is the operational entry point; `market-data.md` and `configuration.md` are reference
+sheets rather than a second narrative.

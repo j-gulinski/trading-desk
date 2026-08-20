@@ -6,7 +6,10 @@ from decimal import Decimal
 class Trade:
     def __init__(self, trade_id, book_id, asset_class, symbol, side, status,
                  quantity, trade_price, currency, opened_at=None, closed_at=None,
-                 close_price=None, close_reason=None):
+                 close_price=None, close_reason=None, market_data_provider=None,
+                 entry_price_timestamp=None, entry_snapshot_id=None,
+                 close_price_timestamp=None, close_snapshot_id=None,
+                 client_seen_price=None):
         self.trade_id = trade_id
         self.book_id = book_id
         self.asset_class = asset_class
@@ -20,6 +23,12 @@ class Trade:
         self.closed_at = closed_at
         self.close_price = close_price
         self.close_reason = close_reason
+        self.market_data_provider = market_data_provider
+        self.entry_price_timestamp = entry_price_timestamp
+        self.entry_snapshot_id = entry_snapshot_id
+        self.close_price_timestamp = close_price_timestamp
+        self.close_snapshot_id = close_snapshot_id
+        self.client_seen_price = client_seen_price
 
 
 class IndexedStore:

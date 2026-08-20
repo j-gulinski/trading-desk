@@ -5,6 +5,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     Text,
     UniqueConstraint,
@@ -55,6 +56,10 @@ class Trade(Base):
     opened_at = Column(DateTime(timezone=True), nullable=False)
     closed_at = Column(DateTime(timezone=True), nullable=True)
     close_price = Column(Numeric, nullable=True)
+    close_price_timestamp = Column(DateTime(timezone=True), nullable=True)
+    close_snapshot_id = Column(
+        UUID(as_uuid=True), ForeignKey("market_data_snapshots.snapshot_id"), nullable=True
+    )
     close_reason = Column(Text, nullable=True)
     source = Column(Text, nullable=False)
     client_request_id = Column(Text, nullable=True, unique=True)
@@ -113,8 +118,15 @@ class MarketDataSpotPrice(Base):
     mid = Column(Numeric, nullable=False)
     price_basis = Column(Text, nullable=False)
     quote_grade = Column(Text, nullable=False)
+    previous_close = Column(Numeric, nullable=True)
     provider_timestamp = Column(DateTime(timezone=True), nullable=True)
     received_at = Column(DateTime(timezone=True), nullable=False)
+    stale_after_seconds = Column(Integer, nullable=True)
+    closed_stale_after_seconds = Column(Integer, nullable=True)
+    market_open = Column(Boolean, nullable=True)
+    latest_snapshot_id = Column(
+        UUID(as_uuid=True), ForeignKey("market_data_snapshots.snapshot_id"), nullable=True
+    )
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 
@@ -193,7 +205,7 @@ class WatchlistItem(Base):
     symbol = Column(Text, primary_key=True)
     asset_class = Column(Text, nullable=False)
     currency = Column(Text, nullable=False)
-    capabilities = Column(JSONB, nullable=True)
+    providers = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 

@@ -13,13 +13,8 @@
   color: var(--text-muted);
 }
 .filter-bar__chips {
+  flex: 1 1 auto;
   gap: var(--sp-1);
-
-  .filter-chip {
-    gap: var(--sp-1);
-    padding: 3px 7px;
-    font-size: 12px;
-  }
 }
 .filter-bar__tools {
   margin-left: auto;

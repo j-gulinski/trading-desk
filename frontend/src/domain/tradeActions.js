@@ -1,4 +1,8 @@
-import { TRADE_QUANTITY_BOUNDS } from '../config/tradeActions.js'
+import {
+  CURVE_PRICED_ASSET_CLASSES,
+  TRADE_QUANTITY_BOUNDS,
+} from '../config/tradeActions.js'
+import { freshnessOf, instrumentId } from './marketData.js'
 import { formatNumber } from './formatting.js'
 
 export function newOpenTradeRequestId() {
@@ -16,7 +20,53 @@ export function instrumentCatalogOf(raw) {
       ...instrument,
       assetClass: instrument.asset_class,
       currency: instrument.currency ?? 'USD',
+      providers: Array.isArray(instrument.providers) ? instrument.providers : [],
     }))
+}
+
+export function isCurvePriced(assetClass) {
+  return CURVE_PRICED_ASSET_CLASSES.includes(assetClass)
+}
+
+function executionPriceOf(instrument, side) {
+  if (instrument == null) return null
+  const quoted = side === 'BUY' ? instrument.ask : instrument.bid
+  return Number.isFinite(quoted) ? quoted : instrument.value
+}
+
+const TRADEABLE_STATES = ['LIVE', 'CLOSED']
+
+export function providerQuotesOf({ instrument, feed, side, now }) {
+  if (instrument == null) return []
+  const serving = new Set(instrument.providers)
+  return Object.keys(instrument.capabilities ?? {}).map((provider) => {
+    if (!instrument.capabilities?.[provider]) {
+      return { provider, state: 'UNSUPPORTED', reason: `does not quote ${instrument.assetClass}` }
+    }
+    if (!serving.has(provider)) {
+      return { provider, state: 'UNWATCHED', reason: 'not on the watchlist for this symbol' }
+    }
+    const quote = feed[instrumentId(provider, instrument.symbol)]
+    if (quote == null) {
+      return { provider, state: 'MISSING', reason: 'watched, no quote yet' }
+    }
+    const state = freshnessOf(quote, now)
+    if (state === 'MISSING') {
+      return { provider, state, reason: 'watched, no quote yet' }
+    }
+    const price = executionPriceOf(quote, side)
+    return {
+      provider,
+      state,
+      price: Number.isFinite(price) && price > 0 ? price : null,
+      bid: quote.bid,
+      ask: quote.ask,
+      last: quote.last,
+      currency: quote.currency,
+      atMs: quote.providerTimestampMs,
+      tradeable: TRADEABLE_STATES.includes(state) && Number.isFinite(price) && price > 0,
+    }
+  })
 }
 
 export function tradeableInstrumentsOf(instruments, assetClass) {
@@ -27,89 +77,28 @@ export function tradeableInstrumentsOf(instruments, assetClass) {
     .sort((a, b) => a.symbol.localeCompare(b.symbol))
 }
 
-export function termSchemaOf(raw, assetClass) {
-  const schema = raw?.[assetClass]
-  if (schema == null || schema.customizable !== true || !Array.isArray(schema.fields)) return null
-  return schema
-}
+const WHOLE_UNIT_CLASSES = ['EQUITY']
 
-function fieldScaleOf(field) {
-  return field.unit === 'percent' ? 100 : 1
-}
-
-export function termErrorsOf(fields, values) {
-  const errors = {}
-  for (const field of fields) {
-    const raw = values[field.name]
-    if (raw == null || raw === '') {
-      errors[field.name] = 'Required.'
-      continue
-    }
-    if (field.type === 'choice') {
-      if (!field.choices.includes(raw)) errors[field.name] = 'Pick a value.'
-      continue
-    }
-    const scale = fieldScaleOf(field)
-    const value = Number(raw)
-    if (!Number.isFinite(value)) errors[field.name] = 'Must be a number.'
-    else if (field.type === 'integer' && !Number.isInteger(value)) errors[field.name] = 'Must be a whole number.'
-    else if (field.gt != null && !(value > field.gt * scale)) errors[field.name] = `Must be greater than ${field.gt * scale}.`
-    else if (field.ge != null && !(value >= field.ge * scale)) errors[field.name] = `Must be at least ${field.ge * scale}.`
-    else if (field.max != null && !(value <= field.max * scale)) errors[field.name] = `Must be at most ${field.max * scale}.`
-  }
-  return errors
-}
-
-export function termsFromValues(fields, values) {
-  const terms = {}
-  for (const field of fields) {
-    terms[field.name] = field.type === 'choice'
-      ? values[field.name]
-      : Number(values[field.name]) / fieldScaleOf(field)
-  }
-  return terms
-}
-
-function maturityTag(maturityYears) {
-  const maturity = Number(maturityYears)
-  if (!Number.isFinite(maturity) || maturity <= 0) return ''
-  return maturity < 1 ? `${Math.round(maturity * 12)}M` : `${maturity}Y`
-}
-
-export function derivedSymbolOf(assetClass, terms) {
-  const tag = maturityTag(terms.maturity_years)
-  let symbol = ''
-  if (assetClass === 'EUROPEAN_OPTION' && terms.underlying_symbol && terms.option_type) {
-    symbol = `${terms.underlying_symbol}_${terms.option_type}_${terms.strike ?? ''}_${tag}`
-  } else if (assetClass === 'IRS' && terms.direction) {
-    const direction = terms.direction === 'PAY_FIXED_RECEIVE_FLOAT' ? 'PAY_FIXED' : 'RECEIVE_FIXED'
-    symbol = `USD_IRS_${direction}_${tag}`
-  }
-  return String(symbol)
-    .toUpperCase()
-    .replace(/[^A-Z0-9_.-]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 32)
-}
-
-export function tradeFormErrorsOf({ bookId, symbol, quantity, price, assetClass }) {
+export function tradeFormErrorsOf({ bookId, symbol, quantity, quote, assetClass }) {
   const errors = {}
   if (!bookId) errors.book = 'Pick a book.'
   if (!symbol) errors.instrument = 'Pick an instrument.'
+  if (symbol && quote == null) errors.provider = 'Pick a market data provider.'
+  else if (quote?.state === 'STALE') {
+    errors.provider = 'This quote is stale. Wait for the provider to update.'
+  } else if (quote != null && !quote.tradeable) {
+    errors.provider = `${quote.provider} cannot fill this trade right now.`
+  }
+  const whole = WHOLE_UNIT_CLASSES.includes(assetClass)
   if (
-    !Number.isSafeInteger(quantity) ||
+    !Number.isFinite(quantity) ||
+    (whole && !Number.isSafeInteger(quantity)) ||
     quantity < TRADE_QUANTITY_BOUNDS.min ||
     quantity > TRADE_QUANTITY_BOUNDS.max
   ) {
-    errors.quantity = `Quantity must be a whole number between ${formatNumber(
+    errors.quantity = `${whole ? 'Quantity must be a whole number' : 'Notional must be'} between ${formatNumber(
       TRADE_QUANTITY_BOUNDS.min,
     )} and ${formatNumber(TRADE_QUANTITY_BOUNDS.max)}.`
-  }
-  if (symbol && !Number.isFinite(price)) {
-    errors.price = 'No market price received for this instrument yet.'
-  } else if (symbol && assetClass !== 'IRS' && price < 0.005) {
-    errors.price = 'Mark rounds to 0.00 — not tradeable at these terms.'
   }
   return errors
 }
@@ -121,9 +110,7 @@ export function buildOpenTradeIntent({
   symbol,
   side,
   quantity,
-  price,
-  currency,
-  terms,
+  quote,
 }) {
   const intent = {
     action_type: 'OPEN_TRADE',
@@ -133,11 +120,11 @@ export function buildOpenTradeIntent({
     symbol,
     side,
     quantity,
-    trade_price: price.toFixed(4),
-    currency: currency ?? 'USD',
+    currency: quote.currency ?? 'USD',
+    market_data_provider: quote.provider,
+    client_seen_price: String(quote.price),
     source: 'MANUAL',
   }
-  if (terms != null) intent.terms = terms
   return intent
 }
 
@@ -150,11 +137,10 @@ export function buildReassignIntent(sourceBookId, targetBookId) {
   }
 }
 
-export function buildCloseTradeIntent(tradeId, closePrice) {
+export function buildCloseTradeIntent(tradeId) {
   return {
     action_type: 'CLOSE_TRADE',
     trade_id: tradeId,
-    close_price: Number.isFinite(closePrice) ? closePrice : null,
     close_reason: 'MANUAL_CLOSE',
     client_request_id: crypto.randomUUID(),
   }

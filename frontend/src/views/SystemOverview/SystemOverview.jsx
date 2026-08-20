@@ -8,7 +8,7 @@ import {
 import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { normalizeServiceStatus, summarize } from '../../domain/serviceStatus.js'
-import { normalizeAuditEvents } from '../../domain/auditEvents.js'
+import { activeAuditAlerts, normalizeAuditEvents } from '../../domain/auditEvents.js'
 import { normalizeLogLines, warnPulseOf } from '../../domain/logLines.js'
 import { formatClockTime, formatElapsedTime, formatNumber } from '../../domain/formatting.js'
 import { summarizeFeed } from '../../domain/marketData.js'
@@ -21,15 +21,13 @@ import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
 import AuditEventList from '../../components/audit/AuditEventList.jsx'
 import StatusPill from '../../components/status/StatusPill.jsx'
 import LogLineList from '../../components/logs/LogLineList.jsx'
+import ProviderOpsPanel from '../../components/status/ProviderOpsPanel.jsx'
 import StoryPanel from '../../components/logs/StoryPanel.jsx'
 import { ERROR_WINDOW_MS } from '../../config/monitoring.js'
 import { RECENT_ERRORS_LIMIT, WARN_LEVELS } from '../../config/logs.js'
 import { streamStatusLevel } from '../../config/stream.js'
 
 const FILTER_LEVELS = ['healthy', 'degraded', 'stale', 'down', 'unknown']
-const ERROR_SEVERITIES = ['WARNING', 'ERROR', 'CRITICAL']
-
-
 export default function SystemOverview() {
   const [activeLevel, setActiveLevel] = useState(null)
   const [story, setStory] = useState(null)
@@ -44,14 +42,13 @@ export default function SystemOverview() {
   const audits = usePolling(({ signal }) =>
     apiGet(
       endpoints.monitoring.audits({
-        severity: ERROR_SEVERITIES,
         since: new Date(Date.now() - ERROR_WINDOW_MS).toISOString(),
         limit: 100,
       }),
       { signal },
     ),
   )
-  const auditEvents = normalizeAuditEvents(audits.data)
+  const auditEvents = activeAuditAlerts(normalizeAuditEvents(audits.data))
 
   const logsFeed = usePolling(({ signal }) =>
     apiGet(
@@ -60,7 +57,8 @@ export default function SystemOverview() {
     ),
   )
   const recentLogLines = normalizeLogLines(logsFeed.data?.lines)
-  const logPulse = warnPulseOf(logsFeed.data?.meta, Date.now())
+    .filter((line) => line.atMs != null && line.atMs >= now - ERROR_WINDOW_MS)
+  const logPulse = warnPulseOf(logsFeed.data?.meta, now)
 
   const services = normalizeServiceStatus(data, {
     now,
@@ -70,7 +68,7 @@ export default function SystemOverview() {
   const summary = summarize(services)
   const marketSummary = summarizeFeed(Object.values(marketFeed.instruments), now)
   const valuationSummary = summarizeValuations(
-    valuationRowsOf(Object.values(valuationFeed.valuations), now),
+    valuationRowsOf(Object.values(valuationFeed.valuations), now, marketFeed.instruments),
   )
   const streamsLastUpdateMs = Math.max(
     marketSummary.lastUpdateMs ?? 0,
@@ -143,9 +141,9 @@ export default function SystemOverview() {
               sub="this tab session"
             />
             <StatCard
-              label="INSTRUMENTS"
-              value={marketSummary.total}
-              sub={`${marketSummary.live} live · ${marketSummary.stale} stale`}
+              label="QUOTE ROWS"
+              value={marketSummary.rows}
+              sub={`${marketSummary.symbols} symbols · ${marketSummary.live} live`}
             />
             <StatCard
               label="VALUATIONS"
@@ -154,8 +152,10 @@ export default function SystemOverview() {
             />
             <StatCard
               label="FRESHNESS"
-              value={`${valuationSummary.live} / ${valuationSummary.live + valuationSummary.stale}`}
-              sub="live of open valuations"
+              value={`${valuationSummary.live + valuationSummary.marketClosed} / ${
+                valuationSummary.live + valuationSummary.marketClosed + valuationSummary.stale
+              }`}
+              sub="current of open valuations"
               tone={valuationSummary.stale > 0 ? 'warn' : 'default'}
             />
             <StatCard
@@ -168,8 +168,12 @@ export default function SystemOverview() {
       </div>
 
       <div className="overview__panels">
+        <ProviderOpsPanel />
+      </div>
+
+      <div className="overview__panels">
         <Panel
-          title="Errors & warnings · last 5 min"
+          title="Active errors & warnings · last 5 min"
           meta={audits.error ? 'UNAVAILABLE' : auditEvents.length || null}
         >
           {audits.loading && <EmptyState message="Loading recent events…" />}
