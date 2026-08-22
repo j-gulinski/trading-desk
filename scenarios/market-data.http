@@ -3,5 +3,26 @@
 ### health
 GET {{marketData}}/health
 
-### snapshot - current spots + curves (empty until the first provider client lands)
-GET {{marketData}}/snapshot
+### providers and one runtime detail
+GET {{marketData}}/providers
+
+###
+GET {{marketData}}/providers/FINNHUB/health
+
+### snapshot - current spots + curves
+GET {{marketData}}/market-data/snapshot
+
+### filter the normalized quote board
+GET {{marketData}}/market-data/quotes?symbol=AAPL&asset_class=EQUITY
+
+### one provider-symbol quote
+GET {{marketData}}/market-data/quotes/FINNHUB/AAPL
+
+### immediate fetch within the provider budget
+POST {{marketData}}/market-data/refresh?symbol=AAPL&provider=FINNHUB
+
+### Run SSE requests individually; each remains open waiting for events
+GET {{marketData}}/market-data/stream/FINNHUB
+
+###
+GET {{marketData}}/market-data/stream

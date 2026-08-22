@@ -1,4 +1,11 @@
+.side-panel__body.quote-history-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .quote-history__current {
+  flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -109,6 +116,10 @@
 }
 
 .quote-history__observations {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
   margin-top: var(--sp-5);
 }
 
@@ -135,6 +146,18 @@
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.quote-history__tape {
+  min-height: 0;
+  padding-right: var(--sp-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
 }
 
 .quote-history__tick {

@@ -9,6 +9,19 @@ For exact environment defaults use [configuration.md](../configuration.md). For 
 provider reference use [market-data.md](../market-data.md). For hands-on verification use
 [validation-runbook.md](../validation-runbook.md).
 
+## Stable decisions
+
+| Boundary | Current decision | Why it stays explicit |
+| --- | --- | --- |
+| Service ownership | Only Market Data Service calls external providers. | Normalization, budgets, health and vendor errors have one owner. |
+| Quote identity | A quote is `(provider, symbol)` and carries provider time plus received time. | Competing feeds and delayed ingestion must remain distinguishable. |
+| Polling | Finnhub uses 15 s held/benchmark, 60 s watchlist and 300 s closed cadences. Twelve Data batches on a daily-ledger-paced cadence. | Each provider is paced by its binding limit instead of a false common interval. |
+| State recovery | PostgreSQL seeds current state; SSE follows with changes. | SSE has no replay, while the database survives reconnects and restarts. |
+| Execution | The server chooses ask/bid/mid from the provider selected in the ticket; the trade freezes that provider through valuation and close. | Price and PnL remain attributable to one feed. |
+| Market state | LIVE and confirmed CLOSED quotes are bookable; STALE and MISSING quotes are blocked. | Venue closure and feed failure are different facts in a portfolio-booking system. |
+| History | The detail panel shows 60 newest-first, change-only observations and keeps the current quote visible while only the tape scrolls. | Sparse application observations are evidence, not a complete market chart. |
+| Provider extension | `ProviderClient` shares HTTP/error mechanics; feed cadence, budget and normalization are composed separately. | The providers share transport but not enough operating policy for one deep inheritance tree. |
+
 ## Scope and guarantees
 
 The implemented feature guarantees that:
@@ -321,16 +334,21 @@ providers render only `NOT AVAILABLE`.
 | `GET /symbols/search?q=` | normalized, provider-tagged discovery |
 | `GET/POST /watchlist` | list or merge provider membership |
 | `DELETE /watchlist/<symbol>?provider=` | remove one provider membership |
-| `GET /quotes` | current stored normalized board, filterable by provider/symbol/class |
-| `GET /quotes/<provider>/<symbol>/history?limit=60` | latest change-only observations for one board row; database-only |
-| `GET /snapshot` + `GET /stream` | seed and live normalized quote updates |
+| `GET /market-data/quotes` | current stored normalized board, filterable by provider/symbol/class |
+| `GET /market-data/quotes/<provider>/<symbol>` | one active normalized provider-symbol quote or 404 |
+| `GET /market-data/quotes/<provider>/<symbol>/history?limit=60` | latest change-only observations for one board row; database-only |
+| `GET /market-data/snapshot` | database seed with stream identity and current spots |
+| SSE `GET /market-data/stream` | all normalized quote and removal events |
+| SSE `GET /market-data/stream/<provider>` | the same event contract filtered to one wired provider |
 | `GET /providers` + `/providers/<name>/health` | provider runtime and budgets |
-| `POST /refresh?symbol=&provider=` | immediate budgeted poll |
+| `POST /market-data/refresh?symbol=&provider=` | immediate budgeted poll |
 | `GET /instruments` | tradeable symbols and their provider choices |
 | `POST /trade-actions` | provider-bound open/close intent |
 
-The frontend uses `/api/market-data/...`; Vite removes that prefix before proxying to the
-single service-root route for each endpoint.
+The `/market-data/...` forms are the canonical direct port-8001 assignment contract. The
+existing `/snapshot`, `/quotes`, `/stream`, `/stream/<provider>` and `/refresh` forms remain
+compatibility aliases. The frontend continues to use relative `/api/market-data/...` URLs;
+Vite removes the gateway prefix before proxying to those service-root aliases.
 
 ## Data model additions
 
@@ -344,9 +362,26 @@ The single development migration adds only state needed by these flows:
 The foreign key from a trade to its entry snapshot has no cascade. Retention skips snapshots
 referenced by trades and the current board, so audit provenance cannot be removed by cleanup.
 
+## Review contract
+
+A review should connect visible behavior to a decision and then challenge it. These are the
+questions worth being able to answer without memorizing class names:
+
+| Question | A strong answer connects | Evidence to inspect |
+| --- | --- | --- |
+| Which clock decides whether a quote is current? | Provider time describes when the market event occurred; received time describes ingestion health and confirms a closed feed is still polling. | Quote detail, `shared/freshness.py`, stored board row. |
+| Why not collapse two AAPL rows into one best price? | A better displayed number is not stable provenance. Provider identity must survive ticket, trade, valuation and close. | Ticket provider choice, trade detail, valuation provider. |
+| Why seed before opening SSE? | A stream carries only future events. The database seed closes the restart/reconnect gap. | `/market-data/snapshot`, `useStreamSeed.js`, pricing cache seed. |
+| Why is the tape not a line chart? | Change-only observations have gaps and begin when this application starts; joining points would claim unobserved market movement. | Snapshot rows and the quote detail tape. |
+| Why can CLOSED be booked while STALE cannot? | CLOSED is a known venue state with healthy confirmation polls; STALE means an expected feed update is overdue. | Provider session, both clocks and ticket eligibility. |
+| What does inheritance solve here, and what does it not solve? | The base client is a Template Method for HTTP mechanics. Provider budgets and schedules remain composition. ABC can later prevent incomplete adapters from being instantiated; it does not validate returned market data. | `clients/base.py`, concrete clients, separate feed modules. |
+| Are volume, depth and open interest interchangeable? | Volume counts executions, depth describes resting orders by price level, and open interest counts outstanding derivatives contracts. None can be inferred from the current normalized quote. | [Market-data capability note](../market-data.md#volume-depth-and-open-interest). |
+
 ## Verification route
 
-Run [provider-trading.http](../../scenarios/provider-trading.http) and verify in the browser:
+Run [provider-trading.http](../../scenarios/provider-trading.http), then use the
+**Observe → Explain → Probe** walkthrough in
+[validation-runbook.md](../validation-runbook.md):
 
 1. Search AAPL and add Finnhub only, then Twelve Data.
 2. Confirm two independent board rows and remove only one provider.

@@ -9,10 +9,11 @@ rebuilds market data around real providers. Provider facts come from live probes
 2026-08-17 or from provider documentation and are marked accordingly. Revalidate documented
 limits when registering production keys.
 
-The core sequence is budgeted at roughly 14–15 focused engineering days. Hosting and the
-technical load dashboard are a separate 3–4 day capability group. Automated strategy execution
-is deliberately deferred until the market-data, execution and operational foundations are
-complete.
+The original core sequence was budgeted at roughly 14–15 focused engineering days. After the
+two-provider vertical and its review closure landed, the remaining PD5 sequence is roughly 6–8
+focused days. Hosting and the technical load dashboard remain a separate capability
+group. Automated strategy execution is deliberately deferred until every required PD5 provider,
+curve, execution and verification gate is complete.
 
 ---
 
@@ -156,7 +157,7 @@ decision.
 `market_data_spot_prices` = **latest board**: one row per (provider, symbol), upserted — the
 thing the UI, ticket and pricing read. `market_data_snapshots` = **append history**: one row per
 *changed* quote with `raw_payload` (change-only insert means closed markets write ~nothing),
-swept by a retention job (`SNAPSHOT_RETENTION_DAYS`, default 30). `market_data_curves` (+ new
+swept by a retention job (`SNAPSHOT_RETENTION_DAYS`, default 90). `market_data_curves` (+ new
 `market_data_curve_points`) = curve sets upserted by (provider, curve, as_of_date) — ≤ one set
 per source per day *by construction*. Growth math at 25 active symbols: Finnhub ≤ ~10k rows/day
 worst case, Twelve Data ≤ 800, Alpha Vantage ≤ 25, curves ≤ ~40 points/day → trivial for
@@ -357,7 +358,31 @@ app/
 
 Each phase ends with an executable acceptance check and updates the relevant feature guide.
 
-### Phase 0 — Fork & deep clean *(~1.5–2 days)*
+### Replan checkpoint — PD5 brief + Recording 6 *(2026-08-22)*
+
+The current implementation is ahead of the old phase labels: the two-provider ticket,
+server-priced execution, provider frozen on the trade, provider-bound valuation and close,
+change-only quote history and the provider operations surface are already present. The former
+Phase 4 trading-flow work is therefore part of the delivered Phase 3a vertical, not future work.
+Phase 3b has now closed its route/scenario drift and fresh-stack review boundary.
+
+The replan follows five direct signals from the review and assignment:
+
+| Evidence | Planning consequence |
+| --- | --- |
+| Recording 6, 06:20–06:46: compare the provider event time, not only the local receive time. | Preserve the two-clock contract and make both clocks visible in every provider/curve review. |
+| Recording 6, 07:24–07:38: keep the selected quote card visible while its history scrolls. | Keep the shipped fixed quote card and independently scrolling tape; do not redesign the praised side-panel model. |
+| Recording 6, 18:27–19:22: positions retain settlement currency; only portfolio reporting converts to one currency. | Put NBP/ECB reference FX and a provenance-carrying reporting-currency resolver before portfolio aggregation. |
+| Recording 6, 25:00–26:09: connect NBP and the other central banks next; the current design is functionally sound and flexible. | Official sources move ahead of strategy work and broad refactors. Add providers through the existing boundary. |
+| PD5 pp. 2–14: all six sources, the listed Market Data routes, three-provider ticket, same-provider PnL, official curves, audit events, README and repeatable tests are required. | None of Alpha Vantage, NBP, ECB, FRED, contract/audit closure or verification is optional for the PD5 finish line. |
+
+Recording 6 also raises volume, visible order-book depth and open interest at 11:12–13:02. Those
+are different measures and are not PD5 acceptance criteria. Phase 3b records the provider
+capability finding, but no field or chart ships until its semantics and upstream availability
+are verified. Sparse application observations also remain a discrete history tape; they are not
+reintroduced as a continuous market chart.
+
+### Phase 0 — Fork & deep clean *(complete)*
 This phase is intentionally **deep** — the fork must contain no rubbish, and simplification
 by extraction is in scope, not just deletion.
 
@@ -384,7 +409,7 @@ by extraction is in scope, not just deletion.
 **Acceptance check:** clean boot of `trading-desk` — no synthetic data anywhere, empty-but-honest UI,
 health green, and a repository a developer can read without tripping over leftovers.
 
-### Phase 1 — Contracts & schema *(~1 day)*
+### Phase 1 — Contracts & schema *(complete)*
 `shared/`: normalized-quote + curve-point contracts, provider registry + capability matrix,
 `freshness.py` (four states, grades), `symbols.py` (conventions; catalog consumers migrated).
 One hand-written migration: board uniqueness + quote columns (bid/ask/last/mid/basis/two
@@ -392,7 +417,7 @@ clocks), history reshape, curve tables, trades/valuations columns (D2), `watchli
 Start `docs/market-data.md` seeded with §2's fact sheets — the domain analysis is pre-written.
 **Exit:** migration up/down clean on a fresh DB.
 
-### Phase 2 — Finnhub vertical slice *(~2 days)*
+### Phase 2 — Finnhub vertical slice *(complete)*
 `clients/base.py` (body-aware error classification), Finnhub client + normalizer, scheduler v1
 (active set, token bucket, market-status awareness), board upsert + change-only history +
 provider-tagged SSE, endpoints (`/providers`, health, quotes, refresh), pricing cache keyed
@@ -400,12 +425,12 @@ provider-tagged SSE, endpoints (`/providers`, health, quotes, refresh), pricing 
 **Acceptance check:** live AAPL on screen with honest age; a manual trade valued off Finnhub through
 the (provider, symbol) cache.
 
-### Phase 3 — Watchlist, second provider and honest board
+### Phase 3 — Watchlist, second provider and provider-bound trading
 
-Phase 3 is split by dependency. **3a** completes the core two-provider workflow end to end;
-**3b** adds provider breadth and pacing refinements after that path is stable.
+Phase 3 is split by review state. **3a** is the delivered two-provider workflow; **3b** closes
+its executable review contract before another provider is added.
 
-**Phase 3a — core multi-provider workflow:**
+**Phase 3a — core multi-provider workflow *(complete in code)*:**
 1. **CLOSED freshness state** *(ruling; refined 2026-08-19: a first-class state, not a
    display remap)*: fifth state in `shared/freshness.py`, so `/quotes` and the UI classify
    identically and rows stay self-classifying (ticks and `/snapshot` rows gain the
@@ -439,59 +464,100 @@ cadences; EURUSD/XAUUSD quote on Twelve Data while Finnhub's cells read UNSUPPOR
 the US market closed the board reads CLOSED, not STALE; the System Overview card shows both
 budgets moving; kill the Twelve Data key → its rows degrade visibly, Finnhub unaffected.
 
-**Phase 3b — breadth completion *(~2026-08-27, first after the pause)*:**
-Alpha Vantage wired (EOD equities with grade chips telling the truth on the board; FX with
-real bid/ask; `"Information"`/`"Note"` 200-body error classification; the 25/day governor);
-governor stagger + remaining-budget pacing polish; `MAX_ACTIVE_SYMBOLS` cap enforcement
-(D4); per-symbol capability matrix cached on the watchlist row (D4).
-**Acceptance check:** Alpha Vantage's column reads "EOD (Tue)" honestly next to two live columns,
-and its 25/day budget visibly paces itself on the ops card.
+**Phase 3b — review closure *(complete 2026-08-22)*:**
 
-### Phase 4 — Trading flow refactor *(~2 days)*
-Ticket v2: per-provider comparison row (value, grade, age, state pill, disagreement in bps),
-provider radio, STALE ack flow, targeted-refresh button. trade-action: D12 server-side
-execution (freshness gate, side-aware price, tolerance, snapshot FK freeze, slippage record);
-close path identical. Valuations stamped with provider; blotter/trades views gain the provider
-column.
-**Acceptance check:** execute the provider-selection ticket scenario end-to-end; the trade's PnL moves only with
-its frozen provider.
+- The executable examples use the implemented trade-action route, provider-specific history and
+  detail paths. The assignment's direct port-8001 contract is canonical while short aliases
+  remain compatible:
+  `/market-data/snapshot`, `/market-data/quotes`, `/market-data/quotes/<provider>/<symbol>`,
+  `/market-data/stream`, `/market-data/stream/<provider>` and
+  `POST /market-data/refresh`.
+- The quote detail keeps its current card fixed while only the observation tape scrolls;
+  Provider time and Received remain visible together.
+- The Dockerfile PATH is valid. A fresh isolated Compose database reached migration head and the
+  two-provider open/value/close path, canonical/alias routes, filtered SSE, frontend and static
+  checks passed.
+- The market-data reference distinguishes traded volume, displayed depth and derivatives open
+  interest for the wired endpoints without adding an unsupported UI field.
 
-### Phase 5 — Curves & multi-curve pricing *(~2.5 days)*
-NBP/ECB/FRED clients; calendar-window scheduling; curve points → assembled curves →
-`/curves` endpoints + curve SSE; **CurveChart** (D15) + curve inspector (per-point provenance);
-pricing curve registry; `TERM_SCHEMAS` gains `settlement_currency` / `discount_curve` /
-`projection_curve` / `floating_rate_index_tenor` → ticket pickers appear server-driven;
-**currency guard** (curve currency must equal settlement currency) and **tenor guard**
-(projection curve's declared `index_tenor` must match the leg) — both reject with readable
-reasons; both PLN curves (composite + NBP-base proxy) + the write-up; per-currency PnL
-subtotals (D10); a curve-selection scenario flow lands in `scenarios/` (D25).
-**Acceptance check:** a PLN swap prices with a *chosen*
-projection curve (two PLN curves to choose from) and is rejected when pointed at
-`USD_TREASURY`; EUR AAA vs ALL selectable; the tenor mechanism demonstrated in schema and
-validation, with the write-up stating why free data can't supply WIBOR 3M/6M curves
-themselves.
+**Acceptance check — met:** the fresh Compose stack passed the repaired scenario request path
+without hand-edited URLs; Finnhub and Twelve Data each opened, valued and closed a trade on their
+own frozen feed; the selected quote summary kept its bounds while the observation tape scrolled.
+The retained evidence and teacher-style review prompts are in
+`docs/phase-reports/phase-3b.md` and `docs/validation-runbook.md`.
 
-### Phase 6 — Provenance & polish *(~1.5 days)*
-Trade detail provenance block (provider → executed vs seen price → snapshot FK → raw payload →
-audit story link); valuation-blocked honest UI state + audit; alpha/beta flipped to
-SPY@Finnhub; board best-quote badge + bps disagreement (D13); audit-event completeness pass
-against the PDF's list. *(Shock absorber: everything here degrades gracefully if time runs
-out.)*
-**Acceptance check:** click any trade and trace the price, provider, timestamp and original
-provider payload without leaving the screen.
+### Phase 4 — NBP/ECB reference FX and reporting currency *(~1.5 days)*
 
-### Phase 7 — Hardening & documentation *(~1.5 days)*
-D8 Decimal conversion + telescoping re-verification; idempotency (duplicate poll → zero
-duplicate rows) + restart warm-start; **the D25 scenario load tests** (ticket storm, SSE
-fan-out, active-board soak, valuation soak) with `docker stats` CPU/RSS per container
-recorded into `performance.md`; README covers the required operational and domain sections
-(per-provider endpoint docs from §2, D11 price-basis policy, D3 STALE rationale argued from
-market hours, keys how-to, run + test); scenarios refreshed (delete `full-flow.http`, add
-provider/watchlist/ticket flows); decisions register updated (D1–D25); operational analysis
-scans the existing log corpus for warnings/errors evidencing write contention and records the
-result; the numerical analysis documents the **Black–Scholes Decimal boundary**: why
-`erf`/`log`/`sqrt` stay float, error magnitude versus the Decimal
-quantization at the boundary, and the fact that every money leg remains Decimal.
+Add NBP table A/C and gold clients plus ECB EXR using the existing Market Data gateway. Their
+jobs use source-calendar windows, publish `REFERENCE`-grade data, persist provider/as-of/raw
+provenance and expose health independently from Group A budgets. Add one FX resolver that
+returns amount, rate, source, as-of and conversion path; positions retain their settlement
+currency, while Books/Valuations show per-currency subtotals and one explicitly selected
+reporting-currency total. Update the Market Data feature guide, README Operating decisions and
+Data flows tables in the same change.
+
+**Acceptance check:** NBP and ECB rows show the last official business-date fixing with both
+clocks and raw provenance; the ECB EUR/PLN cross is compared with NBP; a USD+EUR book never adds
+unlike amounts until the UI shows the conversion rate, path and as-of used for the reporting
+total.
+
+### Phase 5 — FRED and curve-driven pricing *(~2–2.5 days)*
+
+Add FRED Treasury/OECD clients and ECB yield curves, then complete curve persistence and the
+assignment routes: `/curves`, `/curves/<provider>`, `POST /curves/refresh` and curve SSE.
+Every curve set and point retains raw/source provenance. Add **CurveChart** (D15) and the point
+inspector, then replace `USD_GOV` with the live curve registry. `TERM_SCHEMAS` gains
+`settlement_currency`, `discount_curve`, `projection_curve` and
+`floating_rate_index_tenor`; currency and tenor guards reject incompatible choices with a
+readable reason. The PLN proxy/composite limitations remain explicit rather than being
+presented as observed WIBOR curves.
+
+**Acceptance check:** a USD instrument prices from `USD_TREASURY`; EUR AAA vs ALL is selectable;
+a PLN swap can choose the available PLN curve and rejects `USD_TREASURY`; the inspector traces
+every displayed point to provider, series, source date, ingest time and raw response.
+
+### Phase 6 — Alpha Vantage and the complete three-source ticket *(~1–1.5 days)*
+
+Wire Alpha Vantage equities and FX: body-aware `"Information"` / `"Note"` error handling, EOD
+equity grade, real FX bid/ask, 25/day ledger, search and provider health. Formalize the stable
+provider transport boundary with `ABC`/`abstractmethod` where an incomplete adapter must be
+uninstantiable; keep cadence, budget and normalization policies composed rather than forcing
+one inheritance tree over unlike providers. Make trade-action provider choices registry-driven,
+cache per-symbol capabilities, and finish the ticket's optional comment plus the explicit
+`TRADING_TICKET` source.
+
+**Acceptance check:** AAPL displays three independent provider rows, with Alpha Vantage reading
+`EOD (date)` rather than LIVE; EURUSD exposes Alpha Vantage bid/ask; a trade opened on Alpha
+Vantage persists its comment/source and moves only when that provider's quote changes.
+
+### Phase 7 — PD5 compliance, provenance and hardening *(~1.5–2 days)*
+
+- Close schema provenance gaps: the exact normalized and raw observation used by entry/close
+  must remain immutable and reachable; official curve rows retain raw payloads as required by
+  the PDF. Do not rely on transient log files as the only evidence.
+- Implement the PDF's audit matrix with bounded payloads and explicit event types: external
+  fetch success/failure/rate limit, changed quote write, curve-point write, trade create/reject/
+  close, persisted valuation update and valuation blocked by the frozen provider.
+- Prove idempotency and restart recovery: duplicate provider observations add no economic
+  duplicate, provider ledgers recover safely, snapshots seed consumers before SSE follow-up and
+  referenced provenance survives retention.
+- Maintain a phase-specific `.http` flow as each provider lands, then run the final six-provider
+  scenario and D25 ticket-storm/SSE-fan-out/active-board/valuation-soak loads. Record
+  `docker stats` CPU/RSS and database growth in `docs/performance.md`.
+- Bring README and the feature guides to the full PD5 contract: all six official endpoints and
+  formats, keys, normalization, curve construction, same-provider realized/unrealized PnL,
+  Docker Compose, commands, limitations and the operating/data-flow tables. Re-run the Decimal
+  boundary checks, lint, build, dead-code and `git diff --check`.
+
+**Final acceptance check:** one fresh `docker compose up --build` exposes all six providers;
+the assignment's curl routes succeed; the ticket compares Alpha Vantage, Finnhub and Twelve
+Data; entry, live PnL and close use one frozen source; NBP/ECB/FRED reference data drives the
+documented curves; every required audit event is observable; the full scenario and load report
+are repeatable from the repository alone.
+
+Not on the PD5 critical path: a connected intraday chart, unverified volume/depth/open-interest
+fields, best-quote routing, BusinessOverview expansion, gamification, strategies, hosting and a
+broad provider/scheduler rewrite. They begin only after the final acceptance check.
 
 ---
 
@@ -505,7 +571,7 @@ quantization at the boundary, and the fact that every money leg remains Decimal.
 | Valuations / Blotter views | tables, filters | + provider column; valuation rows show market_data_timestamp |
 | Books | cards, summary | + per-currency subtotals + converted total w/ rate as-of |
 | SystemOverview / monitoring | health cards, log tail | + provider ops card (budget spent/remaining, next poll, backoff, RATE_LIMITED state); **all config controls live here** (D24) |
-| BusinessOverview | as is | confirmed Phase 6 stretch: desk-home summary — positions + watchlist movers + curve levels; no config controls on business views (D24) |
+| BusinessOverview | as is | post-PD5 desk-home candidate — positions + watchlist movers + curve levels; no config controls on business views (D24) |
 | Generator view | — | **deleted** (Phase 0) |
 
 Design language: modern quote-board conventions — symbol + mid + Δ + age chip as the headline,
@@ -520,7 +586,7 @@ The design intentionally preserves these technically important properties:
 
 1. **Provenance drill** now lands on an exact FK (`entry_snapshot_id` → raw payload) — trade →
    quote → raw provider JSON in one join.
-2. **Slippage as a first-class record** (seen vs executed, D12) — real order-flow semantics no
+2. **Slippage as a first-class record** (seen vs executed, D12) — real order-flow semantics now
    that distinguishes this system from a basic CRUD trading exercise.
 3. **Rate limits as visible ops** — now with real numbers (60/min vs 800/day vs 25/day) and a
    RATE_LIMITED state machine.
@@ -543,12 +609,12 @@ an instruments table, backtesting (HW6's opening), the replay provider (noted on
 1. **Repo name** → **`trading-desk`** (D16).
 2. **`MAX_ACTIVE_SYMBOLS`** → **25** to start; adding beyond the cap blocks with an
    explanation.
-3. **Retention** → **30 days**, presented well on the dashboard; may grow later if it doesn't
-   drain the volume budget.
+3. **Quote-history retention** → **90 days**, matching the shipped configuration; revisit only
+   with measured database growth.
 4. **Twelve Data daily ledger** → as recommended (~60% RTH / 40% off-hours).
 5. **XAUUSD** → as recommended (keep if a real free key serves metals, else
    NBP-gold-reference only).
-6. **BusinessOverview desk home** → yes, as the Phase 6 stretch — with config controls kept on
+6. **BusinessOverview desk home** → yes, after PD5 acceptance — with config controls kept on
    technical views only (D24).
 
 ---

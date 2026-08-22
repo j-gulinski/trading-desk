@@ -22,7 +22,7 @@ join this table then.
 
 | Variable | Default | Read by | Why |
 | --- | --- | --- | --- |
-| `MARKET_DATA_STREAM_URL` | unset | pricing-service | Its one SSE inlet for quotes and curves. |
+| `MARKET_DATA_STREAM_URL` | unset; Compose example uses `http://market-data-service:8001/market-data/stream` | pricing-service | Its one canonical SSE inlet for quotes and curves; pricing derives the sibling `/market-data/snapshot` seed from this URL. |
 | `VALUATION_STREAM_URL` | unset | blotter-service | Live-valuation SSE inlet feeding the read models. |
 | `BLOTTER_SERVICE_URL` | unset | books-service | Verifies zero ACTIVE trades before deactivating a book; unset refuses every delete. |
 | `*_HEALTHCHECK_URL` (6) | unset | monitoring-service | One poll target per service, so removing a service from watch is unsetting one line. |

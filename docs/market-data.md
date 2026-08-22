@@ -23,6 +23,24 @@ of this document describes the current contracts, feeds and storage model.
 | Market open/closed | `/stock/market-status`, free *(docs)* | `is_market_open` on every quote *(verified)* | static hours in search metadata |
 | Error shape | proper `401`/`429` + `{"error": …}` *(verified 401)* | **HTTP 200** + `{"code":429,"status":"error"}` *(verified shape)* | **HTTP 200** + `"Information"`/`"Note"` key *(verified)* |
 
+### Volume, depth and open interest
+
+These measures answer different questions and are not substitutes for each other:
+
+| Measure | What it counts | Data shape required | Current wired quote endpoints |
+| --- | --- | --- | --- |
+| Traded volume | Executed shares or contracts during a stated interval. It has no BUY/SELL direction by itself. | Interval or session, unit, venue coverage and event/as-of time. | Finnhub's wired `/quote` response has no volume. Twelve Data documents quote volume for supported instruments, but the current normalizer deliberately does not ingest it. |
+| Displayed depth | Resting bid/ask orders or aggregate size at more than one price level. Top-of-book bid/ask alone is not depth. | Ordered price levels, side, size, venue and entitlement. | Neither wired free `/quote` path supplies a depth book. Finnhub's separately documented last bid/ask is premium and still only top of book. |
+| Open interest | Outstanding futures or options contracts not yet offset or delivered; one buyer/seller pair counts once. | Exact derivative contract, publication time and units. | Neither wired quote path supplies it, and it is not meaningful for the current cash-equity/spot-FX rows as a generic quote field. |
+
+The provider references are [Finnhub Quote](https://finnhub.io/docs/api/quote),
+[Twelve Data Quote](https://twelvedata.com/docs/market-data/quote),
+[Nasdaq depth-of-book definition](https://listingcenter.nasdaq.com/rulebook/nasdaq/rules/Nasdaq%20Equity%207)
+and [CME open interest](https://www.cmegroup.com/education/lessons/open-interest).
+Phase 3b therefore adds no pressure indicator or placeholder zero. A future capability must
+name the measure, interval/as-of, instrument scope, units and entitlement before it enters the
+normalized contract or UI.
+
 ## Group B — official sources
 
 | | NBP | ECB | FRED |
@@ -318,15 +336,21 @@ alphabetically, while the provider filter can reduce each group to one feed.
 
 | Route | Serves |
 | --- | --- |
-| `GET /snapshot` | the board read from the DB (warm after restart) + `stream_id` — the UI's seed |
-| SSE `/stream` | `market_tick` per successful poll, provider-tagged, with `stream_id`/`event_id` |
-| `GET /quotes` | stored active-set quotes + computed freshness state; filterable by `symbol`, `asset_class`, `provider` |
-| `GET /quotes/<provider>/<symbol>/history?limit=` | latest stored change observations for one provider-symbol; limit 1–200 |
+| `GET /market-data/snapshot` | the board read from the DB (warm after restart) + `stream_id` — the UI's seed |
+| SSE `/market-data/stream` | `market_tick` per successful poll, provider-tagged, with `stream_id`/`event_id` |
+| SSE `/market-data/stream/<provider>` | the same contract filtered to one wired provider; unknown/unwired provider is 404 |
+| `GET /market-data/quotes` | stored active-set quotes + computed freshness state; filterable by `symbol`, `asset_class`, `provider` |
+| `GET /market-data/quotes/<provider>/<symbol>` | one active normalized quote; unknown provider or missing active row is 404 |
+| `GET /market-data/quotes/<provider>/<symbol>/history?limit=` | latest stored change observations for one provider-symbol; limit 1–200 |
 | `GET /watchlist` · `POST /watchlist` · `DELETE /watchlist/<symbol>?provider=` | the symbol master, self-service and per provider |
 | `GET /symbols/search?q=` | provider-tagged discovery, cached 10 min |
 | `GET /providers` | all six registry entries (capabilities, wired flag) + runtime for wired ones: status, budget + daily ledger, market session, active symbols, and the current poll `strategy` (mode, cadences, server-composed description — what the board strip and the ops card display) |
 | `GET /providers/<p>/health` | one provider's runtime detail |
-| `POST /refresh?symbol=&provider=` | targeted poll within budget (provider defaults to FINNHUB) — 404 unknown symbol, 422 unsupported class, 429 budget/pace exhausted, 503 disabled/cooldown |
+| `POST /market-data/refresh?symbol=&provider=` | targeted poll within budget (provider defaults to FINNHUB) — 404 unknown symbol, 422 unsupported class, 429 budget/pace exhausted, 503 disabled/cooldown |
+
+The `/market-data/...` forms are canonical on direct port 8001. Short `/snapshot`, `/quotes`,
+`/stream`, `/stream/<provider>`, quote-history and `/refresh` routes remain compatibility
+aliases for existing consumers.
 
 Every tick carries the full normalized quote (bid/ask/last/mid, basis, grade, both clocks,
 `previous_close`) plus

@@ -40,10 +40,13 @@ Content-Type: application/json
 # Wait for both pollers. The result is two rows, keyed by provider + symbol.
 
 ### Compare the two normalized quote rows and freshness states
-GET {{marketData}}/quotes?symbol=AAPL
+GET {{marketData}}/market-data/quotes?symbol=AAPL
 
-### Each series starts at previous_close and ends at the current board mid
-GET {{marketData}}/history
+### Each provider keeps an independent, newest-first tape of observed price changes
+GET {{marketData}}/market-data/quotes/FINNHUB/AAPL/history?limit=60
+
+###
+GET {{marketData}}/market-data/quotes/TWELVE_DATA/AAPL/history?limit=60
 
 ### Inspect provider health, cadence and remaining budgets
 GET {{marketData}}/providers
@@ -65,29 +68,29 @@ Content-Type: application/json
 
 ### Read the two rows shown by the ticket
 # @name finnhubQuote
-GET {{marketData}}/quotes/FINNHUB/AAPL
+GET {{marketData}}/market-data/quotes/FINNHUB/AAPL
 
 ###
 # @name twelveQuote
-GET {{marketData}}/quotes/TWELVE_DATA/AAPL
+GET {{marketData}}/market-data/quotes/TWELVE_DATA/AAPL
 
 ### Open through Finnhub
 # @name finnhubTrade
-POST {{actions}}/trades
+POST {{actions}}/trade-actions
 Content-Type: application/json
 
 { "client_request_id": "finnhub-{{$timestamp}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "FINNHUB", "client_seen_price": "{{finnhubQuote.response.body.$.mid}}" }
 
 ### Open through Twelve Data
 # @name twelveTrade
-POST {{actions}}/trades
+POST {{actions}}/trade-actions
 Content-Type: application/json
 
 { "client_request_id": "twelve-{{$timestamp}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "TWELVE_DATA", "client_seen_price": "{{twelveQuote.response.body.$.mid}}" }
 
 ### Repeat the first request ID; the worker must not create a second trade
 # @name duplicateFinnhubTrade
-POST {{actions}}/trades
+POST {{actions}}/trade-actions
 Content-Type: application/json
 
 { "client_request_id": "{{finnhubTrade.response.body.$.client_request_id}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "FINNHUB", "client_seen_price": "{{finnhubQuote.response.body.$.mid}}" }
@@ -104,19 +107,19 @@ GET {{blotter}}/trades/{{twelveTrade.response.body.$.trade_id}}
 GET {{blotter}}/trades/{{duplicateFinnhubTrade.response.body.$.trade_id}}
 
 ### Close the Finnhub trade through its frozen feed
-POST {{actions}}/trades
+POST {{actions}}/trade-actions
 Content-Type: application/json
 
 { "action_type": "CLOSE_TRADE", "client_request_id": "close-finnhub-{{$timestamp}}", "trade_id": "{{finnhubTrade.response.body.$.trade_id}}", "close_reason": "SCENARIO_CLEANUP" }
 
 ### Close the Twelve Data trade through its frozen feed
-POST {{actions}}/trades
+POST {{actions}}/trade-actions
 Content-Type: application/json
 
 { "action_type": "CLOSE_TRADE", "client_request_id": "close-twelve-{{$timestamp}}", "trade_id": "{{twelveTrade.response.body.$.trade_id}}", "close_reason": "SCENARIO_CLEANUP" }
 
 ### A second close is rejected because the trade is no longer active
-POST {{actions}}/trades
+POST {{actions}}/trade-actions
 Content-Type: application/json
 
 { "action_type": "CLOSE_TRADE", "client_request_id": "double-close-{{$timestamp}}", "trade_id": "{{finnhubTrade.response.body.$.trade_id}}", "close_reason": "SHOULD_NOT_APPLY" }

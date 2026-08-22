@@ -16,9 +16,12 @@ future plans come afterwards.
    and persistence contracts.
 5. [configuration.md](configuration.md) - look up each runtime knob, default and rationale.
 6. [validation-runbook.md](validation-runbook.md) and
-   [provider-trading.http](../scenarios/provider-trading.http) - verify the complete feature
-   and clean up test data.
-7. [implementation-roadmap.md](implementation-roadmap.md) - read last; it describes future
+   [provider-trading.http](../scenarios/provider-trading.http) - review the complete feature
+   with Observe → Explain → Probe prompts, retain a compact evidence record and clean up test
+   data.
+7. [phase-reports/phase-3b.md](phase-reports/phase-3b.md) - inspect the latest concrete review
+   evidence and the exact boundary handed to the next phase.
+8. [implementation-roadmap.md](implementation-roadmap.md) - read last; it describes future
    work, not current behavior.
 
 ## Earlier implementation background

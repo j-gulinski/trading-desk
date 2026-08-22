@@ -11,6 +11,7 @@ export default function SidePanel({
   tabs,
   footer,
   wide = false,
+  bodyClassName = '',
   dismissOnOutsideClick = true,
   onClose,
   children,
@@ -50,7 +51,9 @@ export default function SidePanel({
       {notice}
       {tabs}
 
-      <div className="side-panel__body">{children}</div>
+      <div className={`side-panel__body${bodyClassName ? ` ${bodyClassName}` : ''}`}>
+        {children}
+      </div>
 
       {footer && <footer className="side-panel__footer">{footer}</footer>}
     </aside>

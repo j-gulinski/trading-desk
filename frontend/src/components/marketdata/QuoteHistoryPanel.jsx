@@ -119,6 +119,7 @@ export default function QuoteHistoryPanel({ row, onClose }) {
       eyebrow="QUOTE DETAIL"
       title={symbol}
       subtitle={`${providerLabel(instrument.provider)} · ${instrument.assetClass} · ${instrument.currency ?? '—'}`}
+      bodyClassName="quote-history-panel"
       onClose={onClose}
       headActions={
         <StatusPill
@@ -176,23 +177,28 @@ export default function QuoteHistoryPanel({ row, onClose }) {
           </div>
         </header>
 
-        {history.loading ? (
-          <EmptyState message="Loading observed quote changes…" />
-        ) : points.length === 0 ? (
-          <EmptyState message="No stored price changes for this provider-symbol yet." />
-        ) : (
-          <ol className="quote-history__ticks">
-            {points.map((point, index) => (
-              <HistoryItem
-                key={point.id}
-                point={point}
-                previous={points[index + 1]}
-                instrument={instrument}
-              />
-            ))}
-          </ol>
-        )}
-
+        <div
+          className="quote-history__tape"
+          tabIndex={0}
+          aria-label="Observed quote changes"
+        >
+          {history.loading ? (
+            <EmptyState message="Loading observed quote changes…" />
+          ) : points.length === 0 ? (
+            <EmptyState message="No stored price changes for this provider-symbol yet." />
+          ) : (
+            <ol className="quote-history__ticks">
+              {points.map((point, index) => (
+                <HistoryItem
+                  key={point.id}
+                  point={point}
+                  previous={points[index + 1]}
+                  instrument={instrument}
+                />
+              ))}
+            </ol>
+          )}
+        </div>
       </section>
     </SidePanel>
   )

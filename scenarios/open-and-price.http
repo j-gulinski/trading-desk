@@ -12,15 +12,15 @@
 
 ### Current provider rows
 # @name equityQuote
-GET {{marketData}}/quotes/FINNHUB/AAPL
+GET {{marketData}}/market-data/quotes/FINNHUB/AAPL
 
 ###
 # @name fxQuote
-GET {{marketData}}/quotes/TWELVE_DATA/EURUSD
+GET {{marketData}}/market-data/quotes/TWELVE_DATA/EURUSD
 
 ###
 # @name metalQuote
-GET {{marketData}}/quotes/TWELVE_DATA/XAUUSD
+GET {{marketData}}/market-data/quotes/TWELVE_DATA/XAUUSD
 
 ### One matching book per asset class
 # @name equityBook

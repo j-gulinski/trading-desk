@@ -5,7 +5,7 @@ RUN python -m venv /opt/venv \
 
 FROM python:3.14-slim
 ARG SERVICE_DIR
-ENV PATH="/opt/venv/bin:$PATH"the 
+ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 COPY --from=deps /opt/venv /opt/venv
 COPY alembic.ini ./

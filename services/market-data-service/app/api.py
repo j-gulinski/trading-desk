@@ -20,29 +20,66 @@ from shared.logging_config import get_logger
 log = get_logger(SERVICE_NAME)
 app = bottle.Bottle()
 
-@app.route("/stream")
-def stream():
+
+def _provider_event(message, provider):
+    if provider is None:
+        return message
+    data = message["data"]
+    if data.get("provider") == provider:
+        return message
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        return None
+    matching = [row for row in rows if row.get("provider") == provider]
+    if not matching:
+        return None
+    return {**message, "data": {**data, "rows": matching}}
+
+
+def _serve_stream(provider=None):
+    if provider is not None and provider not in scheduler.wired_quote_providers():
+        response.status = 404
+        response.content_type = "application/json"
+        return to_json({"error": f"unknown or unwired provider: {provider}"})
     response.content_type = "text/event-stream"
     response.set_header("Cache-Control", "no-cache")
     with clients_lock:
         client_q = queue.Queue(maxsize=500)
         client_event_queues.add(client_q)
-    log.info("stream_client_connected")
+    log.info("stream_client_connected", provider=provider)
 
     def generate_events():
         yield ": connected\n\n"
         try:
             while True:
                 message = client_q.get()
-                yield f"event: {message['event']}\ndata: {to_json(message['data'])}\n\n"
+                selected = _provider_event(message, provider)
+                if selected is not None:
+                    yield (
+                        f"event: {selected['event']}\n"
+                        f"data: {to_json(selected['data'])}\n\n"
+                    )
         except Exception as exc:
             log.debug("stream_client_error", error=type(exc).__name__)
         finally:
             with clients_lock:
                 client_event_queues.discard(client_q)
-            log.info("stream_client_disconnected")
+            log.info("stream_client_disconnected", provider=provider)
 
     return generate_events()
+
+
+@app.route("/stream")
+@app.route("/market-data/stream")
+def stream():
+    return _serve_stream()
+
+
+@app.route("/stream/<provider>")
+@app.route("/market-data/stream/<provider>")
+def provider_stream(provider):
+    return _serve_stream(provider.strip().upper())
+
 
 def _board_payload():
     active = load_active_set()
@@ -77,6 +114,7 @@ def _quote_rows():
 
 
 @app.route("/snapshot")
+@app.route("/market-data/snapshot")
 def get_snapshot():
     response.content_type = "application/json"
     rows = _board_payload()
@@ -89,6 +127,7 @@ def get_snapshot():
 
 
 @app.route("/quotes")
+@app.route("/market-data/quotes")
 def get_quotes():
     response.content_type = "application/json"
     symbol = (request.query.symbol or "").strip().upper() or None
@@ -103,7 +142,35 @@ def get_quotes():
     return to_json(rows)
 
 
+@app.route("/quotes/<provider>/<symbol>")
+@app.route("/market-data/quotes/<provider>/<symbol>")
+def get_quote(provider, symbol):
+    response.content_type = "application/json"
+    normalized_provider = provider.strip().upper()
+    normalized_symbol = symbol.strip().upper()
+    if normalized_provider not in scheduler.wired_quote_providers():
+        response.status = 404
+        return to_json({
+            "error": f"unknown or unwired provider: {normalized_provider}"
+        })
+    row = next(
+        (
+            item for item in _quote_rows()
+            if item["provider"] == normalized_provider
+            and item["symbol"] == normalized_symbol
+        ),
+        None,
+    )
+    if row is None:
+        response.status = 404
+        return to_json({
+            "error": f"no active quote for {normalized_provider}:{normalized_symbol}"
+        })
+    return to_json(row)
+
+
 @app.route("/quotes/<provider>/<symbol>/history")
+@app.route("/market-data/quotes/<provider>/<symbol>/history")
 def get_quote_history(provider, symbol):
     response.content_type = "application/json"
     normalized_provider = provider.strip().upper()
@@ -204,6 +271,7 @@ def get_provider_health(name):
 
 
 @app.route("/refresh", method="POST")
+@app.route("/market-data/refresh", method="POST")
 def refresh():
     response.content_type = "application/json"
     symbol = (request.query.symbol or "").strip().upper()
