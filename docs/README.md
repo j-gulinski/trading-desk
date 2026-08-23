@@ -1,51 +1,43 @@
 # Documentation
 
-Start with the current system and follow one feature end to end. Reference material comes
-next; the plan of record comes last — unless you are here to build the next phase, in which
-case jump straight to it.
+Two layers. The **phase reports** are the detailed record: every decision (chose /
+rejected / why), the difficult concepts taught step by step, and the evidence — that is
+where explanations live. Everything else is a **lean reference sheet** carrying only the
+current facts a session needs for context; a reference sheet states what is, never argues
+why.
 
 **Working on the next phase?** Read [`../AGENTS.md`](../AGENTS.md) for the house rules,
-then [implementation-roadmap.md](implementation-roadmap.md) §6: the standing phase
-template (verify → build → surface → evidence → browser pass → docs) and the task-level
-plans for phases 4–7 (decisions D26–D34) are there. Each phase ends by adding its report
-to `phase-reports/` and updating the guides in the same change.
+then [implementation-roadmap.md](implementation-roadmap.md) §6 — the standing phase
+template and the task-level plans. The roadmap is a working plan, not a contract: each
+phase re-derives its decisions and ends by adding its report to `phase-reports/`.
 
-## Reading order
+## Reference sheets
 
-1. [Root README](../README.md) - run the stack, see the services and learn the operating
-   rules.
-2. [architecture.md](architecture.md) - understand service ownership, database handoffs and
-   SSE boundaries.
-3. [implementation/multi-provider-trading.md](implementation/multi-provider-trading.md) -
-   follow the implemented search -> watchlist -> quote -> ticket -> valuation -> logs flow,
-   including code maps and diagrams.
-4. [market-data.md](market-data.md) - look up normalized fields, provider facts, endpoints
-   and persistence contracts.
-5. [configuration.md](configuration.md) - look up each runtime knob, default and rationale.
-6. [validation-runbook.md](validation-runbook.md) and
-   [provider-trading.http](../scenarios/provider-trading.http) - review the complete feature
-   with Observe → Explain → Probe prompts, retain a compact evidence record and clean up test
-   data.
-7. [phase-reports/](phase-reports/) - the chronological record, one report per phase:
-   [phase-0](phase-reports/phase-0.md) (fork & deep clean),
-   [phase-1](phase-reports/phase-1.md) (contracts & schema),
-   [phase-2](phase-reports/phase-2.md) (Finnhub vertical),
-   [phase-3a](phase-reports/phase-3a.md) (two-provider workflow review record),
-   [phase-3b](phase-reports/phase-3b.md) (review closure — the latest concrete evidence and
-   the exact boundary handed to Phase 4).
-8. [implementation-roadmap.md](implementation-roadmap.md) - the plan of record: decisions
-   D1–D34, the standing phase template, task-level phases 4–7, and the post-acceptance hosted
-   sequence. Forward-looking by design; implemented behavior is authoritative in the guides
-   above.
+1. [Root README](../README.md) — run the stack, the services, the operating rules.
+2. [architecture.md](architecture.md) — service ownership, the market-data vertical in
+   one diagram, code map, data model, shared runtime, conventions.
+3. [market-data.md](market-data.md) — provider facts, normalized contracts, freshness,
+   feeds, endpoints, storage.
+4. [configuration.md](configuration.md) — every runtime knob: default, reader, one-line
+   why.
+5. [validation-runbook.md](validation-runbook.md) with
+   [provider-trading.http](../scenarios/provider-trading.http) and
+   [reference-fx.http](../scenarios/reference-fx.http) — the review procedure and the
+   executable API paths.
 
-## Earlier implementation background
+## Phase reports — the detailed record
 
-These are useful only when tracing how the current foundation evolved:
+- [phase-0](phase-reports/phase-0.md) — fork & deep clean
+- [phase-1](phase-reports/phase-1.md) — provider contracts & schema
+- [phase-2](phase-reports/phase-2.md) — the Finnhub vertical
+- [phase-3a](phase-reports/phase-3a.md) — the two-provider workflow, review record
+- [phase-3b](phase-reports/phase-3b.md) — review closure
+- [phase-4](phase-reports/phase-4.md) — NBP/ECB reference FX and the reporting currency
+  (the latest evidence and the exact boundary handed to Phase 5)
 
-- [implementation/foundation.md](implementation/foundation.md)
-- [implementation/provider-domain.md](implementation/provider-domain.md)
-- [implementation/finnhub-integration.md](implementation/finnhub-integration.md)
+## The plan
 
-The feature guide is the primary explanation of current multi-provider behavior. The root
-README is the operational entry point; `market-data.md` and `configuration.md` are reference
-sheets rather than a second narrative.
+[implementation-roadmap.md](implementation-roadmap.md) — the working plan: the standing
+phase template, task-level phases 5–7, and the post-acceptance sequence. Forward-looking
+by design; for implemented behavior the phase reports and reference sheets above are
+authoritative.

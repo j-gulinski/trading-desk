@@ -6,28 +6,29 @@ frontend, communicating through database rows and server-sent events.
 
 Forked from [trading-microservices](https://github.com/j-gulinski/trading-microservices),
 which stays archived as the runnable synthetic baseline. This repository replaces its
-synthetic feed with two real quote providers: Finnhub for US equities/ETFs and Twelve Data
-for equities, FX and metals.
+synthetic feed with real sources: Finnhub (US equities/ETFs) and Twelve Data (equities, FX,
+metals) as quote providers, plus NBP and ECB official FX fixings as reference data feeding
+the reporting-currency conversion.
 
 Each symbol is watched per provider, so the same asset can be compared on both feeds and
 either membership can be removed independently. The Market Data board groups provider feeds
 under each symbol and shows a structured benchmark summary, a discrete tape of observed
 price changes, and market-aware LIVE/CLOSED/STALE/MISSING states.
 The trade ticket compares selected feeds and stores the
-provider used for execution; pricing and closing continue to use that same provider. See
-[docs/implementation/multi-provider-trading.md](docs/implementation/multi-provider-trading.md)
-for the complete implementation guide.
+provider used for execution; pricing and closing continue to use that same provider. Facts
+in [docs/market-data.md](docs/market-data.md); the detailed record in
+[docs/phase-reports/](docs/phase-reports/).
 
 ## Operating decisions
 
-The rules the system currently runs on. Mechanics and rationale are organized by feature in
-the implementation guides; knob values are in
+The rules the system currently runs on. The reasoning behind each is in the phase report
+that introduced it; knob values are in
 [docs/configuration.md](docs/configuration.md).
 
 | Area | Policy | Rationale |
 | --- | --- | --- |
 | Polling universe | Only the active set is polled: watchlist symbols, symbols with open trades, and the benchmark (SPY). | Free-tier budgets do not cover open-ended polling; the watchlist defines scope. |
-| Polling tiers | Finnhub: tier 1 (open-trade symbols, benchmark) 15 s, tier 2 (remaining watchlist) 60 s. Twelve Data: flat 15 min batches, paced by its daily ledger. | Open positions and the benchmark return series require the freshest marks; Twelve Data's binding constraint is daily, so tiers would not buy freshness there. |
+| Polling tiers | Finnhub: tier 1 (open-trade symbols, benchmark) 15 s, tier 2 (remaining watchlist) 60 s. Twelve Data: flat batches whose true cadence is the greater of the 15-min knob and the daily-ledger pace (60 s × symbol count at defaults), with per-symbol due-times staggered after each batch; the strategy line states the computed cadence and next batch time. | Open positions and the benchmark return series require the freshest marks; Twelve Data's binding constraint is daily, so tiers would not buy freshness there — and a cadence the ledger stretched must be visible, not silent. |
 | Closed market | Polling drops to confirmation cadence after the provider reports the market closed (Finnhub: exchange status, 300 s; Twelve Data: per-symbol `is_market_open`). Unknown status is treated as open. | Prices do not change while the market is closed; confirmation polls remain to detect data issues and reopen. |
 | Freshness | Five states per (provider, symbol). Market open: LIVE until 3× the open cadence on the provider clock, then STALE. Market closed: CLOSED while confirmation polls keep arriving (3× closed cadence on the received clock), then STALE. MISSING = no data yet; UNSUPPORTED = capability fact, served by `/quotes` but never rendered as a board row. Capability appears in search results, where provider selection happens. | STALE means "this feed should be updating and is not" in both regimes; a closed market's closing price is the current price and renders neutral, not broken. |
 | Valuation freshness | A valuation classifies against its own feed's cadence: LIVE while its mark keeps up with the feed's newest tick (within one freshness window), MKT CLOSED while the venue is shut, STALE when the feed is broken or pricing lags it. The 10 s wall-clock rule survives only as the fallback when the tab has no market data. | Only genuinely problematic rows may read STALE; a healthy 15-min Twelve Data cadence is not a problem, and "market closed" is not "trade closed". |
@@ -44,7 +45,7 @@ the implementation guides; knob values are in
 | Retention | Snapshots older than 90 days are deleted daily, except rows referenced by a trade's entry or close snapshot ID. | Hosted database storage stays bounded while trade provenance survives retention. |
 | Quote history | Selecting a board row loads the latest 60 change-only snapshots for that provider-symbol. A price-changing `market_tick` refreshes the selected tape; unchanged ticks do not. The current quote and both clocks stay visible while only the observation tape scrolls. No connected intraday chart or vendor backfill is shown. | Sparse application observations are useful as a discrete audit trail, but connecting them would imply movement and coverage the application does not have. The history read is database-only and spends no provider budget. |
 | Quote audit volume | `QUOTE_WRITTEN` is audited on the **first** stored quote per (provider, symbol); every later tick is in the structured log only. | Auditing every tick is ~8 000 rows a day of noise at these cadences; AuditLogs is the business record, not the poll log. |
-| Registration | The watchlist stores a **provider choice per symbol**, not a capability. Search results list capable providers as toggles; the board can be filtered by provider. Adding a provider merges. `DELETE /watchlist/<symbol>?provider=` drops one feed and leaves the others ticking; `market_remove` tells every tab which row left. The configured benchmark is shown in its own strip rather than mixed into watchlist quotes. | Each feed must be addable/removable and comparable independently; benchmark context is not watchlist membership. |
+| Registration | The watchlist stores a **provider choice per symbol**, not a capability. Search results list capable providers as toggles; the board can be filtered by provider. Adding a provider merges and fires one targeted, budget-aware refresh for each feed just added. `DELETE /watchlist/<symbol>?provider=` drops one feed and leaves the others ticking; `market_remove` tells every tab which row left. The configured benchmark is shown in its own strip rather than mixed into watchlist quotes. | Each feed must be addable/removable and comparable independently; a new pair should quote within seconds, not after a full paced interval; benchmark context is not watchlist membership. |
 | Tradeable universe | `GET /instruments` serves the active set minus the benchmark: a symbol is tradeable if it is watched or already held. A held symbol keeps alive only the provider frozen on its trade. | SPY is polled to compute the return series, not to be bought; pinning every capable provider for a held symbol spends budget nobody reads. |
 | Streams vs. database | SSE streams deliver updates; the database is the source of truth. Every consumer seeds from the database (or `/market-data/snapshot`) and reconciles against it. | SSE has no replay; reconciliation recovers events lost during disconnects. |
 | Market Data API | Direct port 8001 uses `/market-data/snapshot`, `/market-data/quotes`, provider quote detail, all/provider SSE streams and `/market-data/refresh` as its canonical quote contract. Existing short routes remain aliases. | The brief's contract is executable as written while current browser and service consumers remain compatible. |
@@ -52,6 +53,11 @@ the implementation guides; knob values are in
 | Capital invested | The Valuations summary and each open row show gross entry value: `abs(quantity) × entry price × multiplier`. A mixed-currency portfolio does not display one combined capital total. | The portfolio total stays traceable to its rows, while unlike currencies are not added without an FX conversion policy. |
 | Price handling | `bid`/`ask`/`last` are stored as received; missing fields stay NULL. `mid` is derived (bid/ask → reference → last) and drives valuation and display. Every quote carries `price_basis` and `quote_grade`. | Derived and end-of-day prices are identifiable as such. |
 | Tradeability | Only watchlisted symbols are tradeable; the watchlist is the symbol master. | The tradeable universe is user-defined, not hardcoded. |
+| Official reference data | NBP (EUR/PLN, USD/PLN, gold per 1 g) and ECB (EUR/USD, EUR/PLN) fixings join the board as a fourth origin, `reference` — system-owned, beside watched/held/benchmark. The universe is the configured defaults plus each open trade's settlement currency while the source publishes it. Watchlist and search offer quote providers only; `/instruments` derives from watched ∪ held; a forged reference-provider intent is refused with the reason. | Reference data powers conversion and comparison, so a user removing a watchlist row must never silently break it — and a daily fixing is not a fillable price. |
+| Calendar polling | Reference feeds poll inside each source's publication window (NBP ~11:45–12:20 Warsaw, ECB ~15:55–16:45 Frankfurt, business days) every 5 min until a new as-of appears, then hourly confirmation polls. Keyless sources carry the full provider status machine but no token bucket or ledger. | Fixings publish once per business day — polling on a cadence would either hammer the source or miss the window; invented budgets on an unlimited source would be fiction. |
+| Reference freshness | A fixing's stale threshold is computed from the publication calendar: time to the next expected publication plus a 4-hour grace. The UI renders the as-of date, not a seconds counter, and labels an in-date fixing CURRENT. | A Friday fixing must read current through the weekend; STALE has to mean a genuinely missed publication (source holidays excepted — documented limitation). |
+| Currency conversion | One resolver (`shared/fx.py`) with fixed precedence — identity, direct official rate or its inverse, one cross via EUR (ECB), cross via PLN (NBP) — and a path never mixes sources. Served as `GET /fx/rates?to=`; the browser multiplies for display. Valuations and Books show per-currency subtotals; one converted total appears only after an explicit reporting-currency choice (remembered per browser), labeled with rate, path, provider and as-of. Unconvertible currencies stay as labeled subtotals with the reason. Nothing converted is persisted. | Ad-hoc conversion at call sites drifts and silently mixes sources; positions keep settlement currency and only portfolio reporting converts (the review's rule). |
+| Price units | Every rendered pair price names its unit ("4.3122 PLN per EUR"; gold "PLN per 1 g of gold"); search results name their quote currency. | A bare 4.31 next to a bare 0.86 invites misreading — the demo's TWD confusion was exactly this. |
 
 ## Running
 
@@ -95,6 +101,10 @@ streams only — never through each other's APIs.
 | Finnhub → market-data | HTTP polling | 15 s / 60 s by tier; 300 s market closed; market status every 10 min | Quote and market-status ingestion, within the 54/min safe budget. |
 | Twelve Data → market-data | HTTP polling, batched (≤7 symbols/call by default) | 15 min best case; the 720-credit safe ledger is spread across the configured 12-hour active window | Quote ingestion for equities, FX, metals — one credit per symbol per batch. |
 | Finnhub + Twelve Data → market-data | HTTP search calls | on watchlist search, cached 10 min per query | Symbol discovery; each upstream search is budgeted and Twelve Data records one request credit. |
+| watchlist add → provider | targeted quote refresh, budget-aware | once per feed added to the watchlist | First quote lands within seconds instead of at the next scheduled poll; declined silently when the budget disallows it. |
+| NBP → market-data | HTTP polling, publication calendar | every 5 min inside the ~11:45–12:20 Warsaw window until a new as-of; hourly confirmation otherwise | Table A FX fixings + the gold fixing as reference board rows; the full raw table lands in each row's snapshot. |
+| ECB → market-data | HTTP polling, publication calendar | every 5 min inside the ~15:55–16:45 Frankfurt window until a new as-of; hourly confirmation otherwise | EXR euro reference rates (csvdata) as reference board rows. |
+| browser ← market-data FX rates | REST `GET /fx/rates?to=` | every 60 s while a reporting currency is selected on Valuations or Books | Conversion rates with full provenance for the display-only reporting overlay. |
 | market-data → Postgres | upsert + conditional insert | per successful poll | Board update; a history row only when the price changed. |
 | market-data → pricing, browser | SSE `market_tick` on `/market-data/stream`; `GET /market-data/snapshot` seed | per successful poll | Quote distribution; the snapshot provides full state at connect and after restart. |
 | browser ← market-data history | REST `GET /market-data/quotes/<provider>/<symbol>/history?limit=60` | when a board row is selected; again only after a price-changing tick for that selected row | Latest stored observations for the independently scrollable detail tape; database read only, with no timer and no provider request. |
@@ -114,13 +124,15 @@ streams only — never through each other's APIs.
 ## Testing
 
 No unit-test suite by design: the focused provider workflow is retained in
-`scenarios/provider-trading.http` (any REST-client runner). The browser review follows the
+`scenarios/provider-trading.http` and the reference-data/FX-resolver workflow in
+`scenarios/reference-fx.http` (any REST-client runner). The browser review follows the
 Observe → Explain → Probe contract in `docs/validation-runbook.md`, covering the interactive
 watchlist, quote clocks, provider-bound ticket, failure isolation and provider-log paths.
 
 ## Where to read more
 
-[docs/README.md](docs/README.md) is the index: the base architecture, the configuration
-reference, the implementation roadmap (`docs/implementation-roadmap.md`), and feature guides
-under `docs/implementation/`. Each guide explains current behavior, component boundaries,
-technical decisions and repeatable validation.
+[docs/README.md](docs/README.md) is the index. Two layers: lean reference sheets
+(architecture, market data, configuration, the validation runbook) carry the current
+facts, and the phase reports under `docs/phase-reports/` carry the detailed record —
+every decision with its reasoning, the difficult concepts taught step by step, and the
+evidence. The roadmap (`docs/implementation-roadmap.md`) is the working plan.

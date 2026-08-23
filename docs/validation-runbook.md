@@ -1,8 +1,9 @@
 # Review runbook — multi-provider trading
 
 This is the durable review contract for the Finnhub/Twelve Data vertical. It verifies the
-running behavior and prepares the explanation behind it. The matching implementation guide is
-[multi-provider-trading.md](implementation/multi-provider-trading.md); the executable API path
+running behavior and prepares the explanation behind it. Current behavior facts are in
+[market-data.md](market-data.md) and [architecture.md](architecture.md); the detailed
+explanations are in the phase reports. The executable API path
 is [provider-trading.http](../scenarios/provider-trading.http). The latest completed example of
 the evidence record is [phase-3b.md](phase-reports/phase-3b.md).
 

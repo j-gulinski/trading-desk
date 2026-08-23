@@ -94,6 +94,7 @@ def add_item(symbol, asset_class, currency, quote_providers, requested_providers
                 f"{symbol} watched on {', '.join(sorted(added))}"
             )
         else:
+            added = chosen
             if session.query(WatchlistItem).count() >= MAX_ACTIVE_SYMBOLS:
                 return None, (
                     f"the watchlist is full ({MAX_ACTIVE_SYMBOLS} symbols) — "
@@ -118,7 +119,9 @@ def add_item(symbol, asset_class, currency, quote_providers, requested_providers
                      "providers": sorted(merged)},
             session=session,
         )
-    return _describe(symbol, asset_class, currency, merged, quote_providers), None, 201
+    item = _describe(symbol, asset_class, currency, merged, quote_providers)
+    item["added_providers"] = sorted(added)
+    return item, None, 201
 
 
 def remove_item(symbol, provider=None):

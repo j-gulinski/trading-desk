@@ -26,6 +26,7 @@ import {
   formatShortId,
   formatUnitPrice,
 } from '../../domain/formatting.js'
+import { unitLabelOf } from '../../domain/marketFormat.js'
 
 function FieldError({ id, message }) {
   if (!message) return null
@@ -73,6 +74,7 @@ export default function NewTradePanel({ onClose }) {
   const quote = quotes.find((option) => option.provider === provider) ?? null
 
   const wholeUnits = assetClass === 'EQUITY'
+  const unitLabel = symbol ? unitLabelOf({ symbol, assetClass }) : null
   const trimmed = quantityText.trim()
   const quantity = trimmed === '' ? null : Number(trimmed)
   const estimatedPositionValue =
@@ -300,6 +302,7 @@ export default function NewTradePanel({ onClose }) {
                   key={option.provider}
                   quote={option}
                   assetClass={assetClass}
+                  unit={unitLabel}
                   side={side}
                   selected={provider === option.provider}
                   now={now}
@@ -338,7 +341,7 @@ export default function NewTradePanel({ onClose }) {
             <span className="panel-form__info-label">ESTIMATED PRICE</span>
             <span className="panel-form__info-value">
               {quote?.price != null
-                ? `${formatUnitPrice(quote.price, assetClass)} ${quote.currency ?? ''}`
+                ? `${formatUnitPrice(quote.price, assetClass)} ${unitLabel ?? quote.currency ?? ''}`
                 : '—'}
             </span>
           </div>

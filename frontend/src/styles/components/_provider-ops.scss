@@ -145,3 +145,14 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
+
+.provider-card__keyless {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}

@@ -65,6 +65,9 @@ class ProviderClient:
     def auth_params(self):
         return {}
 
+    def decode_body(self, body):
+        return json.loads(body)
+
     def classify_body(self, payload):
         pass
 
@@ -78,10 +81,10 @@ class ProviderClient:
         payload = None
         try:
             body, status = self._fetch(f"{self.base_url}{path}?{query}")
-            payload = json.loads(body)
+            payload = self.decode_body(body)
             self.classify_body(payload)
         except ValueError as error:
-            provider_error = ProviderDataError(self.provider, "response body is not JSON")
+            provider_error = ProviderDataError(self.provider, "response body failed to decode")
             raw_response = body.decode("utf-8", errors="replace") if body else None
             self._log_response(
                 request_fields,

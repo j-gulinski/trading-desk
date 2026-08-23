@@ -16,6 +16,7 @@ const UNAVAILABLE_LABELS = {
 export default function ProviderQuoteOption({
   quote,
   assetClass,
+  unit,
   side,
   selected,
   now,
@@ -45,6 +46,7 @@ export default function ProviderQuoteOption({
             <span className="quote-option__price">
               {side === 'BUY' ? 'buy' : 'sell'} at{' '}
               {formatUnitPrice(quote.price, assetClass)}
+              {unit ? ` ${unit}` : ''}
             </span>
             <span className="quote-option__meta">
               {quote.atMs != null

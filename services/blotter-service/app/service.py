@@ -172,12 +172,14 @@ def books_summary() -> list[dict]:
     books = repository.list_books()
     realized_by_book = repository.realized_pnl_by_book()
     closed_by_book = repository.closed_trade_counts_by_book()
+    currencies_by_book = repository.trade_currencies_by_book()
     summaries = []
     for book in books:
         book_id = book["book_id"]
         active = cache.trades.query(book_id=book_id, status="ACTIVE")
         unrealized, positions = _net_positions(active)
         realized = realized_by_book.get(book_id) or Decimal("0")
+        currencies = currencies_by_book.get(book_id) or set()
         summaries.append({
             "book_id": book_id,
             "name": book["name"],
@@ -188,7 +190,7 @@ def books_summary() -> list[dict]:
             "realized_pnl": realized,
             "unrealized_pnl": unrealized,
             "total_pnl": realized + unrealized,
-            "currency": "USD",
+            "currency": next(iter(currencies)) if len(currencies) == 1 else None,
             "positions": positions,
         })
     return summaries

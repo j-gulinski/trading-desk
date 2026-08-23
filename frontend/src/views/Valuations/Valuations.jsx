@@ -35,6 +35,15 @@ import ColumnPicker from '../../components/tables/ColumnPicker.jsx'
 import SortCaptureStatus from '../../components/tables/SortCaptureStatus.jsx'
 import ValuationTable from '../../components/valuations/ValuationTable.jsx'
 import BookRiskCard from '../../components/valuations/BookRiskCard.jsx'
+import FxReport from '../../components/fx/FxReport.jsx'
+import { useFxRates } from '../../hooks/useFxRates.js'
+import { useReportingCurrency } from '../../hooks/useReportingCurrency.js'
+import { convertedTotalsOf, currencySubtotalsOf } from '../../domain/fx.js'
+
+const FX_COLUMNS = [
+  { id: 'notional', label: 'CAPITAL', signed: false },
+  { id: 'unrealized', label: 'UNREALIZED', signed: true },
+]
 
 function matchesSearch(row, search) {
   if (!search) return true
@@ -57,6 +66,16 @@ export default function Valuations() {
     (row) => !row.valuation.closed,
   )
   const summary = summarizeValuations(openRows)
+  const [reportingCurrency, setReportingCurrency] = useReportingCurrency()
+  const fx = useFxRates(reportingCurrency)
+  const currencySubtotals = currencySubtotalsOf(
+    openRows,
+    (row) => row.valuation.currency,
+    (row) => ({
+      notional: row.valuation.notional ?? 0,
+      unrealized: row.valuation.unrealizedPnl ?? 0,
+    }),
+  )
 
   const portfolioMetric = bookRisk.PORTFOLIO
   const portfolioBook = portfolioMetric
@@ -140,7 +159,23 @@ export default function Valuations() {
 
   const books = bookRisksOf(openRows, bookRisk)
   const bookOptions = bookOptionsOf(openRows)
-  const currency = summary.currency ?? 'MIXED'
+  const convertedSummary =
+    summary.currency == null && reportingCurrency && fx.rates != null
+      ? convertedTotalsOf(
+          currencySubtotals, fx.rates, reportingCurrency,
+          FX_COLUMNS.map((column) => column.id),
+        )
+      : null
+  const headlineConverted =
+    convertedSummary != null && convertedSummary.excluded.length === 0
+  const currency = summary.currency ?? (headlineConverted ? reportingCurrency : 'MIXED')
+  const headlineTitle = headlineConverted ? convertedSummary.applied.join('; ') : undefined
+  const capitalHeadline = summary.currency != null
+    ? summary.notional
+    : headlineConverted ? convertedSummary.totals.notional : null
+  const unrealizedHeadline = summary.currency != null
+    ? summary.unrealized
+    : headlineConverted ? convertedSummary.totals.unrealized : null
 
   let tableContent
   if (visibleRows.length > 0) {
@@ -175,14 +210,20 @@ export default function Valuations() {
       <div className="valuation-summary">
         <StatCard
           label={`CAPITAL INVESTED · ${currency}`}
-          value={summary.currency == null ? '—' : formatAmount(summary.notional)}
-          sub="gross entry value of open positions"
+          value={capitalHeadline == null ? '—' : formatAmount(capitalHeadline)}
+          sub="gross entry value"
+          title={headlineTitle}
         />
         <StatCard
           label={`UNREALIZED PNL · ${currency}`}
-          value={formatSignedAmount(summary.unrealized)}
+          value={unrealizedHeadline == null ? '—' : formatSignedAmount(unrealizedHeadline)}
           sub={`${summary.open} open positions · ${summary.books} books`}
-          tone={summary.unrealized >= 0 ? 'pos' : 'neg'}
+          tone={
+            unrealizedHeadline == null
+              ? 'default'
+              : unrealizedHeadline >= 0 ? 'pos' : 'neg'
+          }
+          title={headlineTitle}
         />
         <StatCard label="LIVE" value={summary.live} sub="valued now" tone="info" />
         <StatCard
@@ -197,6 +238,25 @@ export default function Valuations() {
           tone={summary.stale > 0 ? 'warn' : 'default'}
         />
       </div>
+
+      {currencySubtotals.length > 0 && (
+        <section className="valuation-section" aria-labelledby="fx-report-title">
+          <div className="valuation-section__head">
+            <div>
+              <h2 id="fx-report-title">Portfolio by currency</h2>
+              <p>Subtotals by settlement currency</p>
+            </div>
+            <span>{currencySubtotals.length} settlement {currencySubtotals.length === 1 ? 'currency' : 'currencies'}</span>
+          </div>
+          <FxReport
+            columns={FX_COLUMNS}
+            subtotals={currencySubtotals}
+            reportingCurrency={reportingCurrency}
+            onReportingCurrencyChange={setReportingCurrency}
+            fx={fx}
+          />
+        </section>
+      )}
 
       <section className="valuation-section" aria-labelledby="book-risk-title">
         <div className="valuation-section__head">

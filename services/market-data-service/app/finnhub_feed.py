@@ -95,6 +95,7 @@ def _wire_quote(quote):
         "watched": bool(origin.get("watched")),
         "held": bool(origin.get("held")),
         "benchmark": bool(origin.get("benchmark")),
+        "reference": False,
     }
 
 

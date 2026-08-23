@@ -48,7 +48,7 @@ function ResultRow({ result, onBoard, busy, onAdd }) {
         {result.name}
       </span>
       <span className="watchlist-search__meta">
-        {result.asset_class} · {result.currency}
+        {result.asset_class} · quoted in {result.currency}
       </span>
       <span className="watchlist-search__providers">
         {result.providers.map((provider) => {

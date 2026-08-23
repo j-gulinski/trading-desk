@@ -133,8 +133,13 @@ The watchlist write then runs in these steps:
    watchlist size before writing.
 3. One transaction inserts a symbol or merges new providers into its existing membership and
    writes the matching audit event.
-4. The API reloads every feed's active-set view immediately. The board can show a MISSING
-   placeholder until the first quote arrives; the normal poll then replaces it.
+4. The API reloads every feed's active-set view immediately, then fires one targeted,
+   budget-aware refresh per feed that was just added (a background thread calling the same
+   `refresh_symbol` path as `POST /market-data/refresh`). A newly watched pair therefore
+   quotes within seconds instead of waiting for the next scheduled batch — up to a full
+   paced interval on Twelve Data. When the budget check declines the refresh, the board
+   shows a MISSING placeholder whose tooltip states when the next batch is due, and the
+   normal poll replaces it.
 5. Removal deletes only the requested membership. If no trade or benchmark still needs that
    pair, `market_remove` tells every open tab to drop the row; otherwise `still_polled`
    explains why the quote remains.
@@ -326,6 +331,32 @@ An upstream failure changes only that provider runtime:
 Provider health is returned by `/providers` and `/providers/<name>/health`. The UI renders
 configured feeds with cadence, market session, last success and budgets. Unwired future
 providers render only `NOT AVAILABLE`.
+
+### Quote age vs poll recency
+
+The board's Age column counts from the **provider's own quote event time**
+(`provider_timestamp` — Twelve Data's `last_quote_at`, Finnhub's `t`), never from the last
+poll. A successful poll that returns an unchanged quote time therefore does not zero the
+Age — correct data that reads surprising on a thin symbol or outside trading hours, which
+is exactly what the 2026-08-21 demo observed. Poll recency is a different fact and has its
+own surfaces: the Received column, and the Twelve Data strategy line
+("next batch in Xs · cadence Y min (N symbols on the daily ledger)") shown on the board
+strip, the ops card, and the Age/NO DATA tooltips.
+
+Two pacing consequences are deliberately visible rather than smoothed over:
+
+- **The paced interval can exceed the 15-minute knob.** Twelve Data's cadence is
+  `max(TWELVE_DATA_POLL_SECONDS, active_window × symbols / daily_budget)` — at defaults,
+  60 s per symbol, so past 15 symbols the true cadence grows with the watchlist. The
+  strategy line reports the computed cadence and the symbol count that produced it, so a
+  longer gap is explained on screen instead of looking like a missed poll.
+- **Batch due-times are staggered.** Symbols polled in one batch would otherwise share one
+  synchronized due-time forever: the whole board ages together and jumps together, and one
+  blocked batch (for example, searches spending the same minute bucket) delays every row at
+  once. After each batch the feed spreads the chunk's next due-times across the following
+  interval, so the board refreshes rolling; per-symbol cadence still converges on the paced
+  interval, and symbols that re-synchronize (after a cooldown) are spread again on the next
+  round.
 
 ## Public boundaries
 

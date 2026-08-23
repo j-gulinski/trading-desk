@@ -1,17 +1,19 @@
 # Implementation roadmap — real-data trading system
 
 This roadmap records capability boundaries, dependencies, technical decisions and acceptance
-checks for the real-data trading system. It is a forward-looking companion to the current-state
-guides under `docs/implementation/`; implemented behavior is authoritative there.
+checks for the real-data trading system. It is a forward-looking working plan; implemented
+behavior is authoritative in the phase reports and the reference sheets (`architecture.md`,
+`market-data.md`, `configuration.md`).
 
 The migration starts from `trading-microservices`, removes synthetic/static market flows and
 rebuilds market data around real providers. Provider facts come from live probes performed on
 2026-08-17 or from provider documentation and are marked accordingly. Revalidate documented
 limits when registering production keys.
 
-The original core sequence was budgeted at roughly 14–15 focused engineering days. After the
-two-provider vertical and its review closure landed, the remaining v2 sequence is roughly 7–8
-focused days (P4 ~2 · P5 ~2–2.5 · P6 ~1–1.5 · P7 ~1.5–2), re-sized at the 2026-08-23 replan. Hosting and the technical load dashboard remain a separate capability
+The original core sequence was budgeted at roughly 14–15 focused engineering days. With
+Phase 4 delivered (2026-08-23), the remaining sequence is roughly 5.5–6.5 focused days
+(P5 ~2.5–3 · P6 ~1–1.5 · P7 ~1.5–2) — P5 re-sized 2026-08-23 when the quote-detail
+enrichment and official-history backfill folded in (D35). Hosting and the technical load dashboard remain a separate capability
 group. Automated strategy execution is deliberately deferred until every required v2 provider,
 curve, execution and verification gate is complete.
 
@@ -377,6 +379,22 @@ SSE stays per-tick so the UI loses nothing; each persisted row is auditable. The
 not hosting polish. *Rejected:* leaving it hosted-only — the local database provably blows
 up within days, and a review window can span days.
 
+**D35 (new) — Free-tier surface is mined before it is expanded.** Two principles decided
+2026-08-23 after auditing what the wired responses already contain. (1) **Fields already
+paid for ship first**: day range (both quote providers), 52-week range and volume
+(Twelve Data — documented; Alpha Vantage EOD volume verified, joins in Phase 6) enter the
+normalized quote as nullable stored-as-received extras and surface in the Quote Detail
+session block, with an honest n/a where a tier does not publish — zero additional
+requests, and the review's volume question becomes a shipped feature instead of a
+deferred one. Order-book depth and open interest remain genuinely unpublished on the free
+tiers and stay out. (2) **Every further capability passes the runbook §6 five-answers
+bar** (exact measure, instrument scope, interval/as-of, units, entitlement) before any
+field or endpoint is added: company profile/fundamentals (Finnhub, budget-priced),
+provider candles/`time_series` (would reopen the intraday-chart decision as a labeled
+per-provider capability), and company news are recorded on the post-acceptance list under
+exactly that gate. *Rejected:* adding capabilities because an endpoint exists — budget
+spend and false-completeness are the two ways a free-tier desk starts lying.
+
 ---
 
 ## 5. Target architecture
@@ -423,7 +441,8 @@ app/
 
 ## 6. Phases
 
-Each phase ends with an executable acceptance check and updates the relevant feature guide.
+Each phase ends with an executable acceptance check, its phase report, and fact-only
+updates to the reference sheets.
 
 ### Replan checkpoint — brief + design review *(2026-08-22)*
 
@@ -470,16 +489,27 @@ compliance matrix retained outside the repo) changed four things:
 2. **Build** — backend, then surface (UI), then ops/audit visibility.
 3. **Evidence** — a phase scenario `.http` flow plus a retained evidence record in the
    phase-3b format (commit, market session, IDs, both clocks, probes).
-4. **Browser pass** — every touched view exercised in the browser: features work end to
-   end, UX/UI reviewed deliberately (layout, copy, empty/error states, side-panel
-   behavior — the established design language), zero console errors or warnings,
-   screenshots retained for the phase report.
-5. **Docs & report, after implementation, in the same change** — README operating-decision
-   and data-flow rows, the feature guide, configuration whys, and a
-   `phase-reports/phase-N.md` that records every decision (chose / rejected / why) and
-   teaches the difficult implementation concepts step by step, **with a mermaid diagram
-   wherever a picture genuinely aids understanding** — each phase below names its candidate
-   diagrams so this is planned, not improvised.
+4. **Browser pass, driven by a real scenario** — every touched view exercised in the
+   browser against at least one realistic scenario opened end to end through the running
+   services (real books and trades in the states the feature claims to handle — mixed
+   currencies, several providers — cleaned up afterwards), never just whatever state the
+   stack happens to be in. The pass hunts behavior bugs, not only rendering: recompute
+   every displayed aggregate independently and compare it against the screen (a headline
+   must equal its rows' arithmetic); watch time-dependent behavior across at least one
+   full cycle — a poll cadence, a countdown, a window boundary — rather than one
+   snapshot; after each user action watch what follows within its expected latency (an
+   added symbol quotes, a close settles); walk the empty, single-item, mixed,
+   missing-data and market-closed states. UX/UI reviewed deliberately (layout, copy,
+   error states, side-panel behavior — the established design language), zero console
+   errors or warnings, screenshots retained for the phase report.
+5. **Docs & report, after implementation, in the same change** — the
+   `phase-reports/phase-N.md` is the detailed record: every decision (chose / rejected /
+   why), the difficult implementation concepts taught step by step, **with a mermaid
+   diagram wherever a picture genuinely aids understanding** — each phase below names its
+   candidate diagrams so this is planned, not improvised. The reference sheets
+   (`market-data.md`, `configuration.md`, `architecture.md`) and the README
+   operating-decision and data-flow rows get fact-only updates — new endpoints, knobs,
+   cadences, tables; all explanation stays in the report.
 
 ### Phase 0 — Fork & deep clean *(complete)*
 This phase is intentionally **deep** — the fork must contain no rubbish, and simplification
@@ -585,7 +615,13 @@ own frozen feed; the selected quote summary kept its bounds while the observatio
 The retained evidence and review prompts are in
 `docs/phase-reports/phase-3b.md` and `docs/validation-runbook.md`.
 
-### Phase 4 — NBP/ECB reference FX and the reporting currency *(~2 days)*
+### Phase 4 — NBP/ECB reference FX and the reporting currency *(complete 2026-08-23)*
+
+Delivered as planned, including the demo debrief (B1–B5), the presentation-review round
+(benchmark card redesign, UI copy pass — the no-purpose-captions ruling now codified in
+AGENTS.md) and the weekend market-feed evidence. The full walkthrough, decisions and retained evidence are in
+[`phase-reports/phase-4.md`](phase-reports/phase-4.md); the section below is preserved as
+the plan it was executed against.
 
 **Goal.** The first two official sources — NBP FX fixings + gold, ECB euro reference
 rates — through the *same* gateway, normalizer, board, SSE and ops surfaces as Group A,
@@ -681,7 +717,7 @@ view.
 **Out of scope:** curves (P5), FRED (P5), best-rate logic (D13 stands), NBP table C
 (D30), converted persisted values, new chart types, intraday history.
 
-### Phase 5 — FRED + ECB yield curves, curve plotting, curve-driven pricing *(~2–2.5 days)*
+### Phase 5 — FRED + ECB yield curves, curve plotting, curve-driven pricing, quote-detail enrichment *(~2.5–3 days)*
 
 **Goal.** Real rate curves with per-point provenance in the schema, the brief's
 `/curves*` routes live, **curves drawn as a real, comparative chart** (the plot is a
@@ -694,8 +730,10 @@ conversion labels).
 
 **T5.1 Migration *(0.25 d)*.** `market_data_curves` gains `raw_payload JSONB` (one fetch =
 one raw source response per set — the brief's reproducibility requirement, currently
-missing from the schema) and `curve_type` (D32 vocabulary); up/down clean on a fresh DB —
-the phase-1 gauntlet re-run.
+missing from the schema) and `curve_type` (D32 vocabulary); the spot board gains D35's
+nullable session columns (day open/high/low, 52-week bounds, volume, average volume) —
+change-only snapshots stay untouched; up/down clean on a fresh DB — the phase-1 gauntlet
+re-run.
 
 **T5.2 Clients + assembly *(~0.75 d)*.** `clients/fred.py` (JSON; values are strings,
 `"."` = missing; the 120/min key budget fits the shared bucket shape) and ECB yield curves
@@ -725,26 +763,65 @@ wired curve, and the ticket's curve pickers show currency + tenor + as-of so the
 informed. The PLN proxy/composite limitations stay explicit rather than being presented as
 observed WIBOR curves.
 
-**T5.5 Evidence + browser pass + docs *(~0.5 d)*.** `scenarios/curves.http` (the
+**T5.5 Quote-detail enrichment + official history backfill *(~0.5 d, D35)*.** Two
+additions that cost no new provider requests, converting the review's volume question
+into a shipped, honest feature:
+
+- **Session fields the quote responses already carry and the normalizer discards.**
+  Finnhub `/quote` publishes `o/h/l`; Twelve Data's quote publishes `open/high/low`,
+  `fifty_two_week` and — per its documentation — `volume` + `average_volume` for
+  supported instruments (verify live with the registered key; the probes verified Alpha
+  Vantage's EOD volume, which slots into the same fields in Phase 6). Ingest them as
+  **nullable, stored-as-received** extras on the normalized quote and the board row
+  (columns ride T5.1's migration; change-only snapshots stay price-provenance and are
+  untouched); the wire tick carries them; the **Quote Detail panel gains a session
+  block** — day range, 52-week range where published, volume where published, each
+  provider-labeled, honest "n/a" where the free tier does not publish (Finnhub volume —
+  the UNSUPPORTED lesson again, one level down). The board table itself does not change.
+  Each field enters through the runbook §6 five-answers bar: measure (session cumulative
+  share volume / prior-close volume for EOD grade), instrument scope, interval/as-of,
+  units, entitlement.
+- **Official-fixing history backfill.** NBP serves dated fixing ranges (93-day window
+  cap) and gold history; ECB EXR serves `lastNObservations=N`. On feed boot, when a
+  reference pair's stored history is sparse, backfill up to `REFERENCE_BACKFILL_DAYS`
+  (default 90, matching retention) as ordinary change-only snapshots — each with its own
+  as-of `provider_timestamp`, the backfill moment as `received_at` (the two-clock
+  contract stays honest: "when the market said it" vs "when we ingested it"), and the
+  range-response slice as raw. The reference drill then shows weeks of daily fixings
+  instead of "first observed value", and — unlike the sparse quote tapes — a fixing
+  series is *complete by construction* (one value per business day), which the guide
+  should note as the reason the tape reads as a real series here.
+
+**T5.6 Evidence + browser pass + docs *(~0.5 d)*.** `scenarios/curves.http` (the
 brief's curl forms) + evidence record. Browser pass: the curve section and chart
 interactions (overlay toggling, inspector, derived-point styling), ticket curve pickers
-and rejection copy, Trades/Valuations for a curve-priced trade, the FRED ops card. Docs
-per the standing template, including the PLN investigation narrative (NBP has no rates
-API — 404 verified; WIBOR licensed; what the monthly lag costs) as the domain-analysis
-centerpiece; candidate diagrams: the curve assembly pipeline (series → points → set →
-chart → pricing), the curves/points ER with the new raw/type columns, an annotated sketch
-of the interpolation between the two PLN anchors, and the chart's own screenshot as
-evidence.
+and rejection copy, Trades/Valuations for a curve-priced trade, the FRED ops card, the
+enriched Quote Detail session block on all three row kinds (Finnhub, Twelve Data,
+reference). Docs per the standing template, including the PLN investigation narrative
+(NBP has no rates API — 404 verified; WIBOR licensed; what the monthly lag costs) as the
+domain-analysis centerpiece, and the **brief-to-source mapping** the review clarified:
+the brief's NBP row ("kursy walutowe i dane referencyjne dla krzywych") maps to FX
+fixings + the reference-point set + the config-sourced `PLN_NBP_BASE` rate, while the
+term structures come from ECB (EUR) and FRED (USD, PLN anchors) — stated against the
+brief's own detailed bullets so the reasoning is on paper before anyone asks. Candidate
+diagrams: the curve assembly pipeline (series → points → set → chart → pricing), the
+curves/points ER with the new raw/type columns, an annotated sketch of the interpolation
+between the two PLN anchors, and the chart's own screenshot as evidence.
 
 **Acceptance check:** a USD instrument prices from `USD_TREASURY`; EUR AAA vs ALL is
 selectable and **visually comparable on one chart**; a PLN swap chooses a PLN construct
 and rejects `USD_TREASURY` with the reason; the inspector traces every plotted point to
 provider, series, source date, ingest time and raw response; interpolated points are
-visually distinct; `/curves*` and curve SSE work via the brief's curls; migration
-up/down clean; browser pass clean.
+visually distinct; `/curves*` and curve SSE work via the brief's curls; the Quote Detail
+session block shows day range on both quote providers, 52-week and volume on Twelve Data
+rows, and an honest n/a for Finnhub volume; a reference drill shows a multi-week fixing
+tape with per-row as-of dates and backfill-time receive stamps; migration up/down clean;
+browser pass clean.
 
 **Out of scope:** bootstrapping/splines, curve-versioning UI, vol surfaces, chart
-libraries, licensed WIBOR/Euribor data (documented, not silently narrowed).
+libraries, licensed WIBOR/Euribor data (documented, not silently narrowed), order-book
+depth and open interest (still unpublished on the free tiers — the volume answer does
+not reopen them), candles/intraday charts (post-acceptance, D35's gate).
 
 ### Phase 6 — Alpha Vantage and the complete three-source ticket *(~1–1.5 days)*
 
@@ -798,8 +875,8 @@ feeds, an inheritance tree over the feeds, any test harness.
 ### Phase 7 — brief compliance, provenance and hardening *(~1.5–2 days)*
 
 **Goal.** Close every remaining compliance gap, prove the system honest under load and
-restart, and bring README + guides to the full brief contract so a stranger can run, verify
-and grade the system from the repository alone. The load scripts are the brief's
+restart, and bring the README + reference sheets to the full brief contract so a stranger
+can run, verify and grade the system from the repository alone. The load scripts are the brief's
 required stress test, not a test suite (D25 + owner ruling). Decisions: D33–D34.
 
 **Verify *(0.25 d)*:** Phase-6 gate green; six providers on `/providers`.
@@ -833,7 +910,7 @@ D20 ceilings recorded in `docs/performance.md`. Full-system browser pass: every 
 touched this cycle plus a whole-app UX sweep (navigation, empty states, error copy,
 side-panel stacking), zero console errors, screenshots retained.
 
-**T7.5 README + guides to the full contract *(~0.5 d)*.** Every brief-required README section
+**T7.5 README + reference sheets to the full contract *(~0.5 d)*.** Every brief-required README section
 present (architecture, services, all six integrations with the endpoints used, keys
 how-to, schema, normalization, curve construction, ticket, realized/unrealized PnL,
 compose run, test commands, known limitations) as lean prose linking into docs/ (D24),
@@ -854,12 +931,14 @@ NBP/ECB/FRED reference data drives the documented, plotted curves; every require
 event is observable; the full scenario and stress-test report are repeatable from the
 repository alone; browser pass clean across the application.
 
-Not on the v2 critical path: a connected intraday chart, unverified
-volume/depth/open-interest fields, best-quote routing, BusinessOverview expansion,
-gamification, strategies, hosting and a broad provider/scheduler rewrite. They begin only
-after the final acceptance check. (The gamification hook needs nothing beyond Phase 6's
-extensibility probe — a shared external feed will be one more client + feed +
-registry line.)
+Not on the v2 critical path: a connected intraday chart and provider candles
+(`time_series`), order-book depth and open interest (unpublished on the free tiers —
+published volume itself ships in Phase 5, D35), company profile/fundamentals and company
+news (each gated by the runbook §6 five-answers bar, D35), best-quote routing,
+BusinessOverview expansion, gamification, strategies, hosting and a broad
+provider/scheduler rewrite. They begin only after the final acceptance check. (The
+gamification hook needs nothing beyond Phase 6's extensibility probe — a shared external
+feed will be one more client + feed + registry line.)
 
 ---
 

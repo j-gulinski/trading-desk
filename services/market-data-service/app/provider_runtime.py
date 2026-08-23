@@ -25,9 +25,14 @@ class ProviderRuntime:
         daily_budget=None,
         provider_minute_limit=None,
         provider_daily_limit=None,
+        keyless=False,
     ):
         self.provider = provider
-        self.bucket = TokenBucket(budget_per_minute, budget_per_minute / 60)
+        self.keyless = keyless
+        self.bucket = (
+            TokenBucket(budget_per_minute, budget_per_minute / 60)
+            if budget_per_minute is not None else None
+        )
         self.ledger = DailyLedger(daily_budget, provider_daily_limit)
         self._budget_per_minute = budget_per_minute
         self._provider_minute_limit = provider_minute_limit
@@ -43,7 +48,7 @@ class ProviderRuntime:
         self._active = {}
 
     def try_take(self, cost=1):
-        return self.bucket.try_take(cost)
+        return True if self.bucket is None else self.bucket.try_take(cost)
 
     def record_request(self, credits=1):
         self.ledger.record(credits)
@@ -155,15 +160,20 @@ class ProviderRuntime:
                 "market_open": self._market_open,
                 "market_session": self._market_session,
             }
-        return {
-            **state,
-            "budget": {
+        if self.bucket is None:
+            budget = self.ledger.state()
+        else:
+            budget = {
                 **self.bucket.state(),
                 "budget_per_minute": self._budget_per_minute,
                 "provider_minute_limit": self._provider_minute_limit,
                 "usage_percent": PROVIDER_BUDGET_USAGE_PERCENT,
                 "active_window_hours": PROVIDER_ACTIVE_WINDOW_HOURS,
                 **self.ledger.state(),
-            },
+            }
+        return {
+            **state,
+            "keyless": self.keyless,
+            "budget": budget,
             "active_symbols": active_symbols,
         }

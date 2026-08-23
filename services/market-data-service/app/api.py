@@ -1,8 +1,10 @@
 import queue
+import threading
+
 import bottle
 from bottle import request, response
 
-from app import persistence, scheduler, symbol_search, watchlist
+from app import persistence, reference_set, scheduler, symbol_search, watchlist
 from app.publisher import (
     client_event_queues,
     clients_lock,
@@ -11,6 +13,7 @@ from app.publisher import (
     stream_id,
 )
 from app.config import SERVICE_NAME
+from shared import fx
 from shared.active_set import load_active_set
 from shared.freshness import classify
 from shared.functions import utcnow
@@ -37,7 +40,7 @@ def _provider_event(message, provider):
 
 
 def _serve_stream(provider=None):
-    if provider is not None and provider not in scheduler.wired_quote_providers():
+    if provider is not None and provider not in scheduler.wired_providers():
         response.status = 404
         response.content_type = "application/json"
         return to_json({"error": f"unknown or unwired provider: {provider}"})
@@ -83,13 +86,23 @@ def provider_stream(provider):
 
 def _board_payload():
     active = load_active_set()
-    rows = [
-        row for row in persistence.board_rows()
-        if row["symbol"] in active and active[row["symbol"]].serves(row["provider"])
-    ]
-    for row in rows:
+    reference = reference_set.reference_board_symbols()
+    rows = []
+    for row in persistence.board_rows():
+        provider, symbol = row["provider"], row["symbol"]
+        if provider in reference:
+            if symbol not in reference[provider]:
+                continue
+            origin = {"watched": False, "held": False, "benchmark": False,
+                      "reference": True}
+        else:
+            entry = active.get(symbol)
+            if entry is None or not entry.serves(provider):
+                continue
+            origin = {**entry.origin(provider), "reference": False}
         row["event_time"] = row["received_at"]
-        row.update(active[row["symbol"]].origin(row["provider"]))
+        row.update(origin)
+        rows.append(row)
     return rows
 
 
@@ -148,7 +161,7 @@ def get_quote(provider, symbol):
     response.content_type = "application/json"
     normalized_provider = provider.strip().upper()
     normalized_symbol = symbol.strip().upper()
-    if normalized_provider not in scheduler.wired_quote_providers():
+    if normalized_provider not in scheduler.wired_providers():
         response.status = 404
         return to_json({
             "error": f"unknown or unwired provider: {normalized_provider}"
@@ -183,11 +196,12 @@ def get_quote_history(provider, symbol):
     if not 1 <= limit <= 200:
         response.status = 400
         return to_json({"error": "limit must be between 1 and 200"})
-    if normalized_provider not in scheduler.wired_quote_providers():
+    if normalized_provider not in scheduler.wired_providers():
         response.status = 404
         return to_json({"error": f"unknown or unwired provider: {normalized_provider}"})
+    include_raw = (request.query.raw or "").strip() in ("1", "true")
     return to_json(persistence.quote_history(
-        normalized_provider, normalized_symbol, limit
+        normalized_provider, normalized_symbol, limit, include_raw
     ))
 
 
@@ -195,6 +209,13 @@ def get_quote_history(provider, symbol):
 def get_watchlist():
     response.content_type = "application/json"
     return to_json(watchlist.list_items(scheduler.wired_quote_providers()))
+
+
+def _refresh_added_feeds(symbol, providers):
+    for provider in providers:
+        _, error, _ = scheduler.refresh_symbol(symbol, provider)
+        log.info("watchlist_add_refresh", symbol=symbol, provider=provider,
+                 outcome="ok" if error is None else error)
 
 
 @app.route("/watchlist", method="POST")
@@ -209,6 +230,11 @@ def post_watchlist():
         response.status = status
         return to_json({"error": error})
     scheduler.reload_active_set()
+    threading.Thread(
+        target=_refresh_added_feeds,
+        args=(item["symbol"], item["added_providers"]),
+        daemon=True,
+    ).start()
     log.info("watchlist_symbol_added", symbol=item["symbol"],
              asset_class=item["asset_class"],
              providers=[p for p, on in item["providers"].items() if on])
@@ -242,6 +268,16 @@ def delete_watchlist(symbol):
         "remaining_providers": result["remaining"],
         "still_polled": [name for name in result["dropped"] if name not in released],
     })
+
+
+@app.route("/fx/rates")
+def get_fx_rates():
+    response.content_type = "application/json"
+    to_currency = (request.query.to or "").strip().upper()
+    if not watchlist.CURRENCY_PATTERN.match(to_currency):
+        response.status = 400
+        return to_json({"error": "to must be a 3-letter ISO currency code"})
+    return to_json({"to": to_currency, "rates": fx.rates_to(to_currency)})
 
 
 @app.route("/symbols/search")

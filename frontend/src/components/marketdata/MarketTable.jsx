@@ -57,6 +57,7 @@ export default function MarketTable({
   table,
   rows,
   caption,
+  strategies,
   onRemove,
   busyKey,
   selectedId,
@@ -73,6 +74,7 @@ export default function MarketTable({
         <MarketCell
           column={column}
           row={row}
+          strategies={strategies}
           onRemove={onRemove}
           busyKey={busyKey}
         />

@@ -18,6 +18,7 @@ export function useQuoteHistory(instrument) {
   const key = instrument?.id ?? null
   const provider = instrument?.provider ?? null
   const symbol = instrument?.symbol ?? null
+  const includeRaw = instrument?.grade === 'REFERENCE'
   const priceVersion = [instrument?.bid, instrument?.ask, instrument?.last, instrument?.value]
     .map((value) => value ?? '')
     .join('|')
@@ -35,7 +36,9 @@ export function useQuoteHistory(instrument) {
         : { ...EMPTY, key, loading: true },
     )
 
-    apiGet(endpoints.marketData.quoteHistory(provider, symbol), { signal: controller.signal })
+    apiGet(endpoints.marketData.quoteHistory(provider, symbol, 60, includeRaw), {
+      signal: controller.signal,
+    })
       .then((payload) => {
         setState({
           key,
@@ -55,7 +58,7 @@ export function useQuoteHistory(instrument) {
       })
 
     return () => controller.abort()
-  }, [key, provider, symbol, priceVersion])
+  }, [key, provider, symbol, priceVersion, includeRaw])
 
   return state
 }

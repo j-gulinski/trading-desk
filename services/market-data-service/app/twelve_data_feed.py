@@ -116,6 +116,7 @@ def _wire_quote(quote):
         "watched": bool(origin.get("watched")),
         "held": bool(origin.get("held")),
         "benchmark": bool(origin.get("benchmark")),
+        "reference": False,
     }
 
 
@@ -215,9 +216,11 @@ def poll_loop():
             if not runtime.try_take(len(chunk)):
                 break
             _guarded_fetch(chunk)
+            # spread the polled chunk's next due-times across the interval
             interval = paced_interval_seconds()
-            for entry in chunk:
-                _next_due[entry.symbol] = time.monotonic() + interval
+            for position, entry in enumerate(chunk, start=start):
+                offset = round(position * interval / len(due))
+                _next_due[entry.symbol] = time.monotonic() + interval + offset
         # forget symbols that left this provider's active set
         _prune_next_due(pollable)
         time.sleep(1)
@@ -259,14 +262,27 @@ def search(query):
     return _client.search(query)
 
 
+def next_batch_seconds():
+    due_times = [
+        _next_due.get(entry.symbol, 0) for entry in runtime.pollable_entries()
+    ]
+    if not due_times:
+        return None
+    return max(0, round(min(due_times) - time.monotonic()))
+
+
 def poll_strategy():
     on_pace = _pacing_allows(1)
     cadence = paced_interval_seconds()
-    description = (
-        f"batch of ≤{TWELVE_DATA_BUDGET_PER_MINUTE} every "
-        f"{cadence // 60} min · {TWELVE_DATA_DAILY_BUDGET} credits over configured "
-        f"active window"
-    )
+    symbols = len(runtime.pollable_entries())
+    next_batch = next_batch_seconds()
+    if next_batch is None:
+        description = "no symbols on the daily ledger"
+    else:
+        description = (
+            f"next batch in {next_batch}s · cadence {round(cadence / 60)} min "
+            f"({symbols} {'symbol' if symbols == 1 else 'symbols'} on the daily ledger)"
+        )
     if not on_pace:
         description += " — holding for daily pace"
     return {
@@ -275,6 +291,8 @@ def poll_strategy():
         "batch_size": TWELVE_DATA_BUDGET_PER_MINUTE,
         "daily_budget": TWELVE_DATA_DAILY_BUDGET,
         "current_cadence_seconds": cadence,
+        "next_batch_seconds": next_batch,
+        "symbol_count": symbols,
         "on_pace": on_pace,
         "description": description,
     }

@@ -16,11 +16,31 @@ export function formatAge(ms) {
 }
 
 export function formatMarketSymbol(instrument) {
+  if (instrument.symbol === 'XAUPLN_G') return 'GOLD (1 g)'
   const pair = currencyPair(instrument.symbol)
   if (pair && (instrument.assetClass === 'FX' || instrument.assetClass === 'COMMODITY')) {
     return `${pair.base}/${pair.quote}`
   }
   return instrument.symbol
+}
+
+export function unitLabelOf(instrument) {
+  if (instrument.symbol === 'XAUPLN_G') return 'PLN per gram'
+  const pair = currencyPair(instrument.symbol)
+  if (pair && instrument.assetClass === 'FX') {
+    return `${pair.quote} per ${pair.base}`
+  }
+  if (pair && instrument.assetClass === 'COMMODITY') {
+    return `${pair.quote} per ${pair.base} (troy oz)`
+  }
+  return null
+}
+
+export function formatAsOfDate(ms) {
+  if (!Number.isFinite(ms)) return '—'
+  const d = new Date(ms)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
 }
 
 export function formatDelta(instrument, delta) {

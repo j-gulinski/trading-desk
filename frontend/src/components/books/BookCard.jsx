@@ -94,7 +94,7 @@ export default function BookCard({
       </header>
 
       <div className="book-tile__pnl">
-        <PnlMetric label={`Unrealized · ${book.currency ?? 'USD'}`} value={book.unrealizedPnl} />
+        <PnlMetric label={`Unrealized · ${book.currency ?? '—'}`} value={book.unrealizedPnl} />
         <PnlMetric label="Realized" value={book.realizedPnl} />
       </div>
 

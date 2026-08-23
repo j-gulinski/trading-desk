@@ -10,6 +10,10 @@ export const SYMBOL_SEARCH_SHOWN_LIMIT = 8
 
 export const PROVIDERS_POLL_INTERVAL_MS = 5000
 
+export const FX_RATES_REFRESH_MS = 60000
+
+export const REPORTING_CURRENCY_BASE_OPTIONS = ['EUR', 'PLN', 'USD']
+
 export const FRESHNESS_PILL_LEVELS = {
   LIVE: 'info',
   STALE: 'stale',
@@ -32,6 +36,23 @@ export const FRESHNESS_HINTS = {
   CLOSED: 'Market is closed; the last session close is the current price',
   MISSING: 'Watched, but this provider has not returned a quote yet',
   UNSUPPORTED: 'This provider does not quote this asset class',
+}
+
+export function freshnessLabelOf(state, grade) {
+  if (grade === 'REFERENCE' && state === 'LIVE') return 'CURRENT'
+  return FRESHNESS_LABELS[state] ?? state
+}
+
+export function freshnessHintOf(state, grade) {
+  if (grade === 'REFERENCE') {
+    if (state === 'LIVE') {
+      return 'Official fixing — current until the source’s next expected publication'
+    }
+    if (state === 'STALE') {
+      return 'The source missed its expected publication — the fixing is overdue'
+    }
+  }
+  return FRESHNESS_HINTS[state]
 }
 
 export const MARKET_COLUMNS = [

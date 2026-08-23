@@ -81,6 +81,7 @@ function ProviderCard({ provider, now }) {
 
   const budget = runtime?.budget ?? {}
   const strategy = runtime?.strategy ?? {}
+  const keyless = runtime?.keyless === true
   const minuteUsed = Math.max(0, (budget.capacity ?? 0) - (budget.tokens_available ?? 0))
   const cooldown = runtime?.cooldown_seconds_left ?? 0
   const lastSuccessMs = Date.parse(runtime?.last_success_at ?? '')
@@ -97,6 +98,14 @@ function ProviderCard({ provider, now }) {
     >
       <header className="provider-card__head">
         <h3>{providerLabel(provider.provider)}</h3>
+        {keyless && (
+          <span
+            className="provider-card__keyless"
+            title="Official source — no API key, no rate-limit budget"
+          >
+            KEYLESS
+          </span>
+        )}
         <StatusPill
           level={PROVIDER_STATUS_LEVELS[runtime?.status] ?? 'unknown'}
           label={runtime?.status ?? 'UNKNOWN'}
@@ -105,25 +114,31 @@ function ProviderCard({ provider, now }) {
       </header>
       <p className="provider-card__strategy">{providerScheduleText(provider)}</p>
       <dl className="provider-card__facts">
-        <Fact label="Market">{marketSessionText(runtime)}</Fact>
+        {keyless ? (
+          <Fact label="Last fixing">{strategy.last_as_of ?? '—'}</Fact>
+        ) : (
+          <Fact label="Market">{marketSessionText(runtime)}</Fact>
+        )}
         <Fact label="Polling">
           {runtime?.active_symbols?.length ?? 0} symbols
         </Fact>
-        <Fact label="Last quote">
+        <Fact label={keyless ? 'Last read' : 'Last quote'}>
           {Number.isFinite(lastSuccessMs) ? formatElapsedTime(now - lastSuccessMs) : '—'}
         </Fact>
         <Fact label="Calls today">{formatNumber(budget.requests_today ?? 0)}</Fact>
       </dl>
-      <BudgetGauge
-        label="Rate limit"
-        used={minuteUsed}
-        capacity={budget.capacity ?? 0}
-        detail={`${budget.tokens_available ?? 0} of ${budget.capacity ?? 0} safe ${budgetUnit} available${
-          budget.provider_minute_limit
-            ? ` · ${budget.usage_percent}% of ${budget.provider_minute_limit}/min`
-            : ''
-        }`}
-      />
+      {budget.capacity != null && (
+        <BudgetGauge
+          label="Rate limit"
+          used={minuteUsed}
+          capacity={budget.capacity ?? 0}
+          detail={`${budget.tokens_available ?? 0} of ${budget.capacity ?? 0} safe ${budgetUnit} available${
+            budget.provider_minute_limit
+              ? ` · ${budget.usage_percent}% of ${budget.provider_minute_limit}/min`
+              : ''
+          }`}
+        />
+      )}
       {budget.daily_budget != null && (
         <BudgetGauge
           label="Credits today"

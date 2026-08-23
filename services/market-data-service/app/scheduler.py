@@ -1,30 +1,22 @@
-from shared.providers import PROVIDERS
-from app import finnhub_feed, twelve_data_feed
+from shared.providers import PROVIDERS, QUOTE_PROVIDERS
+from app import ecb_feed, finnhub_feed, nbp_feed, twelve_data_feed
 
-FEEDS = {feed.PROVIDER: feed for feed in (finnhub_feed, twelve_data_feed)}
+FEEDS = {
+    feed.PROVIDER: feed
+    for feed in (finnhub_feed, twelve_data_feed, nbp_feed, ecb_feed)
+}
 
 POLL_LOOPS = tuple(feed.poll_loop for feed in FEEDS.values())
 
 DEFAULT_PROVIDER = finnhub_feed.PROVIDER
 
 
-def wired_quote_providers():
+def wired_providers():
     return list(FEEDS)
 
 
-def stale_after_seconds(provider, symbol):
-    feed = FEEDS.get(provider, finnhub_feed)
-    return feed.stale_after_seconds(symbol)
-
-
-def closed_stale_after_seconds(provider, symbol):
-    feed = FEEDS.get(provider, finnhub_feed)
-    return feed.closed_stale_after_seconds(symbol)
-
-
-def market_open(provider, symbol):
-    feed = FEEDS.get(provider)
-    return feed.market_open(symbol) if feed else None
+def wired_quote_providers():
+    return [name for name in FEEDS if name in QUOTE_PROVIDERS]
 
 
 def reload_active_set():
@@ -45,6 +37,11 @@ def refresh_all(provider=None):
     feeds = [FEEDS[provider]] if provider is not None else list(FEEDS.values())
     refreshed, skipped = [], []
     for feed in feeds:
+        if hasattr(feed, "refresh_table"):
+            table_refreshed, table_skipped = feed.refresh_table()
+            refreshed.extend(table_refreshed)
+            skipped.extend(table_skipped)
+            continue
         for symbol in sorted(feed.active_symbols()):
             tick, error, _ = feed.refresh_symbol(symbol)
             if error is None:

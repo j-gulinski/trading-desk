@@ -1,7 +1,7 @@
 # Configuration
 
-One rule (D24 in [implementation-roadmap.md](implementation-roadmap.md)): a tunable
-exists only as an environment variable listed in `.env.example`, and its rationale lives here —
+One rule: a tunable
+exists only as an environment variable listed in `.env.example`, and its one-line rationale lives here —
 `.env.example` stays scannable, this table carries the why. `os.environ` is read in exactly one
 place, `shared/config.py` (`env_str` / `env_int` / `env_float` / `env_required`); every other
 module imports typed values from its own `app/config.py` or from `shared.config`. A missing
@@ -53,7 +53,7 @@ NBP and ECB require no key — the four above are the complete registration list
 | --- | --- | --- | --- |
 | `PROVIDER_BUDGET_USAGE_PERCENT` | `90` | market-data-service | Shared safety ceiling applied to each provider's published minute/day limit. A 90% cap leaves headroom without duplicating derived values as magic numbers. |
 | `PROVIDER_ACTIVE_WINDOW_HOURS` | `12` | market-data-service | Twelve Data spreads its safe daily credits over the half-day window when this desk is expected to run, instead of diluting them over an unused 24-hour day. |
-| `FINNHUB_TIER1_POLL_SECONDS` | `15` | market-data-service | Cadence for open-trade symbols + the benchmark — a handful of symbols at 4 req/min each stays far inside the budget; the D3 freshness threshold is 3× this (45 s). |
+| `FINNHUB_TIER1_POLL_SECONDS` | `15` | market-data-service | Cadence for open-trade symbols + the benchmark — a handful of symbols at 4 req/min each stays far inside the budget; the freshness threshold is 3× this (45 s). |
 | `FINNHUB_TIER2_POLL_SECONDS` | `60` | market-data-service | Rest-of-watchlist cadence: the full 25-symbol cap costs ≤ 25 req/min, leaving tier-1 headroom; threshold 3× = 180 s. |
 | `FINNHUB_CLOSED_POLL_SECONDS` | `300` | market-data-service | Outside US market hours the last trade does not move — 5-minute confirmation polls keep the board honest for a fraction of the budget. |
 | `FINNHUB_PROVIDER_LIMIT_PER_MINUTE` | `60` | market-data-service | Published provider allowance. The scheduler derives a 54 req/min token bucket from this limit and `PROVIDER_BUDGET_USAGE_PERCENT`. |
@@ -61,13 +61,26 @@ NBP and ECB require no key — the four above are the complete registration list
 
 Scheduler mechanics that are not tuning surface (active-set refresh 15 s, market-status check
 10 min, HTTP timeout 10 s, threshold multiplier 3, cooldowns, symbol-search cache 10 min,
-history-endpoint bounds) are plain constants in the service's `app/config.py`.
+history-endpoint bounds) are plain constants in the service's `app/config.py`. The same rule
+covers the official-source publication facts: the NBP window (11:45–12:20 Warsaw), the ECB
+window (15:55–16:45 Frankfurt), the in-window 5-min retry, the hourly off-window confirmation
+poll, and the 4-hour publication grace are source facts and freshness policy, not tuning —
+they change only when a probe shows the source itself changed. `tzdata` is in
+`requirements.txt` solely so `zoneinfo` can evaluate those two source timezones inside the
+`python:slim` images, which ship no system tz database.
+
+## Reference data — NBP & ECB
+
+| Variable | Default | Read by | Why |
+| --- | --- | --- | --- |
+| `NBP_REFERENCE_SYMBOLS` | `EURPLN,USDPLN,XAUPLN_G` | market-data-service | The default reference universe for NBP: the two fixing pairs currency conversion actually needs plus the official gold fixing (`XAUPLN_G` is PLN per **1 g** — deliberately not `XAUPLN`, which would read as PLN per troy ounce). Settlement currencies of open trades auto-join as `<CCY>PLN` beyond these; a currency table A does not carry is simply absent, never invented. |
+| `ECB_REFERENCE_SYMBOLS` | `EURUSD,EURPLN` | market-data-service | The default reference universe for ECB: `EURUSD` anchors the resolver's cross-via-EUR path and `EURPLN` powers the NBP-vs-ECB cross-check chip. Open-trade currencies auto-join as `EUR<CCY>` — ECB quotes ~30 currencies against EUR, so one hop covers nearly everything. |
 
 ## Market data — Twelve Data
 
 | Variable | Default | Read by | Why |
 | --- | --- | --- | --- |
-| `TWELVE_DATA_POLL_SECONDS` | `900` | market-data-service | One batch poll per symbol per 15 min: the binding constraint is the 800-credit **daily** cap, and a full 25-symbol watchlist at this cadence costs 2 400 credits/day — the daily governor, not this knob, is what actually paces a big watchlist, so the knob only sets the best case. The D3 freshness threshold is 3× this (2 700 s) in both market regimes, because closed-market confirmation polls run at the same cadence. |
+| `TWELVE_DATA_POLL_SECONDS` | `900` | market-data-service | One batch poll per symbol per 15 min: the binding constraint is the 800-credit **daily** cap, and a full 25-symbol watchlist at this cadence costs 2 400 credits/day — the daily governor, not this knob, is what actually paces a big watchlist, so the knob only sets the best case. The freshness threshold is 3× this (2 700 s) in both market regimes, because closed-market confirmation polls run at the same cadence. |
 | `TWELVE_DATA_PROVIDER_LIMIT_PER_DAY` | `800` | market-data-service | Published daily allowance. The configured 90% safety ceiling derives a 720-credit ledger. Cadence spreads that ledger across `PROVIDER_ACTIVE_WINDOW_HOURS`; the hard ledger still prevents day-cap overrun. |
 | `TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE` | `8` | market-data-service | Published minute allowance. The 90% ceiling derives a 7-credit minute bucket and maximum batch size. |
 
@@ -83,7 +96,7 @@ history-endpoint bounds) are plain constants in the service's `app/config.py`.
 
 | Variable | Default | Read by | Why |
 | --- | --- | --- | --- |
-| `BENCHMARK_SYMBOL` | `SPY` | pricing-service, market-data-service | Symbol whose ticks drive alpha/beta sampling; SPY is the free real-time S&P 500 proxy (D14). The scheduler always keeps it in the active set's first tier. |
+| `BENCHMARK_SYMBOL` | `SPY` | pricing-service, market-data-service | Symbol whose ticks drive alpha/beta sampling; SPY is the free real-time S&P 500 proxy. The scheduler always keeps it in the active set's first tier. |
 | `BENCHMARK_PROVIDER` | `FINNHUB` | pricing-service | The return series must come from exactly one (provider, symbol) feed — the guard stops double-sampling the moment a second provider also quotes SPY. |
 | `BOOK_RISK_WINDOW` | `100` | pricing-service | Rolling regression window: stable cov/var, still tracks regime shifts. |
 | `BOOK_RISK_MINIMUM_OBSERVATIONS` | `20` | pricing-service | Below this the card reads INSUFFICIENT_DATA instead of noise-fit alpha/beta. |

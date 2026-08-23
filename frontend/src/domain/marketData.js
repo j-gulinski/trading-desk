@@ -1,6 +1,6 @@
 import { directionOf } from './formatting.js'
 
-const MARKET_STATE_STORAGE_VERSION = 9
+const MARKET_STATE_STORAGE_VERSION = 10
 const MAX_STORED_INSTRUMENTS = 100
 
 function toNum(value) {
@@ -53,6 +53,7 @@ function spotInstrument(tick, snapshotStreamId = null) {
     watched: tick.watched === true,
     held: tick.held === true,
     benchmark: tick.benchmark === true,
+    reference: tick.reference === true,
     sourceStreamId: tick.stream_id ?? snapshotStreamId,
     sourceEventId: eventIdOf(tick),
     eventTimeMs: eventTimeOf(tick),
@@ -206,6 +207,7 @@ function restoreInstrument(candidate) {
     watched: candidate.watched === true,
     held: candidate.held === true,
     benchmark: candidate.benchmark === true,
+    reference: candidate.reference === true,
     sourceStreamId:
       typeof candidate.sourceStreamId === 'string' ? candidate.sourceStreamId : null,
     sourceEventId: eventIdOf({ event_id: candidate.sourceEventId }),
@@ -379,4 +381,12 @@ export function boardInstruments(instruments, watchlistItems, watchlistReady = t
 
 export function providerScheduleText(provider) {
   return provider?.runtime?.strategy?.description ?? '—'
+}
+
+export function providerStrategiesOf(providers) {
+  const strategies = {}
+  for (const provider of Array.isArray(providers) ? providers : []) {
+    if (provider?.runtime?.strategy) strategies[provider.provider] = provider.runtime.strategy
+  }
+  return strategies
 }

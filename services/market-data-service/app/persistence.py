@@ -9,6 +9,7 @@ from shared.functions import utcnow
 from shared.logging_config import get_logger
 from shared.models import MarketDataSnapshot, MarketDataSpotPrice, Trade
 from shared.active_set import load_active_set
+from app import reference_set
 from app.config import (
     RETENTION_SWEEP_INTERVAL_SECONDS,
     SERVICE_NAME,
@@ -97,7 +98,7 @@ def board_rows():
         ]
 
 
-def quote_history(provider, symbol, limit):
+def quote_history(provider, symbol, limit, include_raw=False):
     with session_scope() as session:
         rows = (
             session.query(MarketDataSnapshot)
@@ -123,6 +124,7 @@ def quote_history(provider, symbol, limit):
                     "quote_grade": row.quote_grade,
                     "provider_timestamp": row.provider_timestamp,
                     "received_at": row.received_at,
+                    **({"raw_payload": row.raw_payload} if include_raw else {}),
                 }
                 for row in rows
             ],
@@ -170,6 +172,7 @@ def sweep_snapshots():
 
 def sweep_board_strays():
     active = load_active_set()
+    reference = reference_set.reference_board_symbols()
     with session_scope() as session:
         rows = session.query(
             MarketDataSpotPrice.market_data_id,
@@ -179,7 +182,11 @@ def sweep_board_strays():
         stray = [
             market_data_id
             for market_data_id, provider, symbol in rows
-            if symbol not in active or not active[symbol].serves(provider)
+            if (
+                symbol not in reference[provider]
+                if provider in reference
+                else symbol not in active or not active[symbol].serves(provider)
+            )
         ]
         if not stray:
             return 0

@@ -4,7 +4,7 @@
 record in `phase-reports/`. Content unchanged below: the review boundary, walkthrough and
 the eight decisions of the delivered Finnhub + Twelve Data workflow, as reviewed on
 2026-08-21. The durable review method now lives in `../validation-runbook.md`; current
-behavior is documented in `../implementation/multi-provider-trading.md`.*
+behavior facts are in `../market-data.md` and `../architecture.md`.*
 
 ## Review boundary
 
@@ -34,7 +34,7 @@ base for that review, not an invitation to tour older application features.
 ### Current verdict
 
 - **Ready to review:** the two-provider real-quote slice and its UI/data-flow decisions.
-- **Not claimed complete:** the full brief requirements list. Alpha Vantage, NBP, ECB and FRED are not
+- **Not claimed complete:** the full Homework 5 list. Alpha Vantage, NBP, ECB and FRED are not
   wired in this phase.
 - **Not part of this review:** old books features, general queue design, prior valuation/risk
   features, generic monitoring architecture and older service scaffolding.

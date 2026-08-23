@@ -67,6 +67,16 @@ def list_trades(*, book_id=None, asset_class=None, status=None, symbol=None,
         return [_to_cached_trade(r) for r in rows]
 
 
+def trade_currencies_by_book() -> dict[str, set]:
+    with session_scope() as session:
+        rows = session.query(Trade.book_id, Trade.trade_currency).distinct().all()
+    currencies: dict[str, set] = {}
+    for book_id, currency in rows:
+        if currency:
+            currencies.setdefault(str(book_id), set()).add(currency)
+    return currencies
+
+
 def closed_trade_counts_by_book() -> dict[str, int]:
     with session_scope() as session:
         rows = (

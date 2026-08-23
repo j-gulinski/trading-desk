@@ -4,16 +4,18 @@ import EmptyState from '../EmptyState.jsx'
 import { useQuoteHistory } from '../../hooks/useQuoteHistory.js'
 import {
   formatAge,
+  formatAsOfDate,
   formatDelta,
   formatMarketSymbol,
   formatPercentDelta,
+  unitLabelOf,
 } from '../../domain/marketFormat.js'
 import { directionOf, formatClockTime, formatUnitPrice } from '../../domain/formatting.js'
 import { providerLabel } from '../../config/providers.js'
 import {
-  FRESHNESS_HINTS,
-  FRESHNESS_LABELS,
   FRESHNESS_PILL_LEVELS,
+  freshnessHintOf,
+  freshnessLabelOf,
 } from '../../config/marketData.js'
 
 function toNumber(value) {
@@ -64,6 +66,7 @@ function normalizeHistory(rows) {
     priceBasis: item.price_basis,
     providerTimestampMs: toTime(item.provider_timestamp),
     receivedAtMs: toTime(item.received_at),
+    rawPayload: item.raw_payload ?? null,
   }))
 }
 
@@ -78,7 +81,7 @@ function changeFrom(point, previous) {
   }
 }
 
-function HistoryItem({ point, previous, instrument }) {
+function HistoryItem({ point, previous, instrument, reference }) {
   const change = changeFrom(point, previous)
   const tone = directionOf(change.delta)
   const eventTime = point.providerTimestampMs ?? point.receivedAtMs
@@ -87,7 +90,9 @@ function HistoryItem({ point, previous, instrument }) {
       <span className="quote-history__rail" aria-hidden="true" />
       <div className="quote-history__tick-head">
         <time dateTime={eventTime ? new Date(eventTime).toISOString() : undefined}>
-          provider {formatClockTime(eventTime, { day: true })}
+          {reference
+            ? `as of ${formatAsOfDate(point.providerTimestampMs)}`
+            : `provider ${formatClockTime(eventTime, { day: true })}`}
         </time>
       </div>
       <div className="quote-history__tick-main">
@@ -103,6 +108,12 @@ function HistoryItem({ point, previous, instrument }) {
         <span>{basisLabel(point.priceBasis)}</span>
         <span>received {formatClockTime(point.receivedAtMs, { millis: true })}</span>
       </div>
+      {point.rawPayload != null && (
+        <details className="quote-history__raw">
+          <summary>Raw source response</summary>
+          <pre>{JSON.stringify(point.rawPayload, null, 2)}</pre>
+        </details>
+      )}
     </li>
   )
 }
@@ -113,19 +124,21 @@ export default function QuoteHistoryPanel({ row, onClose }) {
   const points = normalizeHistory(history.rows)
   const symbol = formatMarketSymbol(instrument)
   const currentTone = directionOf(tickChange.delta)
+  const reference = instrument.grade === 'REFERENCE'
+  const unit = unitLabelOf(instrument)
 
   return (
     <SidePanel
       eyebrow="QUOTE DETAIL"
       title={symbol}
-      subtitle={`${providerLabel(instrument.provider)} · ${instrument.assetClass} · ${instrument.currency ?? '—'}`}
+      subtitle={`${providerLabel(instrument.provider)} · ${instrument.assetClass} · ${unit ?? instrument.currency ?? '—'}`}
       bodyClassName="quote-history-panel"
       onClose={onClose}
       headActions={
         <StatusPill
           level={FRESHNESS_PILL_LEVELS[state] ?? 'unknown'}
-          label={FRESHNESS_LABELS[state] ?? state}
-          title={FRESHNESS_HINTS[state]}
+          label={freshnessLabelOf(state, instrument.grade)}
+          title={freshnessHintOf(state, instrument.grade)}
         />
       }
       notice={
@@ -158,9 +171,13 @@ export default function QuoteHistoryPanel({ row, onClose }) {
           <Metric label="Last" value={formatUnitPrice(instrument.last, instrument.assetClass)} />
           <Metric label="Basis" value={basisLabel(instrument.priceBasis)} note={instrument.grade} />
           <Metric
-            label="Provider time"
-            value={formatClockTime(instrument.providerTimestampMs, { millis: true })}
-            note={formatAge(providerAgeMs)}
+            label={reference ? 'As of' : 'Provider time'}
+            value={
+              reference
+                ? formatAsOfDate(instrument.providerTimestampMs)
+                : formatClockTime(instrument.providerTimestampMs, { millis: true })
+            }
+            note={reference ? 'official fixing date' : formatAge(providerAgeMs)}
           />
           <Metric
             label="Received"
@@ -194,6 +211,7 @@ export default function QuoteHistoryPanel({ row, onClose }) {
                   point={point}
                   previous={points[index + 1]}
                   instrument={instrument}
+                  reference={reference}
                 />
               ))}
             </ol>

@@ -1,13 +1,13 @@
-# Market data — providers, contracts, storage
+# Market data — provider and contract reference
 
-The current runtime wires Finnhub and Twelve Data. The provider fact sheets below also retain
-research for four possible future adapters; those providers are not presented as implemented.
-The research came from live API checks run against all six providers on **2026-08-17**
-([implementation-roadmap.md](implementation-roadmap.md) §2); facts are tagged *verified* (seen in a live response) or
-*docs* (from provider documentation — re-check when credentials or plans change). The rest
-of this document describes the current contracts, feeds and storage model.
+Current facts only: providers, normalized contracts, feed parameters, endpoints, storage.
+The reasoning behind these facts — why each boundary exists and what was rejected — lives
+in the phase reports. Provider facts come from live API probes (2026-08-17, all six
+providers; NBP/ECB re-verified 2026-08-23 at wiring); *verified* = seen in a live
+response, *docs* = provider documentation, re-check when credentials or plans change.
+Alpha Vantage and FRED are researched but not wired.
 
-## Group A — quote providers
+## Quote providers
 
 | | Finnhub | Twelve Data | Alpha Vantage |
 | --- | --- | --- | --- |
@@ -19,29 +19,16 @@ of this document describes the current contracts, feeds and storage model.
 | Indices (^GSPC/SPX) | premium *(docs)* | limited | premium |
 | ETF (SPY) | free, real-time US *(docs)* | free | free (EOD grade) |
 | Batch | none | **`symbol=A,B,…` — one HTTP call, 1 credit/symbol** *(docs)* | none (bulk = premium) |
-| Symbol search | `/search` + full `/stock/symbol?exchange=US` directory | `symbol_search` — one API credit per request in the current provider documentation | `SYMBOL_SEARCH`, free *(verified)* |
+| Symbol search | `/search` + full `/stock/symbol?exchange=US` directory | `symbol_search` — one API credit per request | `SYMBOL_SEARCH`, free *(verified)* |
 | Market open/closed | `/stock/market-status`, free *(docs)* | `is_market_open` on every quote *(verified)* | static hours in search metadata |
 | Error shape | proper `401`/`429` + `{"error": …}` *(verified 401)* | **HTTP 200** + `{"code":429,"status":"error"}` *(verified shape)* | **HTTP 200** + `"Information"`/`"Note"` key *(verified)* |
 
-### Volume, depth and open interest
+No wired quote path supplies interval volume, displayed depth, or open interest — the
+normalized contract carries none of them, and no placeholder zero is rendered. A future
+capability must name the measure, interval/as-of, units, instrument scope and entitlement
+before it enters the contract or UI.
 
-These measures answer different questions and are not substitutes for each other:
-
-| Measure | What it counts | Data shape required | Current wired quote endpoints |
-| --- | --- | --- | --- |
-| Traded volume | Executed shares or contracts during a stated interval. It has no BUY/SELL direction by itself. | Interval or session, unit, venue coverage and event/as-of time. | Finnhub's wired `/quote` response has no volume. Twelve Data documents quote volume for supported instruments, but the current normalizer deliberately does not ingest it. |
-| Displayed depth | Resting bid/ask orders or aggregate size at more than one price level. Top-of-book bid/ask alone is not depth. | Ordered price levels, side, size, venue and entitlement. | Neither wired free `/quote` path supplies a depth book. Finnhub's separately documented last bid/ask is premium and still only top of book. |
-| Open interest | Outstanding futures or options contracts not yet offset or delivered; one buyer/seller pair counts once. | Exact derivative contract, publication time and units. | Neither wired quote path supplies it, and it is not meaningful for the current cash-equity/spot-FX rows as a generic quote field. |
-
-The provider references are [Finnhub Quote](https://finnhub.io/docs/api/quote),
-[Twelve Data Quote](https://twelvedata.com/docs/market-data/quote),
-[Nasdaq depth-of-book definition](https://listingcenter.nasdaq.com/rulebook/nasdaq/rules/Nasdaq%20Equity%207)
-and [CME open interest](https://www.cmegroup.com/education/lessons/open-interest).
-Phase 3b therefore adds no pressure indicator or placeholder zero. A future capability must
-name the measure, interval/as-of, instrument scope, units and entitlement before it enters the
-normalized contract or UI.
-
-## Group B — official sources
+## Official sources
 
 | | NBP | ECB | FRED |
 | --- | --- | --- | --- |
@@ -50,52 +37,45 @@ normalized contract or UI.
 | Auth / limits | none; 93-day range cap | none; fair use | free instant key; 120 req/min |
 | Format note | plain JSON | **use `format=csvdata`** — SDMX-JSON nests values ~5 levels deep; CSV is stdlib-parseable | JSON; values are *strings*, missing = `"."` |
 
-## The ten consequences that shape the design
+Wiring-time facts *(verified 2026-08-23, live)*:
 
-1. **No free Group-A source gives equity bid/ask.** Bid/ask mapping is the *main case*, not an
-   edge case → the price-basis policy (D11).
-2. **Alpha Vantage equities are EOD** (date-only timestamp) → every quote carries a
-   `quote_grade` so the difference is explicit (D3).
-3. **Twelve Data's real constraint is the daily cap** (800), not the per-minute one → the
-   budget governor spreads credits across the day (D7).
-4. **Finnhub has no free FX** → per-provider capability differs by asset class → the fourth
-   freshness state **UNSUPPORTED**, a capability fact distinct from MISSING data (D3).
-5. **The PLN curve is viable on real data**: FRED's OECD Poland series are alive —
-   `IR3TIB01PLM156N` (3M interbank) and `IRLTLT01PLM156N` (10Y gov bond), monthly, ~2-month
-   lag (D6).
-6. **ECB serves two genuine EUR curves** → real projection-vs-discount choice; ECB×NBP FX
-   cross-check agreed to <0.3% in the probes.
-7. **Errors hide in 200 bodies** (Alpha Vantage `"Information"`, Twelve Data `code` field) →
-   the client must classify errors from bodies, not just status codes.
-8. **Benchmark: SPY on Finnhub** — indices are premium everywhere; SPY's *returns* (all
-   alpha/beta needs) track the index (D14).
-9. **Symbol search still consumes provider capacity** → results are cached for ten minutes,
-   and both wired searches pass through their provider budget (D4).
-10. **NBP has no interest-rate endpoint** (404 verified) → the PLN curve must be assembled
-    from FRED's OECD Poland series.
+- **NBP**: the latest-table endpoints (`/exchangerates/tables/a`, `/cenyzlota`) always
+  answer `200` with the last published business-day fixing. A *date-addressed* query for a
+  date with no fixing returns **HTTP 400** (not 404); the wired feed never date-addresses —
+  "not published yet" is detected by the as-of not advancing, with no error path involved.
+  Table A carries 32 currencies; gold is a separate endpoint quoting **PLN per 1 g** of
+  1000-fineness gold.
+- **ECB**: `format=csvdata` is flat and `csv.DictReader`-parseable (`KEY`, `CURRENCY`,
+  `TIME_PERIOD`, `OBS_VALUE`, …). The rates are the **14:15 CET concertation** values
+  (per series metadata), published ~16:00 CET. One series key covers several currencies
+  (`D.USD+PLN.EUR.SP00.A`, one row each); a currency the dataset lacks is simply absent.
+- EUR/PLN cross-check example (Fri 08-21): NBP `4.3122` (~11:00 fixing) vs ECB `4.3078`
+  (14:15 concertation) — ~10 bps apart; the UI chip shows this spread live.
+- FRED has **no NBP-equivalent Polish rate endpoint** (404 verified on NBP's side): a PLN
+  curve must be assembled from FRED's OECD Poland series (`IR3TIB01PLM156N` 3M interbank,
+  `IRLTLT01PLM156N` 10Y gov bond; monthly, ~2-month lag).
 
 ## Contracts
 
 ### The normalized quote
 
 Every provider payload normalizes to one shape before anything stores or reads it
-(`shared/quotes.py`, produced by `build_quote`):
+(`shared/quotes.py`, `build_quote`):
 
-- **Prices are exactly what the provider gave** — `bid`, `ask`, `last`, each nullable, parsed
-  straight to `Decimal` from the wire string. A spread is **never synthesized**; absent fields
-  stay NULL.
-- **`mid` is derived, never invented**: `(bid+ask)/2` when both sides exist, else the official
-  reference mid when the source publishes one, else `last`. A quote with none of these is
-  rejected at build time — an unpriced quote cannot exist.
-- **`price_basis`** records which of those cases produced `mid`: `BID_ASK`, `REFERENCE_MID`,
-  or `LAST`. Valuation and display headline always use `mid` (D13). Spot execution uses ask
-  for BUY and bid for SELL, falling back to `mid` when a provider publishes no spread (D12).
-- **`quote_grade`** says what kind of price this *is*: `REALTIME` (a live tradable quote),
-  `EOD` (a daily close — Alpha Vantage equities), `REFERENCE` (an official fixing — NBP, ECB).
-  The grade travels with every quote, so an end-of-day price is always identifiable as such.
-- **Two clocks**: `provider_timestamp` (the provider's own event time, nullable — Alpha
-  Vantage equities only give a date) and `received_at` (when our system ingested it). Age is
-  measured from the provider's clock; ingest lag is visible as the difference.
+- **Prices are exactly what the provider gave** — `bid`, `ask`, `last`, each nullable,
+  parsed straight to `Decimal` from the wire string. A spread is never synthesized; absent
+  fields stay NULL.
+- **`mid` is derived, never invented**: `(bid+ask)/2` when both sides exist, else the
+  official reference mid when the source publishes one, else `last`. An unpriced quote is
+  rejected at build time.
+- **`price_basis`** records which case produced `mid`: `BID_ASK`, `REFERENCE_MID`, or
+  `LAST`. Valuation and display headline use `mid`; spot execution uses ask for BUY / bid
+  for SELL, falling back to `mid` when the provider publishes no spread.
+- **`quote_grade`**: `REALTIME` (live tradable), `EOD` (daily close — Alpha Vantage
+  equities), `REFERENCE` (official fixing — NBP, ECB). The grade travels with every quote.
+- **Two clocks**: `provider_timestamp` (the provider's own event time, nullable) and
+  `received_at` (ingest time). Age is measured on the provider's clock; ingest lag is the
+  difference.
 
 Per-provider basis mapping: Finnhub last-only; Twelve Data last-only; Alpha Vantage equity
 last-only (EOD), FX true bid/ask; NBP table A = official mid, table C = official bid/ask;
@@ -103,40 +83,42 @@ ECB EXR = official mid.
 
 ### Freshness
 
-`shared/freshness.py` defines five states per (provider, symbol):
+`shared/freshness.py`, five states per (provider, symbol):
 
 | State | Meaning |
 | --- | --- |
 | `LIVE` | market open: quote age (provider clock) within the threshold for that provider × asset class |
-| `CLOSED` | market closed and confirmation polls still arriving — the closing price *is* the current price, rendered neutral |
+| `CLOSED` | market closed and confirmation polls still arriving — the closing price *is* the current price |
 | `STALE` | the feed should be updating and is not: past the provider-clock threshold while open, or confirmation polls stopped while closed |
 | `MISSING` | the provider should serve this symbol but no data has arrived |
-| `UNSUPPORTED` | the provider *cannot* serve this class (e.g. FX on Finnhub) — a static capability fact, never confused with missing data |
+| `UNSUPPORTED` | the provider *cannot* serve this class — a static capability fact, never confused with missing data |
 
-The classifier is a pure function with two clocks and two regimes: market open
-(or unknown, treated as open) judges the *provider* timestamp against 3× the open cadence;
-market closed judges the *received* timestamp against 3× the closed cadence — so STALE means
-"the feed is broken" in both regimes, and an overnight board reads CLOSED, not falsely
-broken. Every tick and snapshot row carries `market_open`, `stale_after_seconds`, and
-`closed_stale_after_seconds`, so `/quotes` and the UI classify identically and rows stay
-self-classifying. The market-open flag is Finnhub's exchange-level `/stock/market-status`
-for Finnhub rows and Twelve Data's per-symbol `is_market_open` for Twelve Data rows.
-Policy (D3, enforced at the ticket and server): MISSING, UNSUPPORTED and STALE
-block a new trade. The provider row cannot be selected and trade-action refuses a forged
-intent with the reason. A manual close may use the last stale quote so an existing position
-is not trapped by a quiet feed.
+The classifier is a pure function with two clocks and two regimes: market open judges the
+*provider* timestamp against 3× the open cadence; market closed judges the *received*
+timestamp against 3× the closed cadence — STALE means "the feed is broken" in both, and an
+overnight board reads CLOSED. Every tick and snapshot row carries `market_open`,
+`stale_after_seconds` and `closed_stale_after_seconds`, so `/quotes` and the UI classify
+identically. The market-open flag is Finnhub's exchange-level `/stock/market-status` for
+Finnhub rows and Twelve Data's per-symbol `is_market_open` for Twelve Data rows.
+MISSING, UNSUPPORTED and STALE block a new trade (enforced at the ticket and the server);
+a manual close may use the last stale quote so a position is never trapped by a quiet feed.
 
-Valuations inherit the same honesty: a valuation classifies against its trade's feed
-instrument — LIVE while the mark keeps up with the feed's newest tick within one freshness
-window, **MKT CLOSED** (a distinct state, never confused with a closed trade) while the
-venue is shut, STALE when the feed is broken or pricing lags it. A flat 10 s wall-clock rule
-survives only as the fallback for tabs with no market data yet.
+Valuations classify the same way against their trade's feed instrument: LIVE while the
+mark keeps up, **MKT CLOSED** (distinct from a closed trade) while the venue is shut,
+STALE when the feed breaks or pricing lags; a flat 10 s wall-clock rule survives only as
+the fallback for tabs with no market data yet.
+
+Reference rows derive freshness from the publication calendar instead of a cadence: at
+store time `stale_after_seconds` = time from the fixing's as-of to the next expected
+publication (next business day's window end) + 4 h grace, so a Friday fixing reads current
+(the UI renders `CURRENT` for reference-grade LIVE) through the weekend; `market_open`
+stays NULL. Source public holidays are not modeled — a holiday Monday reads STALE that
+evening until the next real fixing arrives.
 
 ### The capability matrix
 
-`shared/providers.py` is the registry: six providers, their group, and the class-level
-capability facts from the probes — which classes each provider quotes and at what grade. An
-asset class absent from a provider's map *is* the UNSUPPORTED state.
+`shared/providers.py` is the registry: six providers, their group, and class-level
+capability facts. An asset class absent from a provider's map *is* the UNSUPPORTED state.
 
 | | EQUITY | FX | COMMODITY | curves |
 | --- | --- | --- | --- | --- |
@@ -147,190 +129,161 @@ asset class absent from a provider's map *is* the UNSUPPORTED state.
 | ECB | — | REFERENCE | — | ✓ |
 | FRED | — | — | — | ✓ |
 
-Metals were re-checked with registered keys on **2026-08-18**: Twelve Data serves `XAU/USD`
-("Gold Spot / US Dollar", forex-style quote
-with `is_market_open` and `last_quote_at`) — so **XAUUSD stays a tradeable symbol via
-Twelve Data**. Alpha Vantage rejects XAU on `CURRENCY_EXCHANGE_RATE`
-(`"Error Message": "Invalid API call…"`) while the same call works for EUR→USD with real
-bid/ask — a capability fact, so its COMMODITY cell stays UNSUPPORTED. NBP's gold fixing (PLN
-per gram — ×31.1034768 to the troy ounce) remains the official cross-check. ETFs quote
-through the same equity endpoints on all three Group-A providers, so SPY and friends are
-classed `EQUITY` — no separate ETF class. The class-level matrix drives the UNSUPPORTED rows in `/quotes`, the provider toggles on
-search results, and the ticket's provider comparison (a provider that cannot serve the class
-reads N/A there, with the reason). The watchlist row does not cache the
-matrix: it stores the user's **choice** of providers, and capability is answered from the
-registry on demand — the two had been conflated, which is why dropping one feed dropped
-both. Refining capability to *per-symbol* facts (a ticker one provider lists and another
-doesn't) is still open; today an unlistable ticker is discovered when its quote never
-arrives and the pair reads NO DATA.
+Metals re-checked 2026-08-18 with registered keys: Twelve Data serves `XAU/USD` as a
+forex-style quote (so XAUUSD is tradeable via Twelve Data); Alpha Vantage rejects XAU on
+`CURRENCY_EXCHANGE_RATE` while EUR→USD works — its COMMODITY cell stays UNSUPPORTED.
+ETFs quote through the equity endpoints everywhere, so SPY is classed `EQUITY`. The matrix
+drives the UNSUPPORTED rows in `/quotes`, provider toggles on search results, and the
+ticket's N/A rows. The watchlist stores the user's *choice* of providers; capability is
+answered from the registry on demand — the two are separate facts. Capability is
+class-level today: a ticker one provider lists and another doesn't is discovered when its
+quote never arrives (NO DATA).
 
 ### Curves
 
-`shared/curves.py`: a `CurveSet` is (provider, curve_name, currency, optional `index_tenor`,
-as-of date) plus ordered `CurvePoint`s. Each point carries its own provenance: `source_series`
-(the FRED series id / ECB key it came from; NULL marks a derived, interpolated point) and
-`source_as_of` (the anchor's own date when it lags the set's as-of — the PLN composite's
-monthly anchors). `index_tenor` labels what floating index a projection curve represents
-(e.g. 3M), so tenor-matching validation has a schema fact to check against.
+`shared/curves.py`: a `CurveSet` is (provider, curve_name, currency, optional
+`index_tenor`, as-of date) plus ordered `CurvePoint`s. Each point carries `source_series`
+(the FRED/ECB series id; NULL marks a derived, interpolated point) and `source_as_of`
+(the anchor's own date when it lags the set's as-of). `index_tenor` names the floating
+index a projection curve represents, so tenor-matching validation has a schema fact.
 
 ### Symbols and the symbol master
 
-- **Canonical form**: uppercase, `^[A-Z0-9][A-Z0-9_.\-]{1,31}$` (`shared/symbols.py`). FX
-  pairs are six-letter `BASEQUOTE` (`EURUSD`); per-provider notation (Twelve Data's `EUR/USD`,
-  Alpha Vantage's from/to parameters) is each client's concern and ships with the clients.
-- **The symbol master is the `watchlist_items` table** — the user-curated active universe
-  (symbol, asset class, quote currency, and the providers chosen to poll it). It replaced the
-  static `INSTRUMENT_CATALOG`: the ticket's instrument list, option-underlying choices, and
-  trade-action's execution gate all read it now. What isn't watched isn't tradeable — scope is
-  a user decision, capped by `MAX_ACTIVE_SYMBOLS` (D4, enforced on add).
-  The watchlist is self-service: CRUD endpoints on market-data-service plus
-  provider-backed symbol search (see the watchlist section below).
-- The polled *active set* (watchlist ∪ open-trade symbols ∪ benchmark) is the scheduler's
-  concern — see the Finnhub feed section below.
+- Canonical form: uppercase, `^[A-Z0-9][A-Z0-9_.\-]{1,31}$` (`shared/symbols.py`). FX
+  pairs are six-letter `BASEQUOTE`; per-provider notation (`EUR/USD`, from/to params) is
+  each client's private concern.
+- The symbol master is the **`watchlist_items` table** — the user-curated universe
+  (symbol, class, quote currency, chosen providers). The ticket's instrument list and
+  trade-action's execution gate read it: what isn't watched isn't tradeable, capped by
+  `MAX_ACTIVE_SYMBOLS`.
+- The polled *active set* = watchlist ∪ open-trade symbols ∪ benchmark, reloaded from the
+  DB every 15 s.
 
-## The Finnhub feed
+## Feeds
 
-The first provider slice, and the module shape every later provider repeats (D24's
-one-shape rule). The quote path: `clients/base.py` (transport + error classification) →
-`clients/finnhub.py` (endpoints + body rules) → `normalizer.py` (raw payload →
-`NormalizedQuote`) → `persistence.py` (board upsert + change-only history) →
-`publisher.py` (provider-tagged SSE). The polling side is split by job: `active_set.py`
-(the polled universe), `provider_runtime.py` (per-provider status/cooldown/budget state),
-`budget.py` (token bucket + daily ledger), one feed module per provider running its
-polling loop (`finnhub_feed.py`, `twelve_data_feed.py`), and `scheduler.py` as the thin
-registry the API endpoints read. A new provider is a client + feed pair plus one registry
-line. Twelve Data uses the same module boundary.
+Module shape, identical per provider: `clients/<provider>.py` (endpoints + body rules over
+`clients/base.py` transport) → `normalizer.py` → `persistence.py` (board upsert +
+change-only history) → `publisher.py` (provider-tagged SSE), with one feed module per
+provider and `scheduler.py` as the registry the API reads. A new provider is a client +
+feed pair plus one registry line.
 
-### The active set and cadences
+### Finnhub
 
-The scheduler polls the **active set** — watchlist ∪ open-trade symbols ∪ benchmark (D4),
-reloaded from the DB every 15 s — restricted to classes Finnhub serves (EQUITY, which
-includes ETFs). Two priority tiers (D7):
+- Classes: EQUITY (incl. ETFs). Two priority tiers:
 
-| Tier | Who | Cadence (open) | Cadence (closed) | LIVE while (3× cadence) |
+| Tier | Who | Cadence (open) | Cadence (closed) | LIVE while (3×) |
 | --- | --- | --- | --- | --- |
 | 1 | open-trade symbols + `BENCHMARK_SYMBOL` | 15 s | 300 s | ≤ 45 s |
 | 2 | rest of the watchlist | 60 s | 300 s | ≤ 180 s |
 
-Market open/closed comes from Finnhub's free `/stock/market-status`, checked every 10 min;
-when closed, all polling decays to the 5-minute confirmation cadence and rows classify
-CLOSED for as long as those confirmation polls keep landing (3× 300 s on the
-received clock). Opening a trade promotes its symbol to tier 1 within one active-set
-reload.
+- Market open/closed from `/stock/market-status`, checked every 10 min; when closed all
+  polling decays to the 5-minute confirmation cadence. Opening a trade promotes its symbol
+  to tier 1 within one active-set reload.
+- Token bucket at 90% of `FINNHUB_PROVIDER_LIMIT_PER_MINUTE` (54/min default); every
+  request — quote, market status, search, manual refresh — spends one token; a daily
+  ledger counts spend for the ops surface.
 
-### Budget and the error state machine
+### Twelve Data
 
-A token bucket caps requests at 90% of `FINNHUB_PROVIDER_LIMIT_PER_MINUTE`
-(54 of the default free 60/min);
-every request — quote, market status, search, manual refresh — spends one token, and a daily ledger
-counts spend for the ops surface. Errors classify into a provider state machine, never
-generic failures:
+- Classes: EQUITY, FX, COMMODITY. Flat cadence `TWELVE_DATA_POLL_SECONDS` (15 min best
+  case); the **daily ledger is what actually paces**: 90% of the 800/day cap = 720
+  credits, spread across the configured 12 h active window; a poll, refresh or search runs
+  only while `credits_today + cost ≤ safe budget`.
+- **Batching**: one `/quote?symbol=A,B,…` call, 1 credit/symbol, chunk size = the derived
+  safe minute budget (7 default). A per-symbol error inside a batch is a data error for
+  that symbol only. After each batch, per-symbol due-times are staggered across the next
+  interval so the board refreshes rolling rather than in lockstep.
+- **Clocks**: payload `timestamp` is the day bar's open — wrong for freshness;
+  `last_quote_at` is the actual quote time and is what the normalizer uses.
+- **Session is per symbol** (`is_market_open` on every quote): NVDA reads CLOSED overnight
+  while EUR/USD on the same provider reads LIVE. FX keeps ticking through the weekend —
+  verified Sunday 2026-08-23: `"is_market_open": true`, fresh `last_quote_at`, close
+  moving 4.31225 → 4.31182. That is Twelve Data's consolidated retail feed (weekend-active
+  venues, indicative pricing); the board reports the provider's claim, and the
+  official-rates panel beside it (frozen at Friday's as-of) is the counterweight.
+- Errors arrive as HTTP 200 with `{"code": …, "status": "error"}`; `classify_body` maps
+  them into the shared state machine.
 
-| Signal | State | Reaction |
-| --- | --- | --- |
-| HTTP 429 | `RATE_LIMITED` | cooldown = `Retry-After` (default 60 s), audit `PROVIDER_RATE_LIMITED` |
-| HTTP 401/403 | `AUTH_FAILED` | 5-minute cooldown, audit `PROVIDER_AUTH_FAILED` |
-| network/timeout, 5xx | `ERROR` | 10 s backoff, log only |
-| body-level error (`{"error": …}`, `c: 0`) or HTTP 404 | per-symbol data error | log, symbol skipped this round — provider state untouched |
-| next success after any of the above | `OK` | audit `PROVIDER_RECOVERED` |
+### NBP and ECB
 
-Cooldowns are scoped to the provider that tripped them (D7) and are visible as
-`cooldown_seconds_left` on the ops endpoints. The body-level row exists because errors hide
-in 200 bodies on two of the registered providers (consequence 7 above); `classify_body` is
-each client's hook for exactly that.
+- Keyless clients (`clients/nbp.py` table A + gold; `clients/ecb.py` EXR via csvdata — it
+  overrides the base `decode_body` hook to parse CSV with the stdlib). Runtimes carry the
+  same status machine and cooldowns as quote providers but no token bucket and no daily
+  budget (`keyless: true` on `/providers`), only a calls-today counter.
+- Calendar windows, not cadences: poll every 5 min inside the source's publication window
+  (NBP 11:45–12:20 Warsaw; ECB 15:55–16:45 Frankfurt, business days) until a new as-of
+  appears, then hourly confirmation. A failure degrades only that provider's card
+  (verified live via DNS blackhole: NBP → ERROR, everything else OK, recovery audited).
+- Reference universe = configured defaults (`NBP_REFERENCE_SYMBOLS`,
+  `ECB_REFERENCE_SYMBOLS`) ∪ settlement currencies of ACTIVE trades (as `<CCY>PLN` /
+  `EUR<CCY>`) while the source publishes them. Full tables are not ingested as rows — each
+  snapshot retains the complete raw table response.
+- Rows are reference-graded, never tradeable: ordinary `build_quote` with
+  `reference_mid`, grade `REFERENCE`, `provider_timestamp` = the as-of date at midnight
+  UTC (the source publishes a date, not a time; the UI renders "as of 2026-08-21"). Board
+  reads and SSE tag them `reference` (fourth origin flag beside watched/held/benchmark).
+  Four independent guards keep them un-tradeable: watchlist validation and symbol search
+  offer quote providers only, `/instruments` derives from watched ∪ held, and
+  trade-action refuses a reference `market_data_provider` with the reason.
+- Gold keeps its published unit: symbol `XAUPLN_G`, **PLN per 1 g** (a six-letter
+  `XAUPLN` would read as per-troy-ounce, wrong by ×31.1034768); the ounce conversion is a
+  documented cross-check, never a stored row.
 
-## The Twelve Data feed
+## The FX resolver and the reporting currency
 
-The second provider, same module shape: `clients/twelve_data.py` + `twelve_data_feed.py` +
-one `scheduler.py` registry line. What differs from Finnhub is exactly what the probes said
-would differ:
+`shared/fx.py` is the single owner of conversion. It reads the reference board rows
+(NBP/ECB, class FX) and resolves `from → to` with fixed precedence:
 
-- **Batching.** One `/quote?symbol=A,B,…` call quotes many symbols at one credit each; the
-  feed polls the whole due set in chunks of the derived safe minute budget (7 by default), so a full
-  chunk fits the minute bucket. A single-symbol call returns the quote object bare; a batch
-  returns a dict keyed by provider symbol — the feed normalizes both, and a per-symbol error
-  object inside a batch is a data error for that symbol only, never provider state.
-- **The daily-ledger governor (D7).** The binding constraint is 800 credits/*day*. The
-  shared 90% safety setting derives a 720-credit hard ledger, and cadence spreads that
-  allowance across the configured 12-hour active window. A poll or manual refresh only runs
-  while `credits_today + cost ≤ safe daily budget`; the ledger and both provider/safe limits
-  are surfaced on `/providers`. A symbol-search call also reserves and records one credit.
-- **Symbol notation is the client's concern.** Internal `EURUSD`/`XAUUSD` map to the wire's
-  `EUR/USD`/`XAU/USD` inside the client (6-letter FX/COMMODITY symbols split 3/3); nothing
-  outside the client ever sees provider notation.
-- **Two timestamps in the payload.** `timestamp` is the day bar's open — the *wrong* clock
-  for freshness (it made fresh quotes read 17 h old); `last_quote_at` is the actual quote
-  time and is what the normalizer uses, falling back to `timestamp` when absent.
-- **Market session is per symbol.** Every quote carries `is_market_open`; the feed remembers
-  it per symbol, so NVDA reads CLOSED overnight while EUR/USD on the same provider reads
-  LIVE — there is no provider-level session for a provider that quotes three asset classes.
-- **Errors arrive as HTTP 200** with `{"code": …, "status": "error"}`; `classify_body` maps
-  code 429 → `RATE_LIMITED`, 401/403 → `AUTH_FAILED`, the rest → data errors. The state
-  machine and cooldown semantics are Finnhub's, unchanged.
+1. **identity** — rate 1;
+2. **direct official rate or its inverse** — when both sources publish the pair, the
+   fresher as-of wins, tie to ECB;
+3. **cross via EUR** — both legs from ECB;
+4. **cross via PLN** — both legs from NBP's table A.
 
-Cadence is flat (no tiers): every supported symbol every `TWELVE_DATA_POLL_SECONDS` (15 min),
-best case — the daily governor is what actually paces a large watchlist. The freshness
-threshold is 3× that cadence in both regimes, since closed-market confirmation polls run at
-the same rate.
+A path never mixes sources. Every resolution returns rate (derived rates rounded to
+8 significant digits; stored mids stay exactly as published), path label, provider, as-of
+(the older leg for a cross) and symbols used; "no official path" is an answer with a
+reason, not an error. All arithmetic is `Decimal`.
+
+`GET /fx/rates?to=<CCY>` serves one resolution per known currency. Conversion is a
+display overlay: the browser multiplies on Valuations and Books — per-currency subtotals
+stay primary; one converted total (and, on Valuations, the converted headline cards)
+appears only after the user picks a reporting currency (chip row, remembered per
+browser); every converted row is labeled with rate, provider and as-of; an unconvertible
+currency stays a labeled subtotal with the resolver's reason. Nothing converted is ever
+persisted, and no service calls another service's API for it. The browser's 60 s rate TTL
+is the only cache — the gateway serves `/fx/rates` from two small indexed reads.
 
 ## Watchlist self-service and discovery
 
-The quote table shows watchlist/open-position rows; the configured benchmark has its own
-summary strip above the filters instead of appearing as another quote row. Every row carries
-server-truth origin flags (`watched` / `held` / `benchmark`) saying why it is there: watched
-rows get the remove control and held rows a POS tag (a position anchors them). Rows with data
-classify LIVE/CLOSED/STALE; a watched pair with no data yet renders MISSING. Provider
-capability remains available in the watchlist metadata, but incapable provider/class pairs
-are **not rendered on the board**. Capability facts appear where a decision is made: as toggles in search results
-and as an N/A row on the ticket's provider comparison, not as permanent dash rows on the
-board. `_board_payload` filters to the active set on every read and a
-daily sweep deletes stray spot rows, so a symbol that leaves the active set by any route — a
-closed trade, a poll racing a removal — leaves the board with it.
+Board rows carry server-truth origin flags (`watched`/`held`/`benchmark`/`reference`);
+watched rows get the remove control, held rows a POS tag, the benchmark its own summary
+strip. Incapable provider/class pairs are not rendered as board rows — capability shows
+where a decision is made (search toggles, ticket N/A). `_board_payload` filters to the
+active set on every read; a daily sweep removes stray rows (reference rows validate
+against the reference universe).
 
-- `GET /watchlist` — items with the providers **chosen** for each symbol, plus what each
-  wired provider is *capable* of for that class. The two are separate facts.
-- `POST /watchlist {symbol, asset_class, currency, providers?}` — validates against the
-  canonical form, the spot classes, and `MAX_ACTIVE_SYMBOLS`; an omitted `providers` list
-  means every provider that can quote the class, and a named provider that cannot is
-  refused with the reason. Adding a provider to a symbol already watched is a **merge**
-  (`WATCHLIST_PROVIDER_ADDED`), not a 409. The audit row is written in the same transaction;
-  then every feed's active set reloads, so the first quote lands within seconds rather than
-  at the next 15 s reload.
-- `DELETE /watchlist/<symbol>?provider=` — drops one feed and leaves the others polling;
-  without the parameter it removes the symbol. Audited (`WATCHLIST_PROVIDER_REMOVED` /
-  `WATCHLIST_SYMBOL_REMOVED`) and answered
-  `200 {symbol, removed_providers, remaining_providers, still_polled}`. Board rows for feeds
-  nothing else claims are deleted and a `market_remove` SSE event names those
-  `(provider, symbol)` rows so every open tab drops exactly them; feeds an open position or
-  the benchmark keeps alive land in `still_polled` and their rows stay put as POS/BMK rows.
-  History rows are untouched (provenance).
-- `GET /symbols/search?q=` — discovery across providers (D4): Finnhub `/search` (US
-  equities; costs one budget token, skipped silently when the bucket is empty) merged with
-  Twelve Data `symbol_search` (equities, FX, metals; one recorded request credit), the two fetched in
-  parallel so the response costs one provider round-trip, not two. Results are
-  provider-tagged, normalized to internal symbols, ranked exact-prefix-first, and cached
-  for 10 minutes per query so typing doesn't drain budgets. The UI groups them one row per
-  *symbol* with the capable providers as **toggles**: providers already on the board are
-  ticked and disabled, the rest are the choice, and the Add button counts what it will
-  create. A provider filter beside the board search narrows the watchlist without changing
-  provider membership.
+- `GET /watchlist` — items with chosen providers plus per-class provider capability (two
+  separate facts).
+- `POST /watchlist {symbol, asset_class, currency, providers?}` — validates canonical
+  form, spot classes, `MAX_ACTIVE_SYMBOLS`; omitted `providers` = every capable provider;
+  an incapable named provider is refused with the reason. Adding to an existing symbol is
+  a merge, not a 409. Audit row in the same transaction; the add fires one targeted,
+  budget-aware refresh per feed actually added, so the first quote lands in seconds.
+- `DELETE /watchlist/<symbol>?provider=` — drops one feed or the whole symbol; answers
+  `{symbol, removed_providers, remaining_providers, still_polled}`; a `market_remove` SSE
+  event names exactly the (provider, symbol) rows every open tab should drop; feeds kept
+  alive by a position or the benchmark stay as POS/BMK rows. History rows are untouched.
+- `GET /symbols/search?q=` — Finnhub `/search` + Twelve Data `symbol_search` fetched in
+  parallel, both through their provider budgets, cached 10 min per query, ranked
+  exact-prefix-first, provider-tagged, results name their quote currency. The UI renders
+  one row per symbol with capable providers as toggles.
 
-The board deliberately does not draw an intraday trend. `market_data_snapshots` contains
-sparse changes observed while this application was running, not a complete market series;
-connecting those points or inserting previous close creates movement through unobserved
-time. Finnhub stock candles require Premium access, while using Twelve Data history only for
-one provider would make the comparison asymmetric.
-
-Selecting a provider-symbol row opens a newest-first tape of its latest 60 stored changes.
-The selection performs one database-only history read. While it remains selected, only an
-SSE tick whose bid, ask, last or normalized mark changed triggers another read; unchanged
-confirmation ticks do not. This adds no polling timer and spends no provider credits. The
-board itself shows Mark, the immediately previous accepted tick move, Previous close/Change
-today, market state and quote age.
-
-The board renders one symbol group with stable provider subrows. The symbol is shown once;
-each provider line remains its own history and unwatch target. Symbol groups sort
-alphabetically, while the provider filter can reduce each group to one feed.
+The board draws no intraday trend: `market_data_snapshots` holds sparse changes observed
+while this application ran, not a market series — connecting them would invent movement
+through unobserved time. Selecting a row opens a newest-first tape of its latest 60 stored
+changes (one DB read; re-read only on a changed tick; no polling timer, no provider
+credits).
 
 ### Endpoints
 
@@ -338,52 +291,51 @@ alphabetically, while the provider filter can reduce each group to one feed.
 | --- | --- |
 | `GET /market-data/snapshot` | the board read from the DB (warm after restart) + `stream_id` — the UI's seed |
 | SSE `/market-data/stream` | `market_tick` per successful poll, provider-tagged, with `stream_id`/`event_id` |
-| SSE `/market-data/stream/<provider>` | the same contract filtered to one wired provider; unknown/unwired provider is 404 |
-| `GET /market-data/quotes` | stored active-set quotes + computed freshness state; filterable by `symbol`, `asset_class`, `provider` |
-| `GET /market-data/quotes/<provider>/<symbol>` | one active normalized quote; unknown provider or missing active row is 404 |
-| `GET /market-data/quotes/<provider>/<symbol>/history?limit=` | latest stored change observations for one provider-symbol; limit 1–200 |
-| `GET /watchlist` · `POST /watchlist` · `DELETE /watchlist/<symbol>?provider=` | the symbol master, self-service and per provider |
+| SSE `/market-data/stream/<provider>` | the same contract filtered to one wired provider (quote or reference); unknown/unwired provider is 404 |
+| `GET /market-data/quotes` | stored active-set + reference quotes with computed freshness; filterable by `symbol`, `asset_class`, `provider` |
+| `GET /market-data/quotes/<provider>/<symbol>` | one active normalized quote; unknown provider or missing row is 404 |
+| `GET /market-data/quotes/<provider>/<symbol>/history?limit=&raw=` | latest stored change observations; limit 1–200; `raw=1` includes each observation's stored raw payload (the provenance drill) |
+| `GET /fx/rates?to=<CCY>` | one resolution per known currency: rate, path, provider, as-of, or an honest no-path reason |
+| `GET /watchlist` · `POST /watchlist` · `DELETE /watchlist/<symbol>?provider=` | the symbol master, self-service — offers quote providers only |
 | `GET /symbols/search?q=` | provider-tagged discovery, cached 10 min |
-| `GET /providers` | all six registry entries (capabilities, wired flag) + runtime for wired ones: status, budget + daily ledger, market session, active symbols, and the current poll `strategy` (mode, cadences, server-composed description — what the board strip and the ops card display) |
+| `GET /providers` | all six registry entries (capabilities, wired flag) + runtime for wired ones: status, budget + daily ledger, market session, active symbols, and the current poll `strategy` (what the board strip and ops card display) |
 | `GET /providers/<p>/health` | one provider's runtime detail |
-| `POST /market-data/refresh?symbol=&provider=` | targeted poll within budget (provider defaults to FINNHUB) — 404 unknown symbol, 422 unsupported class, 429 budget/pace exhausted, 503 disabled/cooldown |
+| `POST /market-data/refresh?symbol=&provider=` | targeted poll within budget — 404 unknown symbol, 422 unsupported class, 429 budget/pace exhausted, 503 disabled/cooldown. Without `symbol`: the provider's whole set — for NBP/ECB one keyless table refetch republishing every reference row |
 
-The `/market-data/...` forms are canonical on direct port 8001. Short `/snapshot`, `/quotes`,
-`/stream`, `/stream/<provider>`, quote-history and `/refresh` routes remain compatibility
-aliases for existing consumers.
+The `/market-data/...` forms are canonical on port 8001; short routes remain compatibility
+aliases. Every tick carries the full normalized quote plus `stale_after_seconds`,
+`closed_stale_after_seconds`, `market_open` and the origin flags, so any consumer
+classifies freshness without asking the server. Each provider HTTP call writes one
+`provider_http_response` log line (request metadata, outcome, latency, `response_json`) —
+the Logs view formats it on expansion.
 
-Every tick carries the full normalized quote (bid/ask/last/mid, basis, grade, both clocks,
-`previous_close`) plus
-`stale_after_seconds`, `closed_stale_after_seconds`, `market_open`, and the origin flags,
-so any consumer can classify freshness without asking the server. SSE also carries
-`market_remove` (symbols leaving the board) alongside `market_tick`.
+### Error state machine (all providers)
 
-Each provider HTTP call writes one `provider_http_response` line containing request metadata,
-outcome, latency, and `response_json`. The Logs view formats that raw JSON on expansion. A
-404 returned for one searched/watched symbol remains a data error and does not change the
-provider-wide health state.
+| Signal | State | Reaction |
+| --- | --- | --- |
+| HTTP 429 (or body-level 429) | `RATE_LIMITED` | cooldown = `Retry-After` (default 60 s), audited |
+| HTTP 401/403 (or body-level) | `AUTH_FAILED` | 5-minute cooldown, audited |
+| network/timeout, 5xx | `ERROR` | 10 s backoff, log only |
+| body-level data error, HTTP 404 for one symbol | per-symbol data error | log, symbol skipped this round — provider state untouched |
+| next success | `OK` | audit `PROVIDER_RECOVERED` |
 
-### Valuation provenance — provider bound at the ticket
+Cooldowns are scoped to the provider that tripped them and surface as
+`cooldown_seconds_left` on the ops endpoints. `classify_body` is each client's hook for
+errors that hide in 200 bodies.
 
-Pricing's cache is keyed `(provider, symbol)`; a trade is valued exclusively from its frozen
-`market_data_provider` (D13), close path and final valuation included. The provider column
-is written by the execution gate, while the client only chooses provider identity:
-opening a spot trade requires a
-provider that is actually polling the symbol, and trade-action prices the fill itself from
-that provider's board row — the ask for a BUY, the bid for a SELL, the mid when the feed
-quotes no spread. The client's number arrives as `client_seen_price` and is only compared:
-past `TRADE_PRICE_TOLERANCE_PCT` the ticket is refused with the deviation in the message.
-The trade row records the executed price, the seen price, the provider, the provider's quote
-timestamp and, when that exact board observation has a retained change snapshot,
-`entry_snapshot_id`. The foreign key is left NULL for an unchanged confirmation poll rather
-than pointing at an older observation; referenced snapshots are never swept. Rows written
-before binding existed still
-resolve to `DEFAULT_QUOTE_PROVIDER` (FINNHUB), and every such resolution logs
-`trade_provider_defaulted`.
+## Valuation provenance — provider bound at the ticket
 
-Curve-priced classes (BOND, IRS, EUROPEAN_OPTION) have no wired source, so trade-action
-refuses new positions in them with the reason rather than booking something nothing can
-value; existing rows stay open and blocked.
+Pricing's cache is keyed `(provider, symbol)`; a trade is valued exclusively from its
+frozen `market_data_provider`, close and final valuation included. The client chooses
+provider identity; trade-action prices the fill itself from that provider's board row
+(ask/bid/mid by side) and compares the client's `client_seen_price` — past
+`TRADE_PRICE_TOLERANCE_PCT` the ticket is refused with the deviation. The trade records
+executed price, seen price, provider, provider quote timestamp and, when that exact
+observation has a retained snapshot, `entry_snapshot_id` (NULL for an unchanged
+confirmation poll — never pointed at an older observation). Pre-binding rows resolve to
+`DEFAULT_QUOTE_PROVIDER` and every such resolution logs `trade_provider_defaulted`.
+Curve-priced classes (BOND, IRS, EUROPEAN_OPTION) have no wired source — trade-action
+refuses new positions in them with the reason; existing rows stay open and blocked.
 
 ## Storage
 
@@ -391,22 +343,13 @@ value; existing rows stay open and blocked.
 | --- | --- | --- | --- |
 | `market_data_spot_prices` | latest quote board — what the UI, ticket and pricing read | unique (provider, symbol), upserted | bounded: one row per pair |
 | `market_data_snapshots` | quote history, one row per *changed* quote, with `raw_payload` | append; indexed (provider, symbol, received_at) | ~10k rows/day worst case; swept daily past `SNAPSHOT_RETENTION_DAYS` |
-| `market_data_curves` + `market_data_curve_points` | assembled curve sets / per-point provenance | unique (provider, curve_name, as_of_date); points cascade with their set | ≤ one set per source per day by construction |
+| `market_data_curves` + `market_data_curve_points` | curve sets / per-point provenance | unique (provider, curve_name, as_of_date); points cascade | ≤ one set per source per day |
 | `watchlist_items` | the symbol master | symbol (primary key) | user-bounded (cap 25) |
 
-Provenance chain (D2): the schema gives every trade `market_data_provider`,
-`entry_price_timestamp`, `client_seen_price`, and an optional `entry_snapshot_id`. The
-snapshot foreign key is written only when the board still represents that exact stored
-observation. Close stores the corresponding `close_price_timestamp` and optional
-`close_snapshot_id`. Valuations stamp `market_data_provider` + `market_data_timestamp`,
-including the terminal row, so PnL provably follows the trade's frozen provider. The board
-itself carries no raw payload — history owns raw; the board is the read-optimized latest
-state.
-
-The entry and close snapshot FKs are deliberately strict (no cascade): the retention sweep
-skips snapshot rows referenced by trades, so referenced raw payloads outlive the retention
-window.
-
-Growth math at the 25-symbol cap: Finnhub ≤ ~10k history rows/day worst case, Twelve Data
-≤ 800, Alpha Vantage ≤ 25, curves ≤ ~40 points/day — trivial for Postgres and flat under
-retention.
+Provenance chain: every trade carries `market_data_provider`, `entry_price_timestamp`,
+`client_seen_price`, optional `entry_snapshot_id`, matching close fields; valuations stamp
+provider + timestamp including the terminal row. The snapshot FKs are strict (no cascade):
+the retention sweep skips rows referenced by trades, so execution provenance outlives the
+window. The board carries no raw payload — history owns raw. Reference feeds add one board
+row per configured pair plus gold, and change-only history means a handful of snapshot
+rows per source per day, each carrying the full raw table.

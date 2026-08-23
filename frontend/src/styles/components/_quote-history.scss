@@ -250,3 +250,33 @@
     text-align: left;
   }
 }
+
+.quote-history__raw {
+  margin-top: 2px;
+
+  summary {
+    color: var(--text-muted);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+
+    &:hover {
+      color: var(--text-secondary);
+    }
+  }
+
+  pre {
+    max-height: 260px;
+    margin: var(--sp-1) 0 0;
+    padding: var(--sp-2);
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-app);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1.45;
+  }
+}

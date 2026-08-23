@@ -19,6 +19,15 @@ import FilterBar from '../../components/filters/FilterBar.jsx'
 import BookCard from '../../components/books/BookCard.jsx'
 import BookFormPanel from '../../components/books/BookFormPanel.jsx'
 import MoveTradesPanel from '../../components/books/MoveTradesPanel.jsx'
+import FxReport from '../../components/fx/FxReport.jsx'
+import { useFxRates } from '../../hooks/useFxRates.js'
+import { useReportingCurrency } from '../../hooks/useReportingCurrency.js'
+import { currencySubtotalsOf } from '../../domain/fx.js'
+
+const FX_COLUMNS = [
+  { id: 'unrealized', label: 'UNREALIZED', signed: true },
+  { id: 'realized', label: 'REALIZED', signed: true },
+]
 import { PANEL_ID, usePanelCoordinator } from '../../layout/panelContext.js'
 
 function describeDeleteError(error) {
@@ -57,6 +66,16 @@ export default function Books() {
   const allBooks = bookSummariesOf(summary.data)
   const roster = allBooks.filter((book) => book.isActive || includeDeactivated)
   const totals = summarizeBooks(roster)
+  const [reportingCurrency, setReportingCurrency] = useReportingCurrency()
+  const fx = useFxRates(reportingCurrency)
+  const currencySubtotals = currencySubtotalsOf(
+    roster.filter((book) => book.currency != null),
+    (book) => book.currency,
+    (book) => ({
+      unrealized: book.unrealizedPnl ?? 0,
+      realized: book.realizedPnl ?? 0,
+    }),
+  )
   const deactivatedCount = allBooks.filter((book) => !book.isActive).length
   const search = query.trim().toLowerCase()
   const books = roster.filter(
@@ -168,6 +187,16 @@ export default function Books() {
           Include deactivated
         </label>
       </FilterBar>
+
+      {currencySubtotals.length > 0 && (
+        <FxReport
+          columns={FX_COLUMNS}
+          subtotals={currencySubtotals}
+          reportingCurrency={reportingCurrency}
+          onReportingCurrencyChange={setReportingCurrency}
+          fx={fx}
+        />
+      )}
 
       {summary.error != null && summary.data != null && (
         <div className="blotter-notice" role="status">

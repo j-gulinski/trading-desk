@@ -114,27 +114,38 @@
 }
 
 .market-benchmark {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(650px, 2fr) auto;
-  align-items: center;
-  gap: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
   margin-bottom: var(--sp-4);
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-panel);
 }
+.market-benchmark__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.market-benchmark__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3) var(--sp-5);
+  margin: auto 0;
+}
 .market-benchmark__identity {
-  display: grid;
-  grid-template-columns: auto 1fr;
+  display: flex;
   align-items: baseline;
-  gap: 2px var(--sp-2);
+  gap: var(--sp-2);
 
   h2 {
     margin: 0;
     color: var(--text-primary);
     font-family: var(--font-mono);
-    font-size: 16px;
+    font-size: 18px;
   }
   > span:last-child {
     color: var(--text-muted);
@@ -142,15 +153,16 @@
   }
 }
 .market-benchmark__eyebrow {
-  grid-column: 1 / -1;
   color: var(--text-muted);
   font-size: 9px;
   letter-spacing: 0.14em;
 }
 .market-benchmark__stats {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--sp-4);
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-3) var(--sp-4);
   margin: 0;
 
   > div {
@@ -160,6 +172,7 @@
     color: var(--text-muted);
     font-size: 9px;
     letter-spacing: 0.1em;
+    white-space: nowrap;
   }
   dd {
     margin: 4px 0 0;
@@ -167,6 +180,10 @@
     font-family: var(--font-mono);
     font-size: 12px;
     white-space: nowrap;
+  }
+  .market-benchmark__last {
+    font-size: 15px;
+    font-weight: 600;
   }
 }
 
@@ -396,12 +413,9 @@
 }
 
 @container page (max-width: 620px) {
-  .market-benchmark {
-    grid-template-columns: 1fr auto;
-  }
   .market-benchmark__stats {
-    grid-column: 1 / -1;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: flex-start;
+    column-gap: var(--sp-5);
   }
   .market-summary > .stat-card {
     padding: var(--sp-3) var(--sp-2);

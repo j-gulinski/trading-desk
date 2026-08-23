@@ -1,18 +1,23 @@
 import { useEffect, useState } from 'react'
 import { useMarketFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
+import { usePolling } from '../../hooks/usePolling.js'
 import { useTableState } from '../../hooks/useTableState.js'
 import { useWatchlist } from '../../hooks/useWatchlist.js'
+import { apiGet } from '../../services/apiClient.js'
+import { endpoints } from '../../services/endpoints.js'
 import {
   DEFAULT_MARKET_COLUMNS,
   DEFAULT_MARKET_SORT,
   MARKET_COLUMNS,
   MARKET_FALLBACK_SORT,
+  PROVIDERS_POLL_INTERVAL_MS,
 } from '../../config/marketData.js'
 import {
   boardInstruments,
   instrumentId,
   marketRowsOf,
+  providerStrategiesOf,
   summarizeFeed,
 } from '../../domain/marketData.js'
 import { formatMarketSymbol } from '../../domain/marketFormat.js'
@@ -28,6 +33,7 @@ import MarketTable from '../../components/marketdata/MarketTable.jsx'
 import WatchlistSearch from '../../components/marketdata/WatchlistSearch.jsx'
 import ProviderStrategyStrip from '../../components/marketdata/ProviderStrategyStrip.jsx'
 import MarketBenchmark from '../../components/marketdata/MarketBenchmark.jsx'
+import OfficialRates from '../../components/marketdata/OfficialRates.jsx'
 import QuoteHistoryPanel from '../../components/marketdata/QuoteHistoryPanel.jsx'
 import { providerLabel } from '../../config/providers.js'
 
@@ -66,6 +72,11 @@ export default function MarketData() {
   const { instruments, tickCount, status, seedStatus, dropRows } = useMarketFeedContext()
   const watchlist = useWatchlist()
   const { now } = useElapsedTime()
+  const providersPoll = usePolling(
+    ({ signal }) => apiGet(endpoints.marketData.providers, { signal }),
+    { intervalMs: PROVIDERS_POLL_INTERVAL_MS },
+  )
+  const strategies = providerStrategiesOf(providersPoll.data)
 
   const [activeClass, setActiveClass] = useState(null)
   const [activeProvider, setActiveProvider] = useState(null)
@@ -90,8 +101,17 @@ export default function MarketData() {
   )
   const rows = marketRowsOf(board, now)
   const benchmarkRow = rows.find((row) => row.instrument.benchmark) ?? null
-  const quoteRows = rows.filter((row) => !row.instrument.benchmark)
-  const selectedRow = quoteRows.find((row) => row.instrument.id === selectedId) ?? null
+  const referenceRows = rows
+    .filter((row) => row.instrument.reference)
+    .sort((left, right) =>
+      left.instrument.symbol.localeCompare(right.instrument.symbol) ||
+      left.instrument.provider.localeCompare(right.instrument.provider),
+    )
+  const quoteRows = rows.filter(
+    (row) => !row.instrument.benchmark && !row.instrument.reference,
+  )
+  const selectedRow =
+    [...quoteRows, ...referenceRows].find((row) => row.instrument.id === selectedId) ?? null
 
   useEffect(() => {
     if (selectedId && selectedRow == null) setSelectedId(null)
@@ -167,7 +187,14 @@ export default function MarketData() {
         />
       </div>
 
-      <MarketBenchmark row={benchmarkRow} />
+      <div className="market-context">
+        <MarketBenchmark row={benchmarkRow} />
+        <OfficialRates
+          rows={referenceRows}
+          selectedId={selectedId}
+          onSelect={(row) => setSelectedId(row.instrument.id)}
+        />
+      </div>
 
       <FilterBar
         label="CLASS"
@@ -219,7 +246,7 @@ export default function MarketData() {
             <span>{visibleSymbols} symbols · {visibleRows.length} feeds</span>
           </div>
         </div>
-        <ProviderStrategyStrip />
+        <ProviderStrategyStrip providers={providersPoll.data} />
         <WatchlistSearch
           watchedProviders={watchedProvidersOf(watchlist.items)}
           onAdd={watchlist.add}
@@ -239,6 +266,7 @@ export default function MarketData() {
           <MarketTable
             table={marketTable}
             rows={visibleRows}
+            strategies={strategies}
             onRemove={handleRemove}
             busyKey={watchlist.busyKey}
             selectedId={selectedId}

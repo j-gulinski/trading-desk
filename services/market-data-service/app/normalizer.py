@@ -1,8 +1,12 @@
 from datetime import datetime, timezone
 
 from app.clients.base import ProviderDataError
-from shared.providers import FINNHUB, TWELVE_DATA, quote_grade
+from shared.providers import ECB, FINNHUB, NBP, TWELVE_DATA, quote_grade
 from shared.quotes import as_decimal, build_quote
+
+
+def as_of_timestamp(date_text):
+    return datetime.strptime(date_text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
 
 def _day_value(payload, key):
@@ -29,6 +33,67 @@ def normalize_finnhub_quote(symbol, asset_class, currency, payload, received_at)
         last=last,
         previous_close=_day_value(payload, "pc"),
         provider_timestamp=datetime.fromtimestamp(traded_at, tz=timezone.utc),
+    )
+
+
+def normalize_nbp_rate(symbol, table_payload, received_at):
+    code = symbol[:3]
+    rate = next(
+        (item for item in table_payload.get("rates", []) if item.get("code") == code),
+        None,
+    )
+    if rate is None or rate.get("mid") in (None, ""):
+        raise ProviderDataError(NBP, f"table A carries no {code} rate")
+    return build_quote(
+        provider=NBP,
+        symbol=symbol,
+        asset_class="FX",
+        quote_grade=quote_grade(NBP, "FX"),
+        received_at=received_at,
+        raw_payload=table_payload,
+        currency="PLN",
+        reference_mid=rate["mid"],
+        provider_timestamp=as_of_timestamp(table_payload["effectiveDate"]),
+    )
+
+
+def normalize_nbp_gold(symbol, payload, received_at):
+    if not isinstance(payload, dict) or payload.get("cena") in (None, ""):
+        raise ProviderDataError(NBP, "no gold fixing in response")
+    return build_quote(
+        provider=NBP,
+        symbol=symbol,
+        asset_class="COMMODITY",
+        quote_grade=quote_grade(NBP, "COMMODITY"),
+        received_at=received_at,
+        raw_payload=payload,
+        currency="PLN",
+        reference_mid=payload["cena"],
+        provider_timestamp=as_of_timestamp(payload["data"]),
+    )
+
+
+def normalize_ecb_rate(symbol, payload, received_at):
+    code = symbol[3:]
+    row = next(
+        (
+            item for item in payload.get("rows", [])
+            if item.get("CURRENCY") == code and item.get("OBS_VALUE")
+        ),
+        None,
+    )
+    if row is None:
+        raise ProviderDataError(ECB, f"EXR response carries no EUR/{code} observation")
+    return build_quote(
+        provider=ECB,
+        symbol=symbol,
+        asset_class="FX",
+        quote_grade=quote_grade(ECB, "FX"),
+        received_at=received_at,
+        raw_payload=payload,
+        currency=code,
+        reference_mid=row["OBS_VALUE"],
+        provider_timestamp=as_of_timestamp(row["TIME_PERIOD"]),
     )
 
 

@@ -3,3 +3,4 @@ SQLAlchemy
 psycopg[binary]
 structlog
 alembic
+tzdata

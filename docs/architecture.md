@@ -35,6 +35,55 @@ below replace.
   its `metadata` JSONB; every later process prices from the frozen terms and never looks
   anything up again. Adding the two OTC classes (options, IRS) required no migration.
 
+## The market-data vertical in one diagram
+
+```mermaid
+flowchart LR
+    F[Finnhub API] --> C[Provider clients]
+    T[Twelve Data API] --> C
+    NB[NBP API] --> C
+    EC[ECB API] --> C
+    C --> N[Quote normalizer]
+    N --> P[(spot board + snapshots)]
+    N --> S[market_tick SSE]
+    P --> A[Market Data REST API]
+    A --> U[React market board and ticket]
+    S --> U
+    S --> R[Pricing quote cache]
+    U --> X[Trade Action Service]
+    X --> D[(Trades)]
+    D --> R
+    R --> V[(Valuations)]
+    R --> B[valuation SSE]
+    B --> U
+    C --> L[structured provider_http_response log]
+    L --> M[Monitoring log tail]
+    M --> U
+```
+
+- Only market-data-service connects to vendors; every other service consumes normalized
+  rows or the normalized SSE stream.
+- SSE distributes changes, but PostgreSQL remains the source of truth — consumers seed
+  from a snapshot and reconcile after restart, because SSE has no replay.
+
+## Code map
+
+| Concern | Main files |
+| --- | --- |
+| Provider registry, normalized quote, freshness | `shared/providers.py`, `shared/quotes.py`, `shared/freshness.py` |
+| Active provider-symbol set, watchlist | `shared/active_set.py`, `market-data-service/app/watchlist.py` |
+| Vendor HTTP + decode/classify hooks | `clients/base.py`, `clients/finnhub.py`, `clients/twelve_data.py`, `clients/nbp.py`, `clients/ecb.py` |
+| Payload mapping | `market-data-service/app/normalizer.py` |
+| Polling, budgets, runtimes | `finnhub_feed.py`, `twelve_data_feed.py`, `provider_runtime.py`, `budget.py`, `scheduler.py` |
+| Reference feeds + publication calendar | `reference_feed.py`, `reference_calendar.py`, `reference_set.py`, `nbp_feed.py`, `ecb_feed.py` |
+| FX resolver | `shared/fx.py` |
+| Board, snapshots, history API | `persistence.py`, `publisher.py`, `api.py` |
+| Market UI | `useMarketFeed.js`, `useQuoteHistory.js`, `useWatchlist.js`, `MarketData.jsx` |
+| Reporting-currency overlay | `useFxRates.js`, `useReportingCurrency.js`, `domain/fx.js`, `FxReport.jsx` |
+| Ticket comparison | `domain/tradeActions.js`, `NewTradePanel.jsx`, `ProviderQuoteOption.jsx` |
+| Server execution | `trade-action-service/app/trade_processor.py`, `market_state.py`, `repository.py` |
+| Provider-bound valuation | `pricing-service/app/cache.py`, `valuation_engine.py` |
+
 ## Who owns what
 
 | Service | Port | Owns | Publishes |
@@ -57,7 +106,7 @@ deployment-independent.
   delete).
 - **`trades`** — identity, book, side, quantity, prices, lifecycle status, and `metadata JSONB`
   holding the frozen terms; `asset_class` is `TEXT`, not a database enum. Provenance columns
-  (D2) are `market_data_provider`, `entry_price_timestamp`,
+  are `market_data_provider`, `entry_price_timestamp`,
   optional `entry_snapshot_id` (FK when the exact board observation has a change snapshot),
   `client_seen_price`, `created_by_service`, plus matching close timestamp/snapshot fields —
   written by the execution gate on every trade the ticket creates.
@@ -96,8 +145,8 @@ before any service starts.
 
 ## Conventions
 
-- **No explanatory comments in code** — rationale lives in `docs/`; code carries only
-  constraint comments it cannot express itself.
+- **No explanatory comments in code** — design rationale lives in the phase reports; code
+  carries only constraint comments it cannot express itself.
 - **Honest UI over fake data** — unavailable values render as real states (`PENDING`, `n/a`,
   `INSUFFICIENT_DATA`), never invented zeros.
 - **Bounded everything** — every queue, buffer, and rendered table has an explicit cap.

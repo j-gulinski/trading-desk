@@ -1,0 +1,115 @@
+###############################################################################
+# Reference FX: NBP and ECB official fixings through the provider boundary,
+# and the reporting-currency resolver.
+#
+# It covers the official-source ops surface, reference board rows with both
+# clocks and raw provenance, the provider-filtered stream, a keyless table
+# refresh, the FX resolver with full provenance, the NBP-vs-ECB cross-check,
+# and the guards that keep reference rows out of the tradeable universe.
+#
+# Prerequisites: the full stack is running. NBP and ECB need no API key.
+# Fixings publish on business days (NBP ~12:15, ECB ~16:00 CET); on a weekend
+# every row carries Friday's as-of date and still classifies as current.
+###############################################################################
+
+@marketData = http://localhost:8001
+@actions    = http://localhost:8008
+@books      = http://localhost:8004
+
+# ========================= OFFICIAL-SOURCE RUNTIME =========================
+
+### Both official sources are wired: keyless, calendar-window strategy, last as-of
+GET {{marketData}}/providers
+
+### One official source in detail — no invented budget, a publication schedule instead
+GET {{marketData}}/providers/NBP/health
+
+# ========================= REFERENCE BOARD ROWS ============================
+
+### Reference rows carry grade REFERENCE, basis REFERENCE_MID, the as-of as
+### provider time, a fresh received time, and origin reference=true
+GET {{marketData}}/market-data/quotes?provider=NBP
+
+###
+GET {{marketData}}/market-data/quotes?provider=ECB
+
+### One fixing pair via the canonical detail route
+GET {{marketData}}/market-data/quotes/NBP/EURPLN
+
+### The EUR/PLN cross-check pair: NBP vs ECB publish independent fixings —
+### compare the two mids; the UI chip shows the difference in bps
+GET {{marketData}}/market-data/quotes?symbol=EURPLN
+
+### Gold is PLN per 1 gram (XAUPLN_G), never merged with per-ounce XAU pairs
+GET {{marketData}}/market-data/quotes/NBP/XAUPLN_G
+
+### Fixing history with the raw source table behind every stored observation
+GET {{marketData}}/market-data/quotes/NBP/EURPLN/history?limit=10&raw=1
+
+# ========================= STREAM AND TABLE REFRESH ========================
+
+### Run separately: the NBP-filtered stream stays open and only emits NBP events
+GET {{marketData}}/market-data/stream/NBP
+
+### Keyless table refresh — refetches table A + gold and republishes every row
+POST {{marketData}}/market-data/refresh?provider=NBP
+
+###
+POST {{marketData}}/market-data/refresh?provider=ECB
+
+# ============================ THE FX RESOLVER ==============================
+
+### Every resolvable currency to PLN, each with rate, path, provider and as-of
+GET {{marketData}}/fx/rates?to=PLN
+
+### To USD: EUR→USD is a direct ECB rate; PLN→USD inverts NBP's USD/PLN fixing
+GET {{marketData}}/fx/rates?to=USD
+
+### An unpublished target: every row answers with an honest no-path reason
+GET {{marketData}}/fx/rates?to=GBP
+
+### Not a currency code
+GET {{marketData}}/fx/rates?to=ZLOTY
+
+# ======================= REFERENCE ROWS NEVER TRADE ========================
+
+### The tradeable universe derives from watched ∪ held only — no NBP/ECB rows
+GET {{actions}}/instruments
+
+### Watch EURPLN on a quote provider: the same symbol now has one tradeable
+### TWELVE_DATA row next to the two official fixing rows
+POST {{marketData}}/watchlist
+Content-Type: application/json
+
+{ "symbol": "EURPLN", "asset_class": "FX", "currency": "PLN", "providers": ["TWELVE_DATA"] }
+
+### Three EURPLN rows: one REALTIME quote, two REFERENCE fixings
+GET {{marketData}}/market-data/quotes?symbol=EURPLN
+
+### A real FX book, so the forged intent below fails on the provider, not the book
+# @name fxBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "REFERENCE_GUARD_{{$timestamp}}", "expected_asset_class": "FX" }
+
+###
+@fxBookId = {{fxBook.response.body.$.book_id}}
+
+### A forged NBP intent is refused with the reason (422)
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "forged-nbp-{{$timestamp}}", "book_id": "{{fxBookId}}", "asset_class": "FX", "symbol": "EURPLN", "side": "BUY", "quantity": 1000, "market_data_provider": "NBP", "client_seen_price": "4.31" }
+
+### NBP cannot be added to the watchlist — reference data is system-owned (400)
+POST {{marketData}}/watchlist
+Content-Type: application/json
+
+{ "symbol": "EURPLN", "asset_class": "FX", "currency": "PLN", "providers": ["NBP"] }
+
+### Cleanup: deactivate the guard book, drop the EURPLN quote membership
+DELETE {{books}}/books/{{fxBookId}}
+
+###
+DELETE {{marketData}}/watchlist/EURPLN?provider=TWELVE_DATA

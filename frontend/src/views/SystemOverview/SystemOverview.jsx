@@ -66,7 +66,10 @@ export default function SystemOverview() {
     monitoringUnavailable: error != null,
   })
   const summary = summarize(services)
-  const marketSummary = summarizeFeed(Object.values(marketFeed.instruments), now)
+  const marketSummary = summarizeFeed(
+    Object.values(marketFeed.instruments).filter((instrument) => !instrument.reference),
+    now,
+  )
   const valuationSummary = summarizeValuations(
     valuationRowsOf(Object.values(valuationFeed.valuations), now, marketFeed.instruments),
   )
