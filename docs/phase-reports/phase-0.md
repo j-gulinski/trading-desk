@@ -214,7 +214,7 @@ during review.
   `docs/phase-reports/`. Each phase ships the documentation for what it built, in the same
   change.
 - **`README.md` reset to the minimal runbook** (what the system is, fork context, run steps,
-  key signup links, service table, testing policy, docs index). The PDF-mandated sections
+  key signup links, service table, testing policy, docs index). The brief-mandated sections
   (per-provider endpoints, price basis, freshness) land when they describe running code. `AGENTS.md` aligned with the unified image/runtime/docs reality.
 
 ## Step 6 — verification

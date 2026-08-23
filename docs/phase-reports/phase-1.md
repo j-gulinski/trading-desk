@@ -248,8 +248,8 @@ Each item is something Phase 1's plan bullet does not name, with its why:
 2. **FUTURES hidden, not dropped** (owner ruling 2026-08-18). The class was removed from the
    offered surfaces (pricing spot/shock tuples, the frontend book-class list and unit
    formatter) because no free provider serves futures quotes — but every asset class,
-   futures included, *was* implemented pre-fork, so the HW5 PDF's conditional ticket list
-   ("jeżeli te instrumenty zostały już zaimplementowane", p. 6) is met by the archived repo.
+   futures included, *was* implemented pre-fork, so the brief's conditional ticket list
+   (those classes are required only if already implemented, p. 6) is met by the archived repo.
    The class is dormant, to be restored when a futures data source exists — this deviation
    entry is the record of that hidden status.
 3. **`BENCHMARK_SYMBOL` code default changed `MARKET_INDEX` → `SPY`** as part of its move to

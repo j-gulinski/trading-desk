@@ -5,14 +5,14 @@ reviewable as a set of decisions. It does not add a market-data provider. It clo
 quote contract, scenario drift and quote-detail review issue before NBP/ECB work begins.
 
 **Exit criterion, met:** a fresh isolated Compose stack can open, value and close AAPL trades on
-Finnhub and Twelve Data independently; the assignment's current quote routes work directly on
+Finnhub and Twelve Data independently; the brief's current quote routes work directly on
 port 8001; the selected quote stays visible while its observation tape scrolls.
 
 ## Decisions preserved
 
 | Decision | Review consequence |
 | --- | --- |
-| `/market-data/...` is the canonical direct quote namespace; short service-root routes are compatibility aliases. | The assignment requests run unchanged and existing consumers do not break. |
+| `/market-data/...` is the canonical direct quote namespace; short service-root routes are compatibility aliases. | The brief's requests run unchanged and existing consumers do not break. |
 | Provider detail returns one normalized object and 404 for an unknown provider or inactive provider-symbol. | A ticket or scenario never has to guess which row in a list was requested. |
 | A provider-specific SSE route filters the existing event contract rather than defining a second schema. | All/provider consumers interpret identical `market_tick` and `market_remove` payloads. |
 | The current quote card owns no scrollbar; only the observation tape scrolls. | Provider time, received time, basis and current mark remain available while reviewing history. |

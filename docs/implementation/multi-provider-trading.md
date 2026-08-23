@@ -345,7 +345,7 @@ providers render only `NOT AVAILABLE`.
 | `GET /instruments` | tradeable symbols and their provider choices |
 | `POST /trade-actions` | provider-bound open/close intent |
 
-The `/market-data/...` forms are the canonical direct port-8001 assignment contract. The
+The `/market-data/...` forms are the canonical direct port-8001 brief contract. The
 existing `/snapshot`, `/quotes`, `/stream`, `/stream/<provider>` and `/refresh` forms remain
 compatibility aliases. The frontend continues to use relative `/api/market-data/...` URLs;
 Vite removes the gateway prefix before proxying to those service-root aliases.

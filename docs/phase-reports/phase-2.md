@@ -948,7 +948,7 @@ minutes.
 ## What Phase 2 does not do
 
 The state at phase end, stated as facts. How each gap closes is scoped in the plan —
-[hw5-plan-v2.md](../hw5-plan-v2.md) — not here.
+[implementation-roadmap.md](../implementation-roadmap.md) — not here.
 
 - **Outside US market hours every row reads STALE.** The age is honest — the last trade
   really is hours old — but a closed market's closing price *is* the current price until
