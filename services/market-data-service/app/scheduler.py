@@ -1,12 +1,16 @@
 from shared.providers import PROVIDERS, QUOTE_PROVIDERS
-from app import ecb_feed, finnhub_feed, nbp_feed, twelve_data_feed
+from app import ecb_feed, finnhub_feed, fred_feed, nbp_feed, twelve_data_feed
 
 FEEDS = {
     feed.PROVIDER: feed
-    for feed in (finnhub_feed, twelve_data_feed, nbp_feed, ecb_feed)
+    for feed in (finnhub_feed, twelve_data_feed, nbp_feed, ecb_feed, fred_feed)
 }
 
-POLL_LOOPS = tuple(feed.poll_loop for feed in FEEDS.values())
+POLL_LOOPS = tuple(
+    loop
+    for feed in FEEDS.values()
+    for loop in getattr(feed, "poll_loops", (feed.poll_loop,))
+)
 
 DEFAULT_PROVIDER = finnhub_feed.PROVIDER
 
@@ -49,6 +53,41 @@ def refresh_all(provider=None):
             else:
                 skipped.append({"provider": feed.PROVIDER, "symbol": symbol,
                                 "reason": error})
+    return refreshed, skipped
+
+
+def _curve_feeds(provider=None):
+    return {
+        name: feed for name, feed in FEEDS.items()
+        if hasattr(feed, "refresh_curves") and (provider is None or name == provider)
+    }
+
+
+def curve_provider_of(curve_name):
+    for name, feed in _curve_feeds().items():
+        if curve_name in feed.curve_names():
+            return name
+    return None
+
+
+def refresh_curve(curve_name, provider=None):
+    """Returns (entry, error, http_status)."""
+    provider = provider or curve_provider_of(curve_name)
+    feed = _curve_feeds().get(provider)
+    if feed is None:
+        return None, f"no wired curve source for {curve_name}", 404
+    return feed.refresh_curve(curve_name)
+
+
+def refresh_curves(provider=None):
+    feeds = _curve_feeds(provider)
+    if provider is not None and not feeds:
+        return [], [{"provider": provider, "reason": "provider serves no curves"}]
+    refreshed, skipped = [], []
+    for feed in feeds.values():
+        feed_refreshed, feed_skipped = feed.refresh_curves()
+        refreshed.extend(feed_refreshed)
+        skipped.extend(feed_skipped)
     return refreshed, skipped
 
 

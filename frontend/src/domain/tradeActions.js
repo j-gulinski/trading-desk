@@ -28,6 +28,55 @@ export function isCurvePriced(assetClass) {
   return CURVE_PRICED_ASSET_CLASSES.includes(assetClass)
 }
 
+export function termSchemasOf(raw) {
+  return {
+    schemas: raw?.schemas && typeof raw.schemas === 'object' ? raw.schemas : {},
+    curves: Array.isArray(raw?.curves) ? raw.curves : [],
+  }
+}
+
+export function curveChoicesFor(curves, currency) {
+  return currency ? curves.filter((curve) => curve.currency === currency) : curves
+}
+
+const SYMBOL_SANITIZE = /[^A-Z0-9_.-]/g
+
+export function derivedTermSymbol(assetClass, terms) {
+  const parts = [assetClass === 'EUROPEAN_OPTION' ? 'OPT' : assetClass]
+  if (assetClass === 'EUROPEAN_OPTION') {
+    if (terms.underlying_symbol) parts.push(terms.underlying_symbol)
+    if (terms.option_type) parts.push(terms.option_type)
+    if (terms.strike) parts.push(String(terms.strike))
+  } else {
+    if (terms.settlement_currency) parts.push(terms.settlement_currency)
+    if (terms.maturity_years) parts.push(`${terms.maturity_years}Y`)
+  }
+  return parts
+    .join('-')
+    .toUpperCase()
+    .replace(SYMBOL_SANITIZE, '')
+    .slice(0, 32)
+}
+
+export function termFormComplete(schema, terms) {
+  if (!schema) return false
+  return schema.fields.every((field) => {
+    const value = terms[field.name]
+    return value != null && value !== ''
+  })
+}
+
+export function termCurrencyOf(assetClass, terms, catalog) {
+  if (terms.settlement_currency) return terms.settlement_currency
+  if (assetClass === 'EUROPEAN_OPTION' && terms.underlying_symbol) {
+    const entry = (catalog ?? []).find(
+      (instrument) => instrument.symbol === terms.underlying_symbol,
+    )
+    return entry?.currency ?? null
+  }
+  return null
+}
+
 function executionPriceOf(instrument, side) {
   if (instrument == null) return null
   const quoted = side === 'BUY' ? instrument.ask : instrument.bid
@@ -126,6 +175,34 @@ export function buildOpenTradeIntent({
     source: 'MANUAL',
   }
   return intent
+}
+
+export function buildCurveTradeIntent({
+  clientRequestId,
+  bookId,
+  assetClass,
+  symbol,
+  side,
+  quantity,
+  terms,
+  currency,
+  provider,
+  previewPrice,
+}) {
+  return {
+    action_type: 'OPEN_TRADE',
+    client_request_id: clientRequestId,
+    book_id: bookId,
+    asset_class: assetClass,
+    symbol,
+    side,
+    quantity,
+    terms,
+    currency: currency ?? undefined,
+    market_data_provider: provider || undefined,
+    client_seen_price: String(previewPrice),
+    source: 'MANUAL',
+  }
 }
 
 export function buildReassignIntent(sourceBookId, targetBookId) {

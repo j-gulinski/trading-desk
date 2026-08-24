@@ -43,9 +43,10 @@ flowchart LR
     T[Twelve Data API] --> C
     NB[NBP API] --> C
     EC[ECB API] --> C
-    C --> N[Quote normalizer]
-    N --> P[(spot board + snapshots)]
-    N --> S[market_tick SSE]
+    FR[FRED API] --> C
+    C --> N[Quote normalizer + curve builders]
+    N --> P[(spot board + snapshots + curve sets)]
+    N --> S[market_tick + curve_tick SSE]
     P --> A[Market Data REST API]
     A --> U[React market board and ticket]
     S --> U
@@ -72,15 +73,17 @@ flowchart LR
 | --- | --- |
 | Provider registry, normalized quote, freshness | `shared/providers.py`, `shared/quotes.py`, `shared/freshness.py` |
 | Active provider-symbol set, watchlist | `shared/active_set.py`, `market-data-service/app/watchlist.py` |
-| Vendor HTTP + decode/classify hooks | `clients/base.py`, `clients/finnhub.py`, `clients/twelve_data.py`, `clients/nbp.py`, `clients/ecb.py` |
+| Vendor HTTP + decode/classify hooks | `clients/base.py`, `clients/finnhub.py`, `clients/twelve_data.py`, `clients/nbp.py`, `clients/ecb.py`, `clients/fred.py` |
 | Payload mapping | `market-data-service/app/normalizer.py` |
 | Polling, budgets, runtimes | `finnhub_feed.py`, `twelve_data_feed.py`, `provider_runtime.py`, `budget.py`, `scheduler.py` |
 | Reference feeds + publication calendar | `reference_feed.py`, `reference_calendar.py`, `reference_set.py`, `nbp_feed.py`, `ecb_feed.py` |
+| Curve assembly + feeds | `curve_builders.py`, `curve_feed.py`, `fred_feed.py`, `shared/curves.py`, `shared/curve_registry.py` |
 | FX resolver | `shared/fx.py` |
 | Board, snapshots, history API | `persistence.py`, `publisher.py`, `api.py` |
 | Market UI | `useMarketFeed.js`, `useQuoteHistory.js`, `useWatchlist.js`, `MarketData.jsx` |
+| Curve UI | `domain/curves.js`, `CurveSection.jsx`, `CurveChart.jsx` |
 | Reporting-currency overlay | `useFxRates.js`, `useReportingCurrency.js`, `domain/fx.js`, `FxReport.jsx` |
-| Ticket comparison | `domain/tradeActions.js`, `NewTradePanel.jsx`, `ProviderQuoteOption.jsx` |
+| Ticket comparison | `domain/tradeActions.js`, `NewTradePanel.jsx`, `ProviderQuoteOption.jsx`, `TermFields.jsx` |
 | Server execution | `trade-action-service/app/trade_processor.py`, `market_state.py`, `repository.py` |
 | Provider-bound valuation | `pricing-service/app/cache.py`, `valuation_engine.py` |
 
@@ -88,7 +91,7 @@ flowchart LR
 
 | Service | Port | Owns | Publishes |
 | --- | --- | --- | --- |
-| market-data | 8001 | provider quotes and curves, provider polling and budgets | `GET /snapshot`, `GET /quotes` (+ `/<provider>/<symbol>/history`), `GET /providers` (+ `/<p>/health`), `POST /refresh`, SSE `/stream` |
+| market-data | 8001 | provider quotes and curves, provider polling and budgets | `GET /snapshot`, `GET /quotes` (+ `/<provider>/<symbol>/history`), `GET /curves` (+ `/<provider>`, `POST /curves/refresh`), `GET /providers` (+ `/<p>/health`), `POST /refresh`, SSE `/stream` |
 | pricing | 8002 | valuations, book alpha/beta, scenario analysis | `GET /valuations`, `GET /book-risk`, SSE `/valuation-stream`, `POST /price`, `POST /scenario` |
 | monitoring | 8003 | health polling, audit queries, log collection | `GET /status`, `GET /audits`, `GET /logs`, SSE `/logs/stream` |
 | books | 8004 | book metadata and lifecycle | `GET/POST/PUT/DELETE /books` |
@@ -118,9 +121,9 @@ deployment-independent.
 - **The market store** (details in
   [market-data.md](market-data.md)): `market_data_spot_prices` — the latest quote board,
   unique (provider, symbol), upserted; `market_data_snapshots` — change-only quote history
-  with raw payloads; `market_data_curves` / `market_data_curve_points` — curve sets with
-  per-point provenance; `watchlist_items` — the symbol master that replaced the static
-  instrument catalog.
+  with raw payloads; `market_data_curves` / `market_data_curve_points` — curve sets
+  (curve type, raw source response at set level) with per-point provenance;
+  `watchlist_items` — the symbol master that replaced the static instrument catalog.
 
 Migrations live in `db/versions/` (Alembic) and run as the one-shot `db-migrations` container
 before any service starts.

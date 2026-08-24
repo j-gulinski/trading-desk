@@ -5,8 +5,7 @@ from decimal import Decimal
 
 from shared.db import session_scope
 from shared.quotes import as_decimal
-from shared.symbols import CURVE_PRICED_ASSET_CLASSES
-from shared.term_schemas import DEFAULT_CURVE
+from shared.symbols import SPOT_ASSET_CLASSES
 from shared.models import Book, Trade, Valuation
 from shared.functions import utcnow, get_iso_timestamp
 from shared.logging_config import get_logger
@@ -66,6 +65,11 @@ def has_spots():
         return len(spots) > 0
 
 
+def has_curves():
+    with data_lock:
+        return len(curves) > 0
+
+
 def get_curve(name):
     with data_lock:
         return curves.get(name)
@@ -80,11 +84,19 @@ def trade_provider(trade):
     return DEFAULT_QUOTE_PROVIDER
 
 
+def _needs_spot(trade):
+    return (
+        trade["asset_class"] in SPOT_ASSET_CLASSES
+        or trade["asset_class"] == "EUROPEAN_OPTION"
+    )
+
+
 def trades_for_quote(provider, symbol):
     with data_lock:
         return [
             t for t in active_trades.values()
-            if trade_provider(t) == provider
+            if _needs_spot(t)
+            and trade_provider(t) == provider
             and (
                 t["symbol"] == symbol
                 or (t.get("metadata") or {}).get("underlying_symbol") == symbol
@@ -92,16 +104,18 @@ def trades_for_quote(provider, symbol):
         ]
 
 
-def _trade_curve(trade):
-    curve = (trade.get("metadata") or {}).get("curve")
-    if curve is None and trade["asset_class"] in CURVE_PRICED_ASSET_CLASSES:
-        return DEFAULT_CURVE
-    return curve
+def _trade_curves(trade):
+    meta = trade.get("metadata") or {}
+    return {
+        name for name in (
+            meta.get("discount_curve"), meta.get("projection_curve"), meta.get("curve")
+        ) if name
+    }
 
 
 def trades_for_curve(curve_name):
     with data_lock:
-        return [t for t in active_trades.values() if _trade_curve(t) == curve_name]
+        return [t for t in active_trades.values() if curve_name in _trade_curves(t)]
 
 
 def book_pnl_snapshot():

@@ -1,4 +1,13 @@
-export const STREAM_EVENTS = ['market_tick', 'market_remove']
+export const STREAM_EVENTS = ['market_tick', 'market_remove', 'curve_tick']
+
+export const CURVE_PALETTE = [
+  'var(--accent)',
+  'var(--info)',
+  'var(--pos)',
+  'var(--warn)',
+  'var(--neg)',
+  'var(--text-secondary)',
+]
 
 export const WATCHLIST_POLL_INTERVAL_MS = 10000
 

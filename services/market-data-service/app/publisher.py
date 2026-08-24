@@ -44,6 +44,12 @@ def publish_quote(tick):
     )
 
 
+def publish_curve(tick):
+    publish_tick(
+        "curve_tick", {**tick, "stream_id": stream_id, "event_id": _next_event_id()}
+    )
+
+
 def publish_removal(rows):
     publish_tick(
         "market_remove",

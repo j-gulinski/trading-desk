@@ -5,7 +5,7 @@ The reasoning behind these facts — why each boundary exists and what was rejec
 in the phase reports. Provider facts come from live API probes (2026-08-17, all six
 providers; NBP/ECB re-verified 2026-08-23 at wiring); *verified* = seen in a live
 response, *docs* = provider documentation, re-check when credentials or plans change.
-Alpha Vantage and FRED are researched but not wired.
+Alpha Vantage is researched but not wired.
 
 ## Quote providers
 
@@ -23,10 +23,16 @@ Alpha Vantage and FRED are researched but not wired.
 | Market open/closed | `/stock/market-status`, free *(docs)* | `is_market_open` on every quote *(verified)* | static hours in search metadata |
 | Error shape | proper `401`/`429` + `{"error": …}` *(verified 401)* | **HTTP 200** + `{"code":429,"status":"error"}` *(verified shape)* | **HTTP 200** + `"Information"`/`"Note"` key *(verified)* |
 
-No wired quote path supplies interval volume, displayed depth, or open interest — the
-normalized contract carries none of them, and no placeholder zero is rendered. A future
-capability must name the measure, interval/as-of, units, instrument scope and entitlement
-before it enters the contract or UI.
+Session fields the quote responses already carry are part of the normalized contract as
+nullable, stored-as-received extras: day open/high/low (Finnhub `o/h/l`, Twelve Data
+`open/high/low`), 52-week bounds (Twelve Data `fifty_two_week`), session-cumulative share
+volume and average volume (Twelve Data, where the instrument supports them). They live on
+the board row, ride every tick, and render only in the Quote Detail session block — the
+board table is unchanged, change-only snapshots stay price provenance, and a field a tier
+does not publish renders n/a, never zero. Displayed order-book depth and derivatives open
+interest remain unpublished on the wired free tiers and stay out of the contract; any
+further field must name the measure, interval/as-of, units, instrument scope and
+entitlement before it enters.
 
 ## Official sources
 
@@ -125,7 +131,7 @@ capability facts. An asset class absent from a provider's map *is* the UNSUPPORT
 | FINNHUB | REALTIME | — | — | — |
 | TWELVE_DATA | REALTIME | REALTIME | REALTIME | — |
 | ALPHA_VANTAGE | EOD | REALTIME | — | — |
-| NBP | — | REFERENCE | REFERENCE (gold) | — |
+| NBP | — | REFERENCE | REFERENCE (gold) | ✓ (config proxy) |
 | ECB | — | REFERENCE | — | ✓ |
 | FRED | — | — | — | ✓ |
 
@@ -141,11 +147,34 @@ quote never arrives (NO DATA).
 
 ### Curves
 
-`shared/curves.py`: a `CurveSet` is (provider, curve_name, currency, optional
-`index_tenor`, as-of date) plus ordered `CurvePoint`s. Each point carries `source_series`
-(the FRED/ECB series id; NULL marks a derived, interpolated point) and `source_as_of`
-(the anchor's own date when it lags the set's as-of). `index_tenor` names the floating
-index a projection curve represents, so tenor-matching validation has a schema fact.
+`shared/curves.py`: a `CurveSet` is (provider, curve_name, `curve_type`, currency,
+optional `index_tenor`, as-of date) plus ordered `CurvePoint`s and the raw source
+response for the whole set. Each point carries `source_series` (the FRED/ECB series id;
+NULL marks a derived point) and `source_as_of` (always the anchor's own date — visible
+when it lags the set's as-of). `index_tenor` names the floating index a projection curve
+represents, so tenor-matching validation has a schema fact. `curve_type` is a small text
+vocabulary: `GOV_ZERO` (government curve, par yields treated as zero rates —
+documented simplification), `COMPOSITE_REF` (assembled from mixed official reference
+series), `POLICY_PROXY` (flat at a configured policy rate). A set's as-of is the **oldest**
+of its sources' dates — a curve is only as current as its stalest anchor, the same rule
+the FX resolver applies to cross legs.
+
+The wired catalog (latest stored set per name serves reads; history accumulates one set
+per source-day):
+
+| Curve | Source | Type | Points | As-of behavior |
+| --- | --- | --- | --- | --- |
+| `USD_TREASURY` | FRED, 11 `DGS*` series (1M–30Y), one request each | GOV_ZERO | 11, all sourced | daily, 1–2 business-day lag; a series whose newest value is `"."` falls back within a 7-observation lookback |
+| `EUR_GOV_AAA` | ECB YC `G_N_A`, one csvdata request | GOV_ZERO | ≤11 (3M–30Y), all sourced | daily, publishes ~12:00 CET for the prior TARGET day |
+| `EUR_GOV_ALL` | ECB YC `G_N_C`, one csvdata request | GOV_ZERO | ≤11, all sourced | same — the second euro curve that makes projection-vs-discount real |
+| `PLN_REF` | FRED OECD `IR3TIB01PLM156N` (3M interbank) + `IRLTLT01PLM156N` (10Y gov) | COMPOSITE_REF, `index_tenor` 3M | 2 sourced anchors + 3 linearly interpolated (1Y/2Y/5Y, NULL series) | monthly, ~2-month lag; refetched weekly |
+| `PLN_NBP_BASE` | `NBP_REFERENCE_RATE_PERCENT` (config — NBP publishes the rate but not via its API) | POLICY_PROXY | 5, all derived | rebuilt locally; a new set when the Warsaw date or the configured rate changes; never drives provider status |
+
+Stored rates are the published percent values. The wire shape carries both: `points`
+(percent, with per-point provenance — what the chart and inspector read) and flattened
+`tenors`/`rates` arrays (years / decimal fractions — what pricing math consumes). Curve
+writes are change-only per (provider, curve, as-of): a confirmation poll only advances
+`received_at`; a new or revised set writes points + raw and audits `CURVE_SET_WRITTEN`.
 
 ### Symbols and the symbol master
 
@@ -228,6 +257,28 @@ feed pair plus one registry line.
 - Gold keeps its published unit: symbol `XAUPLN_G`, **PLN per 1 g** (a six-letter
   `XAUPLN` would read as per-troy-ounce, wrong by ×31.1034768); the ounce conversion is a
   documented cross-check, never a stored row.
+- **History backfill**: after its first successful live round, a feed whose pair has at
+  most one stored observation fetches up to `REFERENCE_BACKFILL_DAYS` (90) of history —
+  NBP `tables/a/last/{n}` + `cenyzlota/last/{n}` (93-day source cap), ECB
+  `lastNObservations` — and inserts change-only snapshots strictly older than anything
+  stored: `provider_timestamp` = the fixing's as-of, `received_at` = the backfill moment,
+  raw = that day's response slice. The drill tape then shows the published daily series;
+  unlike the sparse quote tapes it is complete by construction (one fixing per business
+  day, identical consecutive values excepted). A transient failure retries hourly; runs
+  once per pair.
+
+### FRED and the curve feeds
+
+- `clients/fred.py`: key in `api_key`, `file_type=json`; observation values are strings
+  with `"."` for missing; a bad/unregistered key answers **HTTP 400** naming `api_key`,
+  classified as AUTH_FAILED. Budget: 108/min bucket from the published 120/min.
+- Curve feeds reuse the calendar-window pattern (windows above in `configuration.md`);
+  every curve also refetches on the hourly confirmation poll, so a freshly booted stack
+  has all sets within one loop tick regardless of window. Manual
+  `POST /curves/refresh?curve=` / `?provider=` refetches on demand within the budget.
+- ECB's yield curves share the ECB runtime with the EXR fixings (one status machine,
+  two loops); the NBP proxy build is local and can neither fail nor mask the fixing
+  feed's health.
 
 ## The FX resolver and the reporting currency
 
@@ -295,6 +346,9 @@ credits).
 | `GET /market-data/quotes` | stored active-set + reference quotes with computed freshness; filterable by `symbol`, `asset_class`, `provider` |
 | `GET /market-data/quotes/<provider>/<symbol>` | one active normalized quote; unknown provider or missing row is 404 |
 | `GET /market-data/quotes/<provider>/<symbol>/history?limit=&raw=` | latest stored change observations; limit 1–200; `raw=1` includes each observation's stored raw payload (the provenance drill) |
+| `GET /market-data/curves?raw=` | latest stored set per curve: metadata, provenance-carrying points, pricing arrays; `raw=1` adds each set's raw source response |
+| `GET /market-data/curves/<provider>?raw=` | the same filtered to one wired provider; unknown provider is 404 |
+| `POST /market-data/curves/refresh?curve=&provider=` | targeted curve refetch within the provider budget; without `curve`: every curve the provider (or all providers) builds |
 | `GET /fx/rates?to=<CCY>` | one resolution per known currency: rate, path, provider, as-of, or an honest no-path reason |
 | `GET /watchlist` · `POST /watchlist` · `DELETE /watchlist/<symbol>?provider=` | the symbol master, self-service — offers quote providers only |
 | `GET /symbols/search?q=` | provider-tagged discovery, cached 10 min |
@@ -303,7 +357,10 @@ credits).
 | `POST /market-data/refresh?symbol=&provider=` | targeted poll within budget — 404 unknown symbol, 422 unsupported class, 429 budget/pace exhausted, 503 disabled/cooldown. Without `symbol`: the provider's whole set — for NBP/ECB one keyless table refetch republishing every reference row |
 
 The `/market-data/...` forms are canonical on port 8001; short routes remain compatibility
-aliases. Every tick carries the full normalized quote plus `stale_after_seconds`,
+aliases. `/market-data/snapshot` carries the curve sets beside the spot board, and each
+curve fetch publishes a `curve_tick` SSE event on the same stream (provider-filterable
+like quote ticks) — pricing seeds both from the snapshot and follows both event kinds.
+Every quote tick carries the full normalized quote plus `stale_after_seconds`,
 `closed_stale_after_seconds`, `market_open` and the origin flags, so any consumer
 classifies freshness without asking the server. Each provider HTTP call writes one
 `provider_http_response` log line (request metadata, outcome, latency, `response_json`) —
@@ -334,8 +391,25 @@ executed price, seen price, provider, provider quote timestamp and, when that ex
 observation has a retained snapshot, `entry_snapshot_id` (NULL for an unchanged
 confirmation poll — never pointed at an older observation). Pre-binding rows resolve to
 `DEFAULT_QUOTE_PROVIDER` and every such resolution logs `trade_provider_defaulted`.
-Curve-priced classes (BOND, IRS, EUROPEAN_OPTION) have no wired source — trade-action
-refuses new positions in them with the reason; existing rows stay open and blocked.
+
+Curve-priced classes (BOND, IRS, EUROPEAN_OPTION) execute **model-priced** through the
+same gate: the ticket previews a model value via pricing `POST /price`; trade-action
+recomputes the PV itself from the stored curves (`shared/curve_registry` +
+`shared/pricing_math`) — plus the underlying's board row for options, which passes the
+normal freshness gate on its chosen quote provider — and compares the result against
+`client_seen_price` (IRS deviation is measured against notional; a zero model value skips
+the check). Term validation is shared (`shared/term_schemas.validate_terms`) and enforces
+the curve guards in both services identically: settlement currency must have a wired
+curve, discount and projection curves must match it, and a projection curve's declared
+`index_tenor` must match the leg's `floating_rate_index_tenor`. The accepted trade
+freezes each curve's name, provider and as-of into its terms
+(`discount_curve_as_of`, …); `price_basis` in the audit payload reads `MODEL_PV`;
+`market_data_provider` stays NULL for IRS/BOND (there is no quote feed) and is the
+underlying's provider for options. Valuations stamp the discount curve's provider and
+as-of when no spot is involved. Close recomputes the model value from the current stored
+sets of the same frozen curve names. `GET /instruments/term-schemas` answers
+`{"schemas", "curves"}` — the schemas with resolved choices plus the curve catalog the
+pickers and guards read.
 
 ## Storage
 
@@ -343,7 +417,7 @@ refuses new positions in them with the reason; existing rows stay open and block
 | --- | --- | --- | --- |
 | `market_data_spot_prices` | latest quote board — what the UI, ticket and pricing read | unique (provider, symbol), upserted | bounded: one row per pair |
 | `market_data_snapshots` | quote history, one row per *changed* quote, with `raw_payload` | append; indexed (provider, symbol, received_at) | ~10k rows/day worst case; swept daily past `SNAPSHOT_RETENTION_DAYS` |
-| `market_data_curves` + `market_data_curve_points` | curve sets / per-point provenance | unique (provider, curve_name, as_of_date); points cascade | ≤ one set per source per day |
+| `market_data_curves` + `market_data_curve_points` | curve sets (type, raw source response) / per-point provenance | unique (provider, curve_name, as_of_date); points cascade | ≤ one set per source per day; not swept — years fit in megabytes |
 | `watchlist_items` | the symbol master | symbol (primary key) | user-bounded (cap 25) |
 
 Provenance chain: every trade carries `market_data_provider`, `entry_price_timestamp`,
@@ -352,4 +426,7 @@ provider + timestamp including the terminal row. The snapshot FKs are strict (no
 the retention sweep skips rows referenced by trades, so execution provenance outlives the
 window. The board carries no raw payload — history owns raw. Reference feeds add one board
 row per configured pair plus gold, and change-only history means a handful of snapshot
-rows per source per day, each carrying the full raw table.
+rows per source per day, each carrying the full raw table; the one-time backfill adds up
+to ~90 daily rows per pair inside the same retention window. Curve-priced trades freeze
+their curve provenance in `metadata` — the drill from a trade runs trade → frozen curve
+name + as-of → `market_data_curves` row → raw source response.

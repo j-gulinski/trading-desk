@@ -11,9 +11,8 @@ rebuilds market data around real providers. Provider facts come from live probes
 limits when registering production keys.
 
 The original core sequence was budgeted at roughly 14–15 focused engineering days. With
-Phase 4 delivered (2026-08-23), the remaining sequence is roughly 5.5–6.5 focused days
-(P5 ~2.5–3 · P6 ~1–1.5 · P7 ~1.5–2) — P5 re-sized 2026-08-23 when the quote-detail
-enrichment and official-history backfill folded in (D35). Hosting and the technical load dashboard remain a separate capability
+Phase 5 delivered (2026-08-24), the remaining sequence is roughly 2.5–3.5 focused days
+(P6 ~1–1.5 · P7 ~1.5–2). Hosting and the technical load dashboard remain a separate capability
 group. Automated strategy execution is deliberately deferred until every required v2 provider,
 curve, execution and verification gate is complete.
 
@@ -717,7 +716,17 @@ view.
 **Out of scope:** curves (P5), FRED (P5), best-rate logic (D13 stands), NBP table C
 (D30), converted persisted values, new chart types, intraday history.
 
-### Phase 5 — FRED + ECB yield curves, curve plotting, curve-driven pricing, quote-detail enrichment *(~2.5–3 days)*
+### Phase 5 — FRED + ECB yield curves, curve plotting, curve-driven pricing, quote-detail enrichment *(complete 2026-08-24)*
+
+Delivered on this plan. Divergences, each re-derived against the running system and
+argued in [`phase-reports/phase-5.md`](phase-reports/phase-5.md): the curve SSE event is
+`curve_tick` (the pricing consumer's existing contract), `PLN_REF`'s type label is
+`COMPOSITE_REF` (its anchors are interbank *and* gov-bond), BOND gained its term schema
+so all three curve-priced classes opened, and — because the development environment's
+egress policy blocked the provider hosts — the live FRED/ECB-YC fetch paths were
+verified at the client boundary with recorded response shapes and are re-verified by the
+first local run of `scenarios/curves.http`. The section below is preserved as the plan
+it was executed against.
 
 **Goal.** Real rate curves with per-point provenance in the schema, the brief's
 `/curves*` routes live, **curves drawn as a real, comparative chart** (the plot is a

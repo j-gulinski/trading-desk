@@ -10,7 +10,12 @@ import {
   formatPercentDelta,
   unitLabelOf,
 } from '../../domain/marketFormat.js'
-import { directionOf, formatClockTime, formatUnitPrice } from '../../domain/formatting.js'
+import {
+  directionOf,
+  formatClockTime,
+  formatNumber,
+  formatUnitPrice,
+} from '../../domain/formatting.js'
 import { providerLabel } from '../../config/providers.js'
 import {
   FRESHNESS_PILL_LEVELS,
@@ -40,6 +45,60 @@ function Metric({ label, value, note }) {
       <dd>{value}</dd>
       {note && <span>{note}</span>}
     </div>
+  )
+}
+
+function rangeValue(low, high, assetClass) {
+  if (low == null && high == null) return null
+  return `${formatUnitPrice(low, assetClass)} – ${formatUnitPrice(high, assetClass)}`
+}
+
+function SessionMetric({ label, value, note }) {
+  return (
+    <Metric
+      label={label}
+      value={value ?? <span className="quote-history__na">n/a</span>}
+      note={value == null ? 'not published on this feed' : note}
+    />
+  )
+}
+
+function SessionBlock({ instrument }) {
+  const { assetClass } = instrument
+  return (
+    <section className="quote-history__session" aria-labelledby="session-block-title">
+      <header className="quote-history__section-head">
+        <div>
+          <h3 id="session-block-title">Session</h3>
+          <p>{providerLabel(instrument.provider)}</p>
+        </div>
+      </header>
+      <dl className="quote-history__metrics quote-history__metrics--session">
+        <SessionMetric
+          label="Open"
+          value={instrument.dayOpen == null ? null : formatUnitPrice(instrument.dayOpen, assetClass)}
+        />
+        <SessionMetric
+          label="Day range"
+          value={rangeValue(instrument.dayLow, instrument.dayHigh, assetClass)}
+        />
+        <SessionMetric
+          label="52-week range"
+          value={rangeValue(instrument.week52Low, instrument.week52High, assetClass)}
+        />
+        <SessionMetric
+          label="Volume"
+          value={instrument.volume == null ? null : formatNumber(instrument.volume)}
+          note="session cumulative"
+        />
+        <SessionMetric
+          label="Avg volume"
+          value={
+            instrument.averageVolume == null ? null : formatNumber(instrument.averageVolume)
+          }
+        />
+      </dl>
+    </section>
   )
 }
 
@@ -185,6 +244,8 @@ export default function QuoteHistoryPanel({ row, onClose }) {
           />
         </dl>
       </section>
+
+      <SessionBlock instrument={instrument} />
 
       <section className="quote-history__observations" aria-labelledby="observed-history-title">
         <header className="quote-history__section-head">

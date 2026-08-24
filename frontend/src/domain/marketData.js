@@ -1,6 +1,6 @@
 import { directionOf } from './formatting.js'
 
-const MARKET_STATE_STORAGE_VERSION = 10
+const MARKET_STATE_STORAGE_VERSION = 11
 const MAX_STORED_INSTRUMENTS = 100
 
 function toNum(value) {
@@ -42,6 +42,13 @@ function spotInstrument(tick, snapshotStreamId = null) {
     ask: toNum(tick.ask),
     last: toNum(tick.last),
     previousClose: toNum(tick.previous_close),
+    dayOpen: toNum(tick.day_open),
+    dayHigh: toNum(tick.day_high),
+    dayLow: toNum(tick.day_low),
+    week52High: toNum(tick.week52_high),
+    week52Low: toNum(tick.week52_low),
+    volume: toNum(tick.volume),
+    averageVolume: toNum(tick.average_volume),
     priceBasis: typeof tick.price_basis === 'string' ? tick.price_basis : null,
     grade: tick.quote_grade ?? null,
     providerTimestampMs: Number.isFinite(providerTimestampMs) ? providerTimestampMs : null,
@@ -193,6 +200,13 @@ function restoreInstrument(candidate) {
     ask: toNum(candidate.ask),
     last: toNum(candidate.last),
     previousClose: toNum(candidate.previousClose),
+    dayOpen: toNum(candidate.dayOpen),
+    dayHigh: toNum(candidate.dayHigh),
+    dayLow: toNum(candidate.dayLow),
+    week52High: toNum(candidate.week52High),
+    week52Low: toNum(candidate.week52Low),
+    volume: toNum(candidate.volume),
+    averageVolume: toNum(candidate.averageVolume),
     priceBasis: typeof candidate.priceBasis === 'string' ? candidate.priceBasis : null,
     grade: typeof candidate.grade === 'string' ? candidate.grade : null,
     providerTimestampMs: Number.isFinite(candidate.providerTimestampMs)
@@ -347,6 +361,13 @@ function placeholderInstrument(id, provider, item) {
     ask: null,
     last: null,
     previousClose: null,
+    dayOpen: null,
+    dayHigh: null,
+    dayLow: null,
+    week52High: null,
+    week52Low: null,
+    volume: null,
+    averageVolume: null,
     priceBasis: null,
     grade: null,
     providerTimestampMs: null,

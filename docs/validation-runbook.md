@@ -151,6 +151,28 @@ must provide the same contract.
 **Pass evidence:** Shared HTTP behavior exists once, while provider pacing remains explicit and
 independently testable.
 
+## 8. Prove the curves and model-priced execution
+
+**Observe:** On Market Data, the Rate curves section overlays the stored sets; toggle
+EUR_GOV_AAA against EUR_GOV_ALL and select points — sourced anchors are filled, derived
+points hollow, and the inspector names tenor, rate, source series, source as-of, ingest
+time and the raw response. Open the ticket on an IRS book: the curve pickers name
+currency, index tenor and as-of, and the model value updates as terms change.
+
+**Explain:** Stored rates are the published percent values; pricing consumes the
+flattened decimal-fraction arrays. A set's as-of is its oldest source date. PLN_REF is a
+labeled two-anchor composite (monthly OECD series, ~2-month lag) and PLN_NBP_BASE a
+labeled config-sourced proxy — neither claims to be an observed WIBOR curve. The server
+recomputes every model value itself and freezes the curve names + as-ofs into the trade.
+
+**Probe:** Ask for a PLN swap discounted on USD_TREASURY (rejected with the currency in
+the sentence) and a 6M floating leg projected off PLN_REF (rejected naming the declared
+3M index). Run `scenarios/curves.http` for the API-level flow.
+
+**Pass evidence:** The chart, inspector and pickers agree with `/market-data/curves`;
+rejections carry readable reasons; an accepted trade's terms show the frozen curve
+provenance.
+
 ## Review questions
 
 A reviewer should be able to interrupt the walkthrough with these questions:
@@ -163,6 +185,8 @@ A reviewer should be able to interrupt the walkthrough with these questions:
 6. Which component owns provider failure, and why does one bad symbol not stop the feed?
 7. What does the base class guarantee today, and what additional guarantee would ABC add?
 8. Why are volume, order-book depth and open interest three separate capabilities?
+9. Why is a curve set's as-of its oldest source date, and where does an interpolated
+   point admit what it is?
 
 The answers are the decision boundaries above; class names are supporting evidence, not the
 answer by themselves.

@@ -119,6 +119,13 @@ class MarketDataSpotPrice(Base):
     price_basis = Column(Text, nullable=False)
     quote_grade = Column(Text, nullable=False)
     previous_close = Column(Numeric, nullable=True)
+    day_open = Column(Numeric, nullable=True)
+    day_high = Column(Numeric, nullable=True)
+    day_low = Column(Numeric, nullable=True)
+    week52_high = Column(Numeric, nullable=True)
+    week52_low = Column(Numeric, nullable=True)
+    volume = Column(Numeric, nullable=True)
+    average_volume = Column(Numeric, nullable=True)
     provider_timestamp = Column(DateTime(timezone=True), nullable=True)
     received_at = Column(DateTime(timezone=True), nullable=False)
     stale_after_seconds = Column(Integer, nullable=True)
@@ -170,11 +177,13 @@ class MarketDataCurve(Base):
     curve_id = Column(UUID(as_uuid=True), primary_key=True)
     provider = Column(Text, nullable=False)
     curve_name = Column(Text, nullable=False)
+    curve_type = Column(Text, nullable=False)
     currency = Column(Text, nullable=False)
     index_tenor = Column(Text, nullable=True)
     as_of_date = Column(Date, nullable=False)
     received_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
+    raw_payload = Column(JSONB, nullable=False)
 
 
 class MarketDataCurvePoint(Base):

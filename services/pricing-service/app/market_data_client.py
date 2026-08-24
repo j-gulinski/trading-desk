@@ -65,13 +65,16 @@ def _seed_spots():
     spots = snapshot.get("spots") or {}
     for row in spots.values():
         cache.update_spot(row)
-    log.info("spots_seeded", spots=len(spots))
+    curves = snapshot.get("curves") or {}
+    for row in curves.values():
+        cache.update_curve(row)
+    log.info("spots_seeded", spots=len(spots), curves=len(curves))
 
 
 def market_data_stream_consumer():
     while True:
         log.info("stream_connecting", url=MARKET_DATA_STREAM_URL)
-        if not cache.has_spots():
+        if not cache.has_spots() or not cache.has_curves():
             _seed_spots()
         try:
             request = urllib.request.Request(MARKET_DATA_STREAM_URL)

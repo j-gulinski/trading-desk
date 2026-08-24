@@ -14,3 +14,11 @@ class NbpClient(ProviderClient):
 
     def gold_price(self):
         return self.get("/cenyzlota", {"format": "json"})
+
+    def table_a_history(self, days):
+        # NBP caps range queries at 93 days/255 tables
+        return self.get(f"/exchangerates/tables/a/last/{min(days, 93)}",
+                        {"format": "json"})
+
+    def gold_price_history(self, days):
+        return self.get(f"/cenyzlota/last/{min(days, 93)}", {"format": "json"})

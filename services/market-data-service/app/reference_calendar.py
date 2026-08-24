@@ -48,4 +48,5 @@ class PublicationCalendar:
     def describe_window(self):
         start = self.window_start.strftime("%H:%M")
         end = self.window_end.strftime("%H:%M")
-        return f"{start}–{end} {self.tz.key.split('/')[-1]} time, business days"
+        city = self.tz.key.split("/")[-1].replace("_", " ")
+        return f"{start}–{end} {city} time, business days"

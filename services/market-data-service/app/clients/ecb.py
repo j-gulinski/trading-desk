@@ -19,8 +19,15 @@ class EcbClient(ProviderClient):
                 self.provider, "empty csvdata response", response=payload
             )
 
-    def exchange_rates(self, currency_codes):
+    def exchange_rates(self, currency_codes, last_observations=1):
         series = f"D.{'+'.join(sorted(currency_codes))}.EUR.SP00.A"
         return self.get(
-            f"/data/EXR/{series}", {"format": "csvdata", "lastNObservations": 1}
+            f"/data/EXR/{series}",
+            {"format": "csvdata", "lastNObservations": last_observations},
+        )
+
+    def yield_curve(self, dataset_key, tenor_codes):
+        series = f"B.U2.EUR.4F.{dataset_key}.SV_C_YM.{'+'.join(tenor_codes)}"
+        return self.get(
+            f"/data/YC/{series}", {"format": "csvdata", "lastNObservations": 1}
         )

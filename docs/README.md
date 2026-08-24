@@ -21,8 +21,9 @@ phase re-derives its decisions and ends by adding its report to `phase-reports/`
 4. [configuration.md](configuration.md) — every runtime knob: default, reader, one-line
    why.
 5. [validation-runbook.md](validation-runbook.md) with
-   [provider-trading.http](../scenarios/provider-trading.http) and
-   [reference-fx.http](../scenarios/reference-fx.http) — the review procedure and the
+   [provider-trading.http](../scenarios/provider-trading.http),
+   [reference-fx.http](../scenarios/reference-fx.http) and
+   [curves.http](../scenarios/curves.http) — the review procedure and the
    executable API paths.
 
 ## Phase reports — the detailed record
@@ -33,7 +34,8 @@ phase re-derives its decisions and ends by adding its report to `phase-reports/`
 - [phase-3a](phase-reports/phase-3a.md) — the two-provider workflow, review record
 - [phase-3b](phase-reports/phase-3b.md) — review closure
 - [phase-4](phase-reports/phase-4.md) — NBP/ECB reference FX and the reporting currency
-  (the latest evidence and the exact boundary handed to Phase 5)
+- [phase-5](phase-reports/phase-5.md) — real rate curves, the curve chart, and
+  model-priced execution (the latest evidence and the exact boundary handed to Phase 6)
 
 ## The plan
 

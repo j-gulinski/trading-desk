@@ -15,6 +15,7 @@ import {
   reconcileSnapshotInstruments,
   restoreInstruments,
 } from '../domain/marketData.js'
+import { curveOf, curvesFromSnapshot, mergeCurves } from '../domain/curves.js'
 
 function readStoredTickCount() {
   try {
@@ -55,6 +56,7 @@ function storeInstruments(instruments) {
 
 export function useMarketFeed() {
   const [instruments, setInstruments] = useState(readStoredInstruments)
+  const [curves, setCurves] = useState({})
   const [tickCount, setTickCount] = useState(readStoredTickCount)
   const receivedTicksRef = useRef(tickCount)
 
@@ -82,6 +84,11 @@ export function useMarketFeed() {
         }
         return
       }
+      if (name === 'curve_tick') {
+        const curve = curveOf(data)
+        if (curve) setCurves((previous) => mergeCurves(previous, [curve]))
+        return
+      }
       const receivedAtMs = Date.now()
       const updates = instrumentsFromEvent(name, data)
       if (updates.length === 0) return
@@ -98,17 +105,19 @@ export function useMarketFeed() {
       setInstruments((previous) =>
         reconcileSnapshotInstruments(previous, snapshot, seedStartedMs),
       )
+      setCurves((previous) => mergeCurves(previous, curvesFromSnapshot(snapshot)))
     })
   })
 
   return useMemo(
     () => ({
       instruments,
+      curves,
       tickCount,
       status,
       seedStatus,
       dropRows,
     }),
-    [instruments, tickCount, status, seedStatus, dropRows],
+    [instruments, curves, tickCount, status, seedStatus, dropRows],
   )
 }

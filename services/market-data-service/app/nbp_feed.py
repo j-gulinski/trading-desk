@@ -1,10 +1,11 @@
 from shared.functions import utcnow
 from shared.logging_config import get_logger
 from shared.providers import NBP
-from app import reference_set
+from app import curve_builders, reference_set
 from app.clients.base import ProviderDataError
 from app.clients.nbp import NbpClient
 from app.config import NBP_WINDOW_END, NBP_WINDOW_START, SERVICE_NAME
+from app.curve_feed import CurveBuilder, CurveFeed
 from app.normalizer import normalize_nbp_gold, normalize_nbp_rate
 from app.provider_runtime import ProviderRuntime
 from app.reference_calendar import PublicationCalendar
@@ -55,11 +56,50 @@ def _universe():
     return reference_set.nbp_symbols(reference_set.active_trade_currencies())
 
 
-_feed = ReferenceFeed(NBP, runtime, _calendar, _universe, _fetch)
+def _backfill(symbols, days):
+    received = utcnow()
+    quotes = []
+    fx = [symbol for symbol in symbols if not reference_set.is_gold(symbol)]
+    if fx:
+        runtime.record_request()
+        for table in _client.table_a_history(days):
+            for symbol in fx:
+                try:
+                    quotes.append(normalize_nbp_rate(symbol, table, received))
+                except ProviderDataError:
+                    continue
+    if any(reference_set.is_gold(symbol) for symbol in symbols):
+        runtime.record_request()
+        for entry in _client.gold_price_history(days):
+            try:
+                quotes.append(normalize_nbp_gold(reference_set.NBP_GOLD_SYMBOL,
+                                                 entry, received))
+            except ProviderDataError:
+                continue
+    return quotes
+
+
+_feed = ReferenceFeed(NBP, runtime, _calendar, _universe, _fetch, _backfill)
+# the proxy curve is config-sourced — the shared feed machinery only paces its rebuilds
+_curve_feed = CurveFeed(NBP, runtime, _calendar, _client, (
+    CurveBuilder(curve_builders.PLN_NBP_BASE, curve_builders.build_pln_nbp_base,
+                 local=True),
+))
 
 poll_loop = _feed.poll_loop
+poll_loops = (_feed.poll_loop, _curve_feed.poll_loop)
 refresh_symbol = _feed.refresh_symbol
 refresh_table = _feed.refresh_table
+refresh_curve = _curve_feed.refresh_curve
+refresh_curves = _curve_feed.refresh_all
+curve_names = _curve_feed.curve_names
 reload_active = _feed.reload_universe
 active_symbols = _feed.active_symbols
-runtime_snapshot = _feed.runtime_snapshot
+
+
+def runtime_snapshot():
+    return {
+        **_feed.runtime_snapshot(),
+        "curves": _curve_feed.curve_names(),
+        "curve_strategy": _curve_feed.strategy(),
+    }

@@ -5,6 +5,7 @@ import bottle
 from bottle import request, response
 
 from app import persistence, reference_set, scheduler, symbol_search, watchlist
+from app.curve_feed import wire_curve
 from app.publisher import (
     client_event_queues,
     clients_lock,
@@ -131,12 +132,56 @@ def _quote_rows():
 def get_snapshot():
     response.content_type = "application/json"
     rows = _board_payload()
+    curves = persistence.latest_curve_sets()
     return to_json({
         "stream_id": stream_id,
         "event_id": last_event_id() or None,
         "spots": {f"{row['provider']}:{row['symbol']}": row for row in rows},
-        "curves": {},
+        "curves": {entry["curve_name"]: wire_curve(entry) for entry in curves},
     })
+
+
+@app.route("/curves")
+@app.route("/market-data/curves")
+def get_curves():
+    response.content_type = "application/json"
+    include_raw = (request.query.raw or "").strip() in ("1", "true")
+    curves = persistence.latest_curve_sets(include_raw=include_raw)
+    return to_json([wire_curve(entry) for entry in curves])
+
+
+@app.route("/curves/<provider>")
+@app.route("/market-data/curves/<provider>")
+def get_provider_curves(provider):
+    response.content_type = "application/json"
+    normalized = provider.strip().upper()
+    if normalized not in scheduler.wired_providers():
+        response.status = 404
+        return to_json({"error": f"unknown or unwired provider: {normalized}"})
+    include_raw = (request.query.raw or "").strip() in ("1", "true")
+    curves = persistence.latest_curve_sets(provider=normalized, include_raw=include_raw)
+    return to_json([wire_curve(entry) for entry in curves])
+
+
+@app.route("/curves/refresh", method="POST")
+@app.route("/market-data/curves/refresh", method="POST")
+def refresh_curves():
+    response.content_type = "application/json"
+    curve = (request.query.curve or "").strip().upper() or None
+    provider = (request.query.provider or "").strip().upper() or None
+    if curve is not None:
+        entry, error, status = scheduler.refresh_curve(curve, provider)
+        if error is not None:
+            response.status = status
+            log.warning("manual_curve_refresh_rejected", curve=curve,
+                        provider=provider, reason=error)
+            return to_json({"error": error, "curve": curve})
+        log.info("manual_curve_refresh", curve=curve, provider=provider)
+        return to_json(wire_curve(entry))
+    refreshed, skipped = scheduler.refresh_curves(provider)
+    log.info("manual_curve_refresh_all", provider=provider,
+             refreshed=len(refreshed), skipped=skipped)
+    return to_json({"refreshed": refreshed, "skipped": skipped})
 
 
 @app.route("/quotes")

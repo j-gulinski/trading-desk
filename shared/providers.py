@@ -33,7 +33,7 @@ PROVIDERS = {
     NBP: {
         "group": GROUP_OFFICIAL,
         "quotes": {"FX": QuoteGrade.REFERENCE, "COMMODITY": QuoteGrade.REFERENCE},
-        "serves_curves": False,
+        "serves_curves": True,
     },
     ECB: {
         "group": GROUP_OFFICIAL,

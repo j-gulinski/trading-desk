@@ -1,22 +1,27 @@
 import math
 import time
 import uuid
+from datetime import datetime, time as day_time, timezone
+from decimal import Decimal
 
 import structlog
 from sqlalchemy.exc import IntegrityError
 
 from shared.active_set import load_active_set
 from shared.config import DEFAULT_QUOTE_PROVIDER
+from shared.curve_registry import latest_curve_sets, load_curve
 from shared.db import session_scope
 from shared.freshness import FreshnessState
+from shared.pricing_math import bond_pv, european_option_pv, irs_pv
 from shared.providers import supports_quotes
 from shared.symbols import (
     CURVE_PRICED_ASSET_CLASSES,
     SPOT_ASSET_CLASSES,
     is_valid_symbol,
+    watchlist_spot_currencies,
     watchlist_spot_symbols,
 )
-from shared.term_schemas import validate_terms
+from shared.term_schemas import DEFAULT_VOLATILITY, validate_terms
 from shared.audit import write_audit
 from shared.logging_config import get_logger
 from app import action_queue, market_state, repository
@@ -35,13 +40,16 @@ def _audit(session, event_type, message, intent, severity="INFO", payload=None):
                 severity=severity, payload=payload, session=session)
 
 
-def _resolve_terms(session, intent, active):
+def _resolve_terms(session, intent, active, curves=()):
     asset_class = intent.get("asset_class")
     custom = intent.get("terms")
     if custom is not None:
         if not is_valid_symbol(intent.get("symbol")):
             return None, "invalid custom instrument symbol"
-        return validate_terms(asset_class, custom, watchlist_spot_symbols(session))
+        return validate_terms(asset_class, custom, watchlist_spot_symbols(session),
+                              curves, watchlist_spot_currencies(session))
+    if asset_class in CURVE_PRICED_ASSET_CLASSES:
+        return None, f"{asset_class} requires instrument terms"
     entry = active.get(intent.get("symbol"))
     if entry is None or entry.asset_class != asset_class or not entry.tradeable:
         return None, "symbol is not tradeable for this asset class"
@@ -85,6 +93,127 @@ def _resolve_execution(session, intent, provider, side, allow_stale=False):
     return quote, price, None
 
 
+def _as_of_timestamp(as_of_text):
+    return datetime.combine(
+        datetime.strptime(as_of_text, "%Y-%m-%d").date(), day_time(0, 0),
+        tzinfo=timezone.utc,
+    )
+
+
+def _load_terms_curves(terms):
+    curves = {}
+    for field in ("discount_curve", "projection_curve"):
+        name = terms.get(field)
+        if name is None:
+            continue
+        curve = load_curve(name)
+        if curve is None:
+            return None, f"no stored {name} curve set is available yet"
+        curves[field] = curve
+    return curves, None
+
+
+def _model_price(terms, curves, underlying_mid=None):
+    discount = curves["discount_curve"]
+    if terms["asset_class"] == "IRS":
+        value = irs_pv(terms, discount, curves.get("projection_curve"))
+    elif terms["asset_class"] == "BOND":
+        value = bond_pv(terms, discount)
+    else:
+        value = european_option_pv(
+            terms, underlying_mid, discount,
+            terms.get("volatility", DEFAULT_VOLATILITY),
+        )
+    return Decimal(str(value))
+
+
+def _deviation_scale(terms, price):
+    if terms["asset_class"] == "IRS":
+        return Decimal(str(terms["notional"]))
+    return abs(price)
+
+
+def _model_deviation_error(terms, price, seen):
+    if seen in (None, ""):
+        return None
+    scale = _deviation_scale(terms, price)
+    if not scale:
+        return None
+    try:
+        seen_price = Decimal(str(seen))
+    except (ArithmeticError, ValueError):
+        return None
+    deviation = abs(price - seen_price) / scale * 100
+    if deviation > Decimal(str(TRADE_PRICE_TOLERANCE_PCT)):
+        return (
+            f"model value moved {deviation:.2f}% of "
+            f"{'notional' if terms['asset_class'] == 'IRS' else 'its value'} from the "
+            f"{seen} shown to you (limit {TRADE_PRICE_TOLERANCE_PCT}%)"
+        )
+    return None
+
+
+def _freeze_curve_provenance(terms, curves):
+    for field, curve in curves.items():
+        terms[f"{field}_provider"] = curve["provider"]
+        terms[f"{field}_as_of"] = curve["as_of_date"]
+
+
+def _validate_curve_open(session, intent, active, terms):
+    asset_class = terms["asset_class"]
+    if asset_class == "IRS":
+        if intent.get("side") != "BUY":
+            return None, "an IRS position is directed by its direction term — submit as BUY"
+    elif intent.get("side") not in ("BUY", "SELL"):
+        return None, "side must be BUY or SELL"
+    if not market_state.is_parseable_price(intent.get("client_seen_price")):
+        return None, "client_seen_price must be a number"
+    curves, curve_error = _load_terms_curves(terms)
+    if curve_error is not None:
+        return None, curve_error
+
+    underlying_quote = None
+    provider = None
+    if asset_class == "EUROPEAN_OPTION":
+        underlying = terms["underlying_symbol"]
+        entry = active.get(underlying)
+        underlying_intent = {
+            "asset_class": entry.asset_class if entry else "EQUITY",
+            "market_data_provider": intent.get("market_data_provider"),
+            "symbol": underlying,
+        }
+        provider, provider_error = _resolve_provider(underlying_intent, active)
+        if provider_error is not None:
+            return None, provider_error
+        underlying_quote, state = market_state.current_quote(session, provider, underlying)
+        if state is FreshnessState.MISSING:
+            return None, f"{provider} has no current quote for {underlying}"
+        if state is FreshnessState.STALE:
+            return None, f"the {provider} quote for {underlying} is stale"
+
+    price = _model_price(
+        terms, curves,
+        underlying_mid=underlying_quote.mid if underlying_quote else None,
+    )
+    deviation_error = _model_deviation_error(terms, price, intent.get("client_seen_price"))
+    if deviation_error is not None:
+        return None, deviation_error
+    _freeze_curve_provenance(terms, curves)
+
+    if underlying_quote is not None:
+        quote = market_state.ModelQuote(
+            terms["currency"], underlying_quote.state,
+            provider_timestamp=underlying_quote.provider_timestamp,
+            snapshot_id=underlying_quote.snapshot_id,
+        )
+    else:
+        quote = market_state.ModelQuote(
+            terms["currency"], FreshnessState.LIVE,
+            provider_timestamp=_as_of_timestamp(curves["discount_curve"]["as_of_date"]),
+        )
+    return {"terms": terms, "provider": provider, "quote": quote, "price": price}, None
+
+
 def validate_open(session, intent):
     book_id = _parse_uuid(intent.get("book_id"))
     book = repository.get_active_book(session, book_id) if book_id else None
@@ -96,21 +225,23 @@ def validate_open(session, intent):
             f"not {intent.get('asset_class')}"
         )
     asset_class = intent.get("asset_class")
-    if asset_class in CURVE_PRICED_ASSET_CLASSES:
-        return None, f"{asset_class} needs a rate curve and no curve source is wired"
     active = load_active_set(session)
-    terms, term_error = _resolve_terms(session, intent, active)
+    curves = latest_curve_sets(session) if asset_class in CURVE_PRICED_ASSET_CLASSES \
+        else ()
+    terms, term_error = _resolve_terms(session, intent, active, curves)
     if terms is None:
         return None, term_error
+    quantity = intent.get("quantity")
+    if isinstance(quantity, bool) or not isinstance(quantity, (int, float)) \
+            or not math.isfinite(quantity) or quantity <= 0:
+        return None, "quantity must be a positive number"
+    if asset_class in CURVE_PRICED_ASSET_CLASSES:
+        return _validate_curve_open(session, intent, active, terms)
     provider, provider_error = _resolve_provider(intent, active)
     if provider_error is not None:
         return None, provider_error
     if intent.get("side") not in ("BUY", "SELL"):
         return None, "side must be BUY or SELL"
-    quantity = intent.get("quantity")
-    if isinstance(quantity, bool) or not isinstance(quantity, (int, float)) \
-            or not math.isfinite(quantity) or quantity <= 0:
-        return None, "quantity must be a positive number"
     if not market_state.is_parseable_price(intent.get("client_seen_price")):
         return None, "client_seen_price must be a number"
     quote, price, execution_error = _resolve_execution(
@@ -175,11 +306,48 @@ def _open(intent):
 CLOSING_SIDE = {"BUY": "SELL", "SELL": "BUY"}
 
 
+def _validate_curve_close(session, intent, trade):
+    terms = dict(trade.trade_metadata or {})
+    terms.setdefault("asset_class", trade.asset_class)
+    curves, curve_error = _load_terms_curves(terms)
+    if curve_error is not None:
+        return None, curve_error
+    provider = None
+    underlying_quote = None
+    if trade.asset_class == "EUROPEAN_OPTION":
+        provider = trade.market_data_provider or DEFAULT_QUOTE_PROVIDER
+        underlying = terms.get("underlying_symbol")
+        underlying_quote, state = market_state.current_quote(session, provider, underlying)
+        if state is FreshnessState.MISSING:
+            return None, f"{provider} has no current quote for {underlying}"
+    price = _model_price(
+        terms, curves,
+        underlying_mid=underlying_quote.mid if underlying_quote else None,
+    )
+    deviation_error = _model_deviation_error(terms, price, intent.get("client_seen_price"))
+    if deviation_error is not None:
+        return None, deviation_error
+    if underlying_quote is not None:
+        quote = market_state.ModelQuote(
+            trade.trade_currency, underlying_quote.state,
+            provider_timestamp=underlying_quote.provider_timestamp,
+            snapshot_id=underlying_quote.snapshot_id,
+        )
+    else:
+        quote = market_state.ModelQuote(
+            trade.trade_currency, FreshnessState.LIVE,
+            provider_timestamp=_as_of_timestamp(curves["discount_curve"]["as_of_date"]),
+        )
+    return {"trade": trade, "provider": provider, "quote": quote, "price": price}, None
+
+
 def validate_close(session, intent):
     trade_id = _parse_uuid(intent.get("trade_id"))
     trade = repository.active_trade(session, trade_id) if trade_id else None
     if trade is None:
         return None, "trade is not open"
+    if trade.asset_class in CURVE_PRICED_ASSET_CLASSES:
+        return _validate_curve_close(session, intent, trade)
     provider = trade.market_data_provider or DEFAULT_QUOTE_PROVIDER
     quote, price, error = _resolve_execution(
         session, {**intent, "symbol": trade.symbol}, provider,

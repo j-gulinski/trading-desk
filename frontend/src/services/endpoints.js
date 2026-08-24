@@ -25,6 +25,8 @@ export const endpoints = {
         { limit, raw: raw ? 1 : null },
       ),
     fxRates: (to) => withQuery('/api/market-data/fx/rates', { to }),
+    curves: (raw = false) => withQuery('/api/market-data/curves', { raw: raw ? 1 : null }),
+    curvesRefresh: (curve) => withQuery('/api/market-data/curves/refresh', { curve }),
     watchlist: '/api/market-data/watchlist',
     watchlistItem: (symbol, provider) =>
       withQuery(`/api/market-data/watchlist/${encodeURIComponent(symbol)}`, { provider }),
@@ -34,6 +36,7 @@ export const endpoints = {
     stream: '/api/pricing/valuation-stream',
     valuations: '/api/pricing/valuations',
     bookRisk: '/api/pricing/book-risk',
+    price: '/api/pricing/price',
   },
   books: {
     list: '/api/books/books',
@@ -51,5 +54,6 @@ export const endpoints = {
     submit: '/api/trade-action/trade-actions',
     queueStatus: '/api/trade-action/queue/status',
     instruments: '/api/trade-action/instruments',
+    termSchemas: '/api/trade-action/instruments/term-schemas',
   },
 }

@@ -7,9 +7,14 @@ from app.config import SERVICE_NAME, VALUATION_STREAM_QUEUE_SIZE
 from shared.config import DEFAULT_QUOTE_PROVIDER
 from app.schemas import ScenarioRequest
 from app.valuation_engine import price_instrument
+from shared.curve_registry import latest_curve_sets
 from shared.db import session_scope
 from shared.active_set import load_active_set
-from shared.symbols import SPOT_ASSET_CLASSES, watchlist_spot_symbols
+from shared.symbols import (
+    SPOT_ASSET_CLASSES,
+    watchlist_spot_currencies,
+    watchlist_spot_symbols,
+)
 from shared.term_schemas import validate_terms
 from app.scenario import run_scenario
 from shared.serialization import to_json
@@ -39,8 +44,11 @@ def price_preview():
     if body.get("terms") is not None:
         with session_scope() as session:
             underlying_choices = watchlist_spot_symbols(session)
+            underlying_currencies = watchlist_spot_currencies(session)
+            curves = latest_curve_sets(session)
         terms, error = validate_terms(body.get("asset_class"), body["terms"],
-                                      underlying_choices)
+                                      underlying_choices, curves,
+                                      underlying_currencies)
         if terms is None:
             log.warning("price_preview_rejected", symbol=symbol,
                         asset_class=body.get("asset_class"), reason=error)
@@ -66,17 +74,21 @@ def price_preview():
         return to_json({
             "error": f"{provider or DEFAULT_QUOTE_PROVIDER} has no current quote for {symbol}"
             if terms["asset_class"] in SPOT_ASSET_CLASSES
-            else f"no curve source is wired for {terms['asset_class']}",
+            else "the selected curve (or the underlying quote) is not available yet",
             "symbol": symbol,
         })
     price, multiplier = priced
+    needs_spot = (
+        terms["asset_class"] in SPOT_ASSET_CLASSES
+        or terms["asset_class"] == "EUROPEAN_OPTION"
+    )
     log.info("price_preview", symbol=symbol, asset_class=terms["asset_class"],
              provider=provider, price=str(price))
     return to_json({
         "symbol": symbol,
         "asset_class": terms["asset_class"],
         "currency": terms.get("currency", "USD"),
-        "market_data_provider": provider or DEFAULT_QUOTE_PROVIDER,
+        "market_data_provider": (provider or DEFAULT_QUOTE_PROVIDER) if needs_spot else None,
         "price": price,
         "multiplier": multiplier,
     })

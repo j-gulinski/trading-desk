@@ -1,0 +1,119 @@
+###############################################################################
+# Curves: FRED + ECB yield curves, the NBP proxy, curve provenance, and
+# curve-priced trading with selectable discount/projection curves.
+#
+# It covers the /curves routes with per-point provenance and raw source
+# responses, the curve ops surface, a manual curve refresh, the term schemas
+# with their curve catalog, model-priced IRS open/close on currency-consistent
+# curves, and the guards that reject a currency or tenor mismatch.
+#
+# Prerequisites: the full stack is running and FRED_API_KEY is set (ECB curves
+# and the NBP proxy work keyless). Curve sets load within a minute of boot;
+# FRED DGS series lag 1-2 business days, the OECD Poland anchors ~2 months.
+###############################################################################
+
+@marketData = http://localhost:8001
+@pricing    = http://localhost:8002
+@actions    = http://localhost:8008
+@books      = http://localhost:8004
+
+# ============================ CURVE OPS SURFACE ============================
+
+### FRED is wired for curves (no quotes); ECB and NBP list their curves too
+GET {{marketData}}/providers
+
+### FRED runtime: key budget, publication window, last as-of per curve
+GET {{marketData}}/providers/FRED/health
+
+# ============================== CURVE ROUTES ===============================
+
+### Every latest curve set: points with tenor, published percent rate,
+### source series and source as-of; NULL series marks an interpolated point
+GET {{marketData}}/market-data/curves
+
+### One provider's sets via the provider route
+GET {{marketData}}/market-data/curves/ECB
+
+### The raw source response behind each set — the reproducibility drill
+GET {{marketData}}/market-data/curves/FRED?raw=1
+
+### Curve sets ride the snapshot next to the spot board
+GET {{marketData}}/market-data/snapshot
+
+### Run separately: curve_tick events arrive on the same stream as quotes
+GET {{marketData}}/market-data/stream
+
+### Manual refetch of one curve within the provider budget
+POST {{marketData}}/market-data/curves/refresh?curve=USD_TREASURY
+
+### Whole-provider curve refresh
+POST {{marketData}}/market-data/curves/refresh?provider=ECB
+
+# ===================== TERM SCHEMAS AND THE CURVE CATALOG ==================
+
+### IRS/BOND/EUROPEAN_OPTION schemas now carry curve pickers; the curve
+### catalog names currency, index tenor and as-of for an informed choice
+GET {{actions}}/instruments/term-schemas
+
+# ========================= MODEL-PRICED EXECUTION ==========================
+
+### An IRS book for the flow
+# @name irsBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "CURVE_DESK_{{$timestamp}}", "expected_asset_class": "IRS" }
+
+###
+@irsBookId = {{irsBook.response.body.$.book_id}}
+
+### Preview the model value the ticket shows (this is the client_seen_price)
+# @name irsPreview
+POST {{pricing}}/price
+Content-Type: application/json
+
+{ "asset_class": "IRS", "symbol": "IRS-PLN-5Y", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 0.045, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_NBP_BASE", "projection_curve": "PLN_REF" } }
+
+###
+@irsSeen = {{irsPreview.response.body.$.price}}
+
+### Open the PLN swap: server recomputes the PV from the stored curves and
+### freezes both curve as-ofs into the trade terms
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "irs-open-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-PLN-5Y", "side": "BUY", "quantity": 1, "client_seen_price": "{{irsSeen}}", "currency": "PLN", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 0.045, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_NBP_BASE", "projection_curve": "PLN_REF" } }
+
+# ============================ THE CURVE GUARDS =============================
+
+### A PLN swap cannot discount on USD_TREASURY — rejected with the reason (422)
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "irs-guard-ccy-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-PLN-BAD", "side": "BUY", "quantity": 1, "client_seen_price": "0", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 0.045, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "USD_TREASURY", "projection_curve": "PLN_REF" } }
+
+### A 6M floating leg cannot project off the 3M-index PLN_REF curve (422)
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "irs-guard-tenor-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-PLN-BAD", "side": "BUY", "quantity": 1, "client_seen_price": "0", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 0.045, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "6M", "discount_curve": "PLN_NBP_BASE", "projection_curve": "PLN_REF" } }
+
+# ===================== THE TRADE AND ITS FROZEN CURVES =====================
+
+### The trade carries MODEL_PV provenance: executed PV, frozen curve names
+### with their as-ofs in terms, no quote provider
+GET http://localhost:8006/trades?asset_class=IRS&limit=5
+
+### Valuations follow the same curves live (curve_tick revalues the swap)
+GET {{pricing}}/valuations
+
+# ================================ CLEANUP ==================================
+
+### Close everything in the guard book, then deactivate it
+POST {{actions}}/trade-actions/close-all
+Content-Type: application/json
+
+{ "close_reason": "CURVE_SCENARIO_CLEANUP" }
+
+###
+DELETE {{books}}/books/{{irsBookId}}

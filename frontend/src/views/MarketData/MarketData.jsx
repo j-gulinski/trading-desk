@@ -34,6 +34,7 @@ import WatchlistSearch from '../../components/marketdata/WatchlistSearch.jsx'
 import ProviderStrategyStrip from '../../components/marketdata/ProviderStrategyStrip.jsx'
 import MarketBenchmark from '../../components/marketdata/MarketBenchmark.jsx'
 import OfficialRates from '../../components/marketdata/OfficialRates.jsx'
+import CurveSection from '../../components/marketdata/CurveSection.jsx'
 import QuoteHistoryPanel from '../../components/marketdata/QuoteHistoryPanel.jsx'
 import { providerLabel } from '../../config/providers.js'
 
@@ -69,7 +70,7 @@ function watchedProvidersOf(items) {
 }
 
 export default function MarketData() {
-  const { instruments, tickCount, status, seedStatus, dropRows } = useMarketFeedContext()
+  const { instruments, curves, tickCount, status, seedStatus, dropRows } = useMarketFeedContext()
   const watchlist = useWatchlist()
   const { now } = useElapsedTime()
   const providersPoll = usePolling(
@@ -277,6 +278,8 @@ export default function MarketData() {
           <EmptyState message={boardEmptyMessage()} />
         )}
       </section>
+
+      <CurveSection curves={curves} />
 
       {selectedRow && (
         <QuoteHistoryPanel row={selectedRow} onClose={() => setSelectedId(null)} />

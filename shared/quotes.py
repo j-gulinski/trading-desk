@@ -25,9 +25,44 @@ class NormalizedQuote:
     price_basis: PriceBasis
     quote_grade: QuoteGrade
     previous_close: Decimal | None
+    day_open: Decimal | None
+    day_high: Decimal | None
+    day_low: Decimal | None
+    week52_high: Decimal | None
+    week52_low: Decimal | None
+    volume: Decimal | None
+    average_volume: Decimal | None
     provider_timestamp: datetime | None
     received_at: datetime
     raw_payload: dict
+
+
+WIRE_QUOTE_FIELDS = (
+    "provider",
+    "symbol",
+    "asset_class",
+    "currency",
+    "bid",
+    "ask",
+    "last",
+    "mid",
+    "price_basis",
+    "quote_grade",
+    "previous_close",
+    "day_open",
+    "day_high",
+    "day_low",
+    "week52_high",
+    "week52_low",
+    "volume",
+    "average_volume",
+    "provider_timestamp",
+    "received_at",
+)
+
+
+def wire_quote_fields(quote):
+    return {field: getattr(quote, field) for field in WIRE_QUOTE_FIELDS}
 
 
 def as_decimal(value):
@@ -38,7 +73,8 @@ def as_decimal(value):
 
 def build_quote(provider, symbol, asset_class, quote_grade, received_at, raw_payload,
                 currency=None, bid=None, ask=None, last=None, reference_mid=None,
-                previous_close=None,
+                previous_close=None, day_open=None, day_high=None, day_low=None,
+                week52_high=None, week52_low=None, volume=None, average_volume=None,
                 provider_timestamp=None):
     bid = as_decimal(bid)
     ask = as_decimal(ask)
@@ -69,6 +105,13 @@ def build_quote(provider, symbol, asset_class, quote_grade, received_at, raw_pay
         price_basis=price_basis,
         quote_grade=quote_grade,
         previous_close=as_decimal(previous_close),
+        day_open=as_decimal(day_open),
+        day_high=as_decimal(day_high),
+        day_low=as_decimal(day_low),
+        week52_high=as_decimal(week52_high),
+        week52_low=as_decimal(week52_low),
+        volume=as_decimal(volume),
+        average_volume=as_decimal(average_volume),
         provider_timestamp=provider_timestamp,
         received_at=received_at,
         raw_payload=raw_payload,

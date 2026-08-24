@@ -57,6 +57,30 @@ def current_quote(session, provider, symbol):
     return Quote(row, state, snapshot_id), state
 
 
+class ModelQuote:
+    """Quote-shaped record for a model-priced (curve) execution — what insert_trade
+    and the audit payload read."""
+
+    def __init__(self, currency, state, provider_timestamp=None, snapshot_id=None):
+        self.currency = currency
+        self.state = state
+        self.provider_timestamp = provider_timestamp
+        self.snapshot_id = snapshot_id
+
+    def executed_basis(self, side):
+        return "MODEL_PV"
+
+
+def model_deviation_percent(executed, seen):
+    if seen in (None, "") or executed is None or executed == 0:
+        return None
+    try:
+        seen_price = Decimal(str(seen))
+    except (ArithmeticError, ValueError):
+        return None
+    return abs(executed - seen_price) / abs(executed) * 100
+
+
 def is_parseable_price(seen):
     if seen in (None, ""):
         return True

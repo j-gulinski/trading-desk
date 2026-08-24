@@ -85,6 +85,7 @@ function tradeOf(data, bookNames = new Map()) {
     closedAtMs: toTime(data.closed_at),
     closePrice: toNum(data.close_price),
     closeReason: data.close_reason ?? null,
+    terms: data.terms && typeof data.terms === 'object' ? data.terms : null,
   }
 
   trade.latestValuation = snapshotValuationOf(data.latest_valuation, trade)

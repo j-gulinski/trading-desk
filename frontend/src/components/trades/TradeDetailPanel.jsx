@@ -204,6 +204,20 @@ export default function TradeDetailPanel({
                 {trade.entryPriceAtMs == null ? null : formatDateTime(trade.entryPriceAtMs)}
               </DetailField>
               <DetailField label="Opened">{formatDateTime(trade.openedAtMs)}</DetailField>
+              {trade.terms != null && Object.keys(trade.terms).length > 0 && (
+                <DetailField label="Terms">
+                  <dl className="trade-detail__terms">
+                    {Object.entries(trade.terms)
+                      .filter(([key]) => key !== 'asset_class')
+                      .map(([key, value]) => (
+                        <div key={key}>
+                          <dt>{key.replaceAll('_', ' ')}</dt>
+                          <dd>{String(value)}</dd>
+                        </div>
+                      ))}
+                  </dl>
+                </DetailField>
+              )}
               {row.lifecycle === 'CLOSED' && (
                 <>
                   <DetailField label="Closed">{formatDateTime(trade.closedAtMs)}</DetailField>

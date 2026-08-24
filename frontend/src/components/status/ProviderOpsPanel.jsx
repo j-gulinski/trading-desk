@@ -57,6 +57,13 @@ function marketSessionText(runtime) {
   ].filter(Boolean).join(' · ')
 }
 
+function latestCurveAsOf(runtime) {
+  const asOfs = Object.values(runtime?.curve_strategy?.curves ?? runtime?.strategy?.curves ?? {})
+    .filter(Boolean)
+    .sort()
+  return asOfs.length > 0 ? asOfs[asOfs.length - 1] : null
+}
+
 function Fact({ label, children }) {
   return (
     <div>
@@ -82,6 +89,9 @@ function ProviderCard({ provider, now }) {
   const budget = runtime?.budget ?? {}
   const strategy = runtime?.strategy ?? {}
   const keyless = runtime?.keyless === true
+  const curveNames = Array.isArray(runtime?.curves) ? runtime.curves : []
+  const curveAsOfs = runtime?.curve_strategy?.curves ?? strategy?.curves ?? {}
+  const curveOnly = curveNames.length > 0 && (runtime?.active_symbols?.length ?? 0) === 0
   const minuteUsed = Math.max(0, (budget.capacity ?? 0) - (budget.tokens_available ?? 0))
   const cooldown = runtime?.cooldown_seconds_left ?? 0
   const lastSuccessMs = Date.parse(runtime?.last_success_at ?? '')
@@ -114,19 +124,30 @@ function ProviderCard({ provider, now }) {
       </header>
       <p className="provider-card__strategy">{providerScheduleText(provider)}</p>
       <dl className="provider-card__facts">
-        {keyless ? (
+        {curveOnly ? (
+          <Fact label="Last as-of">{latestCurveAsOf(runtime) ?? '—'}</Fact>
+        ) : keyless ? (
           <Fact label="Last fixing">{strategy.last_as_of ?? '—'}</Fact>
         ) : (
           <Fact label="Market">{marketSessionText(runtime)}</Fact>
         )}
         <Fact label="Polling">
-          {runtime?.active_symbols?.length ?? 0} symbols
+          {curveOnly
+            ? `${curveNames.length} ${curveNames.length === 1 ? 'curve' : 'curves'}`
+            : `${runtime?.active_symbols?.length ?? 0} symbols`}
         </Fact>
-        <Fact label={keyless ? 'Last read' : 'Last quote'}>
+        <Fact label={keyless || curveOnly ? 'Last read' : 'Last quote'}>
           {Number.isFinite(lastSuccessMs) ? formatElapsedTime(now - lastSuccessMs) : '—'}
         </Fact>
         <Fact label="Calls today">{formatNumber(budget.requests_today ?? 0)}</Fact>
       </dl>
+      {curveNames.length > 0 && (
+        <p className="provider-card__note">
+          {curveNames
+            .map((name) => `${name} ${curveAsOfs[name] ?? 'awaiting first set'}`)
+            .join(' · ')}
+        </p>
+      )}
       {budget.capacity != null && (
         <BudgetGauge
           label="Rate limit"

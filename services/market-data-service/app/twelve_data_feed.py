@@ -32,6 +32,7 @@ from app.normalizer import normalize_twelve_data_quote
 from app.provider_runtime import ProviderRuntime
 from app.publisher import publish_quote
 from app.quote_audit import audit_first_quote
+from shared.quotes import wire_quote_fields
 
 log = get_logger(SERVICE_NAME)
 
@@ -98,19 +99,7 @@ def _wire_quote(quote):
     entry = runtime.active_entry(quote.symbol)
     origin = entry.origin(TWELVE_DATA) if entry else {}
     return {
-        "provider": quote.provider,
-        "symbol": quote.symbol,
-        "asset_class": quote.asset_class,
-        "currency": quote.currency,
-        "bid": quote.bid,
-        "ask": quote.ask,
-        "last": quote.last,
-        "mid": quote.mid,
-        "price_basis": quote.price_basis,
-        "quote_grade": quote.quote_grade,
-        "previous_close": quote.previous_close,
-        "provider_timestamp": quote.provider_timestamp,
-        "received_at": quote.received_at,
+        **wire_quote_fields(quote),
         "event_time": quote.received_at,
         **_classifier(quote.symbol),
         "watched": bool(origin.get("watched")),

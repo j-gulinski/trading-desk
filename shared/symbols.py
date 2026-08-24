@@ -29,3 +29,11 @@ def watchlist_spot_symbols(session):
         for item in watchlist_items(session)
         if item.asset_class in SPOT_ASSET_CLASSES
     ]
+
+
+def watchlist_spot_currencies(session):
+    return {
+        item.symbol: item.currency
+        for item in watchlist_items(session)
+        if item.asset_class in SPOT_ASSET_CLASSES
+    }

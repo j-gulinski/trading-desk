@@ -63,7 +63,9 @@ Scheduler mechanics that are not tuning surface (active-set refresh 15 s, market
 10 min, HTTP timeout 10 s, threshold multiplier 3, cooldowns, symbol-search cache 10 min,
 history-endpoint bounds) are plain constants in the service's `app/config.py`. The same rule
 covers the official-source publication facts: the NBP window (11:45–12:20 Warsaw), the ECB
-window (15:55–16:45 Frankfurt), the in-window 5-min retry, the hourly off-window confirmation
+EXR window (15:55–16:45 Frankfurt), the ECB yield-curve window (11:55–12:45 Frankfurt), the
+FRED window (16:15–17:30 New York), the weekly OECD-series refetch, the in-window 5-min
+retry, the hourly off-window confirmation
 poll, and the 4-hour publication grace are source facts and freshness policy, not tuning —
 they change only when a probe shows the source itself changed. `tzdata` is in
 `requirements.txt` solely so `zoneinfo` can evaluate those two source timezones inside the
@@ -75,6 +77,14 @@ they change only when a probe shows the source itself changed. `tzdata` is in
 | --- | --- | --- | --- |
 | `NBP_REFERENCE_SYMBOLS` | `EURPLN,USDPLN,XAUPLN_G` | market-data-service | The default reference universe for NBP: the two fixing pairs currency conversion actually needs plus the official gold fixing (`XAUPLN_G` is PLN per **1 g** — deliberately not `XAUPLN`, which would read as PLN per troy ounce). Settlement currencies of open trades auto-join as `<CCY>PLN` beyond these; a currency table A does not carry is simply absent, never invented. |
 | `ECB_REFERENCE_SYMBOLS` | `EURUSD,EURPLN` | market-data-service | The default reference universe for ECB: `EURUSD` anchors the resolver's cross-via-EUR path and `EURPLN` powers the NBP-vs-ECB cross-check chip. Open-trade currencies auto-join as `EUR<CCY>` — ECB quotes ~30 currencies against EUR, so one hop covers nearly everything. |
+| `REFERENCE_BACKFILL_DAYS` | `90` | market-data-service | How much official-fixing history a sparse reference pair backfills on boot (NBP range endpoints cap at 93 days; ECB serves `lastNObservations`). 90 matches `SNAPSHOT_RETENTION_DAYS`, so the drill shows a full retention window of daily fixings without outliving the sweep. |
+
+## Curves — FRED & NBP proxy
+
+| Variable | Default | Read by | Why |
+| --- | --- | --- | --- |
+| `FRED_PROVIDER_LIMIT_PER_MINUTE` | `120` | market-data-service | Published FRED allowance; the shared 90% ceiling derives a 108/min bucket. A full curve round is 13 requests, so the bucket only matters against manual-refresh storms. |
+| `NBP_REFERENCE_RATE_PERCENT` | `4.25` | market-data-service | The level of the `PLN_NBP_BASE` proxy curve. Config-sourced because NBP publishes its reference rate on nbp.pl but not through the API — update it when the MPC moves; the curve is labeled `POLICY_PROXY` so the origin is never mistaken for market data. |
 
 ## Market data — Twelve Data
 

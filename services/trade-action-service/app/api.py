@@ -6,6 +6,7 @@ from bottle import request, response
 from app import action_queue, trade_processor
 from app.config import QUOTE_PROVIDER_CHOICES
 from shared.active_set import load_active_set
+from shared.curve_registry import latest_curve_sets
 from shared.db import session_scope
 from shared.providers import supports_quotes
 from shared.symbols import watchlist_spot_symbols
@@ -82,7 +83,11 @@ def instruments():
 def term_schemas():
     with session_scope() as session:
         underlying_choices = watchlist_spot_symbols(session)
-    return _json(public_term_schemas(underlying_choices))
+        curves = latest_curve_sets(session)
+    return _json({
+        "schemas": public_term_schemas(underlying_choices, curves),
+        "curves": curves,
+    })
 
 
 @app.route("/trade-actions", method="POST")

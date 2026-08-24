@@ -10,6 +10,7 @@ from app.clients.base import (
 )
 from app.config import (
     RATE_LIMIT_DEFAULT_COOLDOWN_SECONDS,
+    REFERENCE_BACKFILL_DAYS,
     REFERENCE_CONFIRM_SECONDS,
     REFERENCE_LOOP_SLEEP_SECONDS,
     REFERENCE_SET_REFRESH_SECONDS,
@@ -19,21 +20,28 @@ from app.config import (
 )
 from app.publisher import publish_quote
 from app.quote_audit import audit_first_quote
+from shared.quotes import wire_quote_fields
 
 log = get_logger(SERVICE_NAME)
 
 
 class ReferenceFeed:
-    def __init__(self, provider, runtime, calendar, universe_fn, fetch_fn):
+    def __init__(self, provider, runtime, calendar, universe_fn, fetch_fn,
+                 backfill_fn=None):
         self.provider = provider
         self.runtime = runtime
         self.calendar = calendar
         self.universe_fn = universe_fn
         self.fetch_fn = fetch_fn
+        self.backfill_fn = backfill_fn
         self._universe = frozenset()
         self._universe_loaded_at = 0.0
-        self._last_fetch = 0.0
+        # None, not 0.0: monotonic() starts near zero on a freshly booted machine,
+        # which would silently defer the first fetch by a whole confirm interval
+        self._last_fetch = None
         self._latest_as_of = None
+        self._backfill_retry_at = 0.0
+        self._backfill_done = backfill_fn is None
 
     def reload_universe(self):
         self._universe = self.universe_fn()
@@ -53,19 +61,7 @@ class ReferenceFeed:
 
     def _wire_quote(self, quote, classifier):
         return {
-            "provider": quote.provider,
-            "symbol": quote.symbol,
-            "asset_class": quote.asset_class,
-            "currency": quote.currency,
-            "bid": quote.bid,
-            "ask": quote.ask,
-            "last": quote.last,
-            "mid": quote.mid,
-            "price_basis": quote.price_basis,
-            "quote_grade": quote.quote_grade,
-            "previous_close": quote.previous_close,
-            "provider_timestamp": quote.provider_timestamp,
-            "received_at": quote.received_at,
+            **wire_quote_fields(quote),
             "event_time": quote.received_at,
             **classifier,
             "watched": False,
@@ -128,6 +124,35 @@ class ReferenceFeed:
                 log.exception("reference_feed_tick_failed", provider=self.provider)
             time.sleep(REFERENCE_LOOP_SLEEP_SECONDS)
 
+    def _maybe_backfill(self):
+        # runs only after a successful live round, so the latest fixing is already
+        # stored and the backfill stays strictly older than it
+        if self._backfill_done or self._latest_as_of is None:
+            return
+        if time.monotonic() < self._backfill_retry_at:
+            return
+        sparse = persistence.sparse_history_symbols(self.provider,
+                                                   sorted(self.universe()))
+        if not sparse:
+            self._backfill_done = True
+            return
+        try:
+            quotes = self.backfill_fn(sparse, REFERENCE_BACKFILL_DAYS)
+        except ProviderDataError as error:
+            log.info("reference_backfill_unavailable", provider=self.provider,
+                     detail=error.detail)
+            self._backfill_done = True
+            return
+        except ProviderError as error:
+            log.warning("reference_backfill_failed", provider=self.provider,
+                        detail=error.detail)
+            self._backfill_retry_at = time.monotonic() + REFERENCE_CONFIRM_SECONDS
+            return
+        inserted = persistence.backfill_snapshots(self.provider, quotes)
+        self._backfill_done = True
+        log.info("reference_history_backfilled", provider=self.provider,
+                 symbols=sparse, rows=inserted, days=REFERENCE_BACKFILL_DAYS)
+
     def _poll_tick(self):
         # paused by a cooldown: wait, poll nothing
         if self.runtime.cooldown_seconds_left() > 0:
@@ -136,8 +161,12 @@ class ReferenceFeed:
         if time.monotonic() - self._universe_loaded_at >= REFERENCE_SET_REFRESH_SECONDS:
             self.reload_universe()
         # window polling until a new as-of appears, else bounded confirmation polls
-        if time.monotonic() - self._last_fetch >= self._retry_interval(utcnow()):
+        if self._last_fetch is None or (
+            time.monotonic() - self._last_fetch >= self._retry_interval(utcnow())
+        ):
             self._fetch_round()
+        # one-time history catch-up for sparse pairs
+        self._maybe_backfill()
 
     def refresh_symbol(self, symbol):
         self.reload_universe()

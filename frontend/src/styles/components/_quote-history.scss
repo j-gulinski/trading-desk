@@ -280,3 +280,14 @@
     line-height: 1.45;
   }
 }
+
+.quote-history__session {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+}
+
+.quote-history__metrics--session {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}

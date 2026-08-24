@@ -17,6 +17,12 @@ def _day_value(payload, key):
     return None if number == 0 else number
 
 
+def _session_count(payload, key):
+    # a published zero volume is a real observation, unlike a zero price
+    value = payload.get(key)
+    return None if value in (None, "") else as_decimal(value)
+
+
 def normalize_finnhub_quote(symbol, asset_class, currency, payload, received_at):
     last = payload.get("c") if isinstance(payload, dict) else None
     traded_at = payload.get("t") if isinstance(payload, dict) else None
@@ -32,6 +38,9 @@ def normalize_finnhub_quote(symbol, asset_class, currency, payload, received_at)
         currency=currency,
         last=last,
         previous_close=_day_value(payload, "pc"),
+        day_open=_day_value(payload, "o"),
+        day_high=_day_value(payload, "h"),
+        day_low=_day_value(payload, "l"),
         provider_timestamp=datetime.fromtimestamp(traded_at, tz=timezone.utc),
     )
 
@@ -105,6 +114,7 @@ def normalize_twelve_data_quote(symbol, asset_class, currency, payload, received
     quoted_at = payload.get("last_quote_at") or payload.get("timestamp")
     if not last or not quoted_at:
         raise ProviderDataError(TWELVE_DATA, f"no quote data for {symbol}")
+    week52 = payload.get("fifty_two_week") or {}
     return build_quote(
         provider=TWELVE_DATA,
         symbol=symbol,
@@ -115,5 +125,12 @@ def normalize_twelve_data_quote(symbol, asset_class, currency, payload, received
         currency=currency,
         last=last,
         previous_close=_day_value(payload, "previous_close"),
+        day_open=_day_value(payload, "open"),
+        day_high=_day_value(payload, "high"),
+        day_low=_day_value(payload, "low"),
+        week52_high=_day_value(week52, "high") if isinstance(week52, dict) else None,
+        week52_low=_day_value(week52, "low") if isinstance(week52, dict) else None,
+        volume=_session_count(payload, "volume"),
+        average_volume=_session_count(payload, "average_volume"),
         provider_timestamp=datetime.fromtimestamp(int(quoted_at), tz=timezone.utc),
     )

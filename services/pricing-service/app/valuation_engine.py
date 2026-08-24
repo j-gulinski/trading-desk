@@ -6,13 +6,17 @@ from app.pnl import compute_pnl, signed_quantity
 from app.valuation_publisher import publish_valuation
 from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
 from shared.config import DEFAULT_QUOTE_PROVIDER
-from shared.term_schemas import DEFAULT_CURVE, DEFAULT_VOLATILITY
+from shared.term_schemas import DEFAULT_VOLATILITY
 from shared.functions import first_present, get_iso_timestamp
 from shared.pricing_math import bond_pv, european_option_pv, irs_pv
 from shared.symbols import SPOT_ASSET_CLASSES
 from shared.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
+
+
+def _discount_curve_name(meta):
+    return meta.get("discount_curve") or meta.get("curve")
 
 
 def market_inputs(asset_class, symbol, meta, provider=None):
@@ -22,9 +26,11 @@ def market_inputs(asset_class, symbol, meta, provider=None):
         inputs["spot"] = cache.get_spot(provider, symbol)
     elif asset_class == "EUROPEAN_OPTION":
         inputs["spot"] = cache.get_spot(provider, meta["underlying_symbol"])
-        inputs["curve"] = cache.get_curve(meta.get("curve", DEFAULT_CURVE))
+        inputs["curve"] = cache.get_curve(_discount_curve_name(meta))
     elif asset_class in ("BOND", "IRS"):
-        inputs["curve"] = cache.get_curve(meta.get("curve", DEFAULT_CURVE))
+        inputs["curve"] = cache.get_curve(_discount_curve_name(meta))
+        if meta.get("projection_curve"):
+            inputs["projection_curve"] = cache.get_curve(meta["projection_curve"])
     return inputs
 
 
@@ -58,7 +64,10 @@ def price_from_inputs(asset_class, meta, inputs):
     if asset_class == "IRS":
         if not curve:
             return None
-        return Decimal(str(irs_pv(meta, curve))), 1
+        projection = inputs.get("projection_curve")
+        if meta.get("projection_curve") and projection is None:
+            return None
+        return Decimal(str(irs_pv(meta, curve, projection))), 1
 
     return None
 
@@ -79,6 +88,7 @@ def value_trade(trade):
         return None
     price, multiplier = priced
     spot = inputs.get("spot") or {}
+    curve = inputs.get("curve") or {}
     quantity = trade["quantity"]
     fair_value = price * quantity * multiplier
     unrealized, realized, total = compute_pnl(
@@ -98,10 +108,19 @@ def value_trade(trade):
         "unrealized_pnl": unrealized,
         "realized_pnl": realized,
         "total_pnl": total,
-        "market_data_provider": spot.get("provider"),
-        "market_data_timestamp": spot.get("provider_timestamp"),
+        "market_data_provider": spot.get("provider") or curve.get("provider"),
+        "market_data_timestamp": spot.get("provider_timestamp") or (
+            f"{curve['as_of_date']}T00:00:00+00:00" if curve.get("as_of_date") else None
+        ),
         "valuation_time": get_iso_timestamp(),
-        "valuation_payload": {"current_price": str(price), "multiplier": multiplier},
+        "valuation_payload": {
+            "current_price": str(price),
+            "multiplier": multiplier,
+            **({"discount_curve": curve.get("curve_name"),
+                "curve_as_of": curve.get("as_of_date")} if curve else {}),
+            **({"projection_curve": meta["projection_curve"]}
+               if meta.get("projection_curve") else {}),
+        },
     }
 
 
