@@ -1,14 +1,16 @@
 ###############################################################################
 # Scenario analysis — POST /scenario on pricing service
 #
-# base_price in the request is used directly — no market data stack needed.
-# Omit base_price to use the live price from the pricing service cache.
+# The pricing service still needs its live spot/curve cache. `current_price` is
+# optional: when supplied it anchors the base display price while the model
+# difference between base and shocked inputs still drives the scenario move.
 #
 # Shock convention (presentation 9, Scenario analysis dla portfela):
-#   EQUITY / COMMODITY / FUTURES / FX  — decimal percentage  (0.10 = +10%)
-#   BOND                               — basis points         (25   = +25 bps)
+#   EQUITY / COMMODITY / FX / EUROPEAN_OPTION — decimal spot % (0.10 = +10%)
+#   BOND / IRS                              — parallel curve bp (25 = +25 bp)
+# For IRS, both the discount and projection curves move by the same shock.
 #
-# scenario_pnl = scenario_value - base_value
+# BUY scenario_pnl = scenario_value - base_value; SELL reverses that sign.
 ###############################################################################
 
 @pricing = http://localhost:8002
@@ -21,14 +23,15 @@ Content-Type: application/json
   "position": {
     "side": "BUY",
     "quantity": 100,
-    "trade_price": 150.00,
+    "trade_price": 300.00,
     "instrument": {
       "asset_class": "EQUITY",
-      "symbol": "ACME",
-      "current_price": 160.00
+      "symbol": "AAPL",
+      "current_price": 310.00
     }
   },
-  "shock": 0.10
+  "shock": 0.10,
+  "market_data_provider": "FINNHUB"
 }
 
 ### EQUITY - -10% spot shock (downside)
@@ -39,14 +42,15 @@ Content-Type: application/json
   "position": {
     "side": "BUY",
     "quantity": 100,
-    "trade_price": 150.00,
+    "trade_price": 300.00,
     "instrument": {
       "asset_class": "EQUITY",
-      "symbol": "ACME",
-      "current_price": 160.00
+      "symbol": "AAPL",
+      "current_price": 310.00
     }
   },
-  "shock": -0.10
+  "shock": -0.10,
+  "market_data_provider": "FINNHUB"
 }
 
 ### COMMODITY - +10% spot shock
@@ -57,33 +61,15 @@ Content-Type: application/json
   "position": {
     "side": "BUY",
     "quantity": 10,
-    "trade_price": 2000.00,
+    "trade_price": 4500.00,
     "instrument": {
       "asset_class": "COMMODITY",
       "symbol": "XAUUSD",
-      "current_price": 2050.00
+      "current_price": 4629.00
     }
   },
-  "shock": 0.10
-}
-
-### FUTURES - -5% spot shock
-POST {{pricing}}/scenario
-Content-Type: application/json
-
-{
-  "position": {
-    "side": "BUY",
-    "quantity": 2,
-    "trade_price": 5000.00,
-    "instrument": {
-      "asset_class": "FUTURES",
-      "symbol": "ES_FUT",
-      "current_price": 5100.00,
-      "meta": { "multiplier": 50 }
-    }
-  },
-  "shock": -0.05
+  "shock": 0.10,
+  "market_data_provider": "TWELVE_DATA"
 }
 
 ### FX - +1% spot shock
@@ -102,7 +88,8 @@ Content-Type: application/json
       "meta": { "tenor_years": 1.0 }
     }
   },
-  "shock": 0.01
+  "shock": 0.01,
+  "market_data_provider": "TWELVE_DATA"
 }
 
 ### BOND - +25 bps rates shock
@@ -112,18 +99,18 @@ Content-Type: application/json
 {
   "position": {
     "side": "BUY",
-    "quantity": 10,
+    "quantity": 1,
     "trade_price": 1000.00,
     "instrument": {
       "asset_class": "BOND",
-      "symbol": "GOVT_5Y",
-      "current_price": 1020.00,
+      "symbol": "BOND-USD-5Y",
       "meta": {
         "face_value": 1000,
-        "coupon_rate": 0.05,
-        "payments_per_year": 1,
+        "coupon_rate": 5.0,
+        "payments_per_year": 2,
         "maturity_years": 5,
-        "curve": "USD_GOV"
+        "settlement_currency": "USD",
+        "discount_curve": "USD_GOVERNMENT_BONDS"
       }
     }
   },
@@ -137,20 +124,75 @@ Content-Type: application/json
 {
   "position": {
     "side": "BUY",
-    "quantity": 10,
+    "quantity": 1,
     "trade_price": 1000.00,
     "instrument": {
       "asset_class": "BOND",
-      "symbol": "GOVT_5Y",
-      "current_price": 1020.00,
+      "symbol": "BOND-USD-5Y",
       "meta": {
         "face_value": 1000,
-        "coupon_rate": 0.05,
-        "payments_per_year": 1,
+        "coupon_rate": 5.0,
+        "payments_per_year": 2,
         "maturity_years": 5,
-        "curve": "USD_GOV"
+        "settlement_currency": "USD",
+        "discount_curve": "USD_GOVERNMENT_BONDS"
       }
     }
   },
   "shock": -25
+}
+
+### IRS - +25 bp parallel shock to discount and projection curves
+POST {{pricing}}/scenario
+Content-Type: application/json
+
+{
+  "position": {
+    "side": "BUY",
+    "quantity": 1,
+    "trade_price": 0,
+    "instrument": {
+      "asset_class": "IRS",
+      "symbol": "IRS-PLN-5Y",
+      "meta": {
+        "direction": "PAY_FIXED_RECEIVE_FLOAT",
+        "settlement_currency": "PLN",
+        "notional": 1000000,
+        "fixed_rate": 4.5,
+        "maturity_years": 5,
+        "payments_per_year": 4,
+        "floating_rate_index_tenor": "3M",
+        "discount_curve": "PLN_RISK_FREE",
+        "projection_curve": "PLN_REFERENCE_PROJECTION_3M"
+      }
+    }
+  },
+  "shock": 25
+}
+
+### European call - +10% underlying spot shock; selected curve is unchanged
+POST {{pricing}}/scenario
+Content-Type: application/json
+
+{
+  "position": {
+    "side": "BUY",
+    "quantity": 1,
+    "trade_price": 10,
+    "instrument": {
+      "asset_class": "EUROPEAN_OPTION",
+      "symbol": "OPT-AAPL-CALL-1Y",
+      "meta": {
+        "underlying_symbol": "AAPL",
+        "option_type": "CALL",
+        "strike": 310,
+        "maturity_years": 1,
+        "multiplier": 1,
+        "volatility": 0.22,
+        "discount_curve": "USD_RISK_FREE"
+      }
+    }
+  },
+  "shock": 0.10,
+  "market_data_provider": "FINNHUB"
 }

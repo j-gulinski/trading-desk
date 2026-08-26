@@ -19,6 +19,7 @@ import {
   summarizeValuations,
   valuationRowsOf,
 } from '../../domain/valuations.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
 import { countOptions } from '../../domain/filters.js'
 import {
   formatAmount,
@@ -31,6 +32,7 @@ import StatCard from '../../components/cards/StatCard.jsx'
 import StreamHeader from '../../components/status/StreamHeader.jsx'
 import FilterBar from '../../components/filters/FilterBar.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
+import LoadingSkeleton from '../../components/LoadingSkeleton.jsx'
 import ColumnPicker from '../../components/tables/ColumnPicker.jsx'
 import SortCaptureStatus from '../../components/tables/SortCaptureStatus.jsx'
 import ValuationTable from '../../components/valuations/ValuationTable.jsx'
@@ -38,12 +40,14 @@ import BookRiskCard from '../../components/valuations/BookRiskCard.jsx'
 import FxReport from '../../components/fx/FxReport.jsx'
 import { useFxRates } from '../../hooks/useFxRates.js'
 import { useReportingCurrency } from '../../hooks/useReportingCurrency.js'
-import { convertedTotalsOf, currencySubtotalsOf } from '../../domain/fx.js'
+import { currencySubtotalsOf, reportedTotalsOf } from '../../domain/fx.js'
 
 const FX_COLUMNS = [
   { id: 'notional', label: 'CAPITAL', signed: false },
   { id: 'unrealized', label: 'UNREALIZED', signed: true },
 ]
+
+const FX_METRICS = FX_COLUMNS.map((column) => column.id)
 
 function matchesSearch(row, search) {
   if (!search) return true
@@ -55,14 +59,14 @@ function matchesSearch(row, search) {
 
 export default function Valuations() {
   const { valuations, bookRisk, status, seedStatus } = useValuationFeedContext()
-  const { instruments } = useMarketFeedContext()
+  const { instruments, curves } = useMarketFeedContext()
   const { now } = useElapsedTime()
 
   const [activeClass, setActiveClass] = useState(null)
   const [activeBook, setActiveBook] = useState(null)
   const [query, setQuery] = useState('')
 
-  const openRows = valuationRowsOf(Object.values(valuations), now, instruments).filter(
+  const openRows = valuationRowsOf(Object.values(valuations), now, instruments, curves).filter(
     (row) => !row.valuation.closed,
   )
   const summary = summarizeValuations(openRows)
@@ -77,12 +81,28 @@ export default function Valuations() {
     }),
   )
 
+  function reportedTotals(source) {
+    return reportedTotalsOf(source, fx.rates, reportingCurrency, FX_METRICS)
+  }
+
+  const headline = reportedTotals({
+    subtotals: currencySubtotals,
+    currency: summary.currency,
+    values: summary,
+  })
+  const currency = headline.currency
+  const headlineTitle = headline.title
+  const capitalHeadline = headline.values?.notional ?? null
+  const unrealizedHeadline = headline.values?.unrealized ?? null
+
   const portfolioMetric = bookRisk.PORTFOLIO
   const portfolioBook = portfolioMetric
     ? {
         name: 'PORTFOLIO',
         assetClass: 'ALL BOOKS',
-        unrealized: summary.unrealized,
+        unrealizedReported: unrealizedHeadline,
+        unrealizedCurrency: currency,
+        unrealizedNote: headlineTitle,
         open: summary.open,
         live: summary.live,
         alpha: portfolioMetric.alpha,
@@ -114,7 +134,7 @@ export default function Valuations() {
         `Benchmark: ${benchmark.symbol}`,
         Number.isFinite(benchmark.level) ? formatAmount(benchmark.level, 2) : null,
         Number.isFinite(benchmarkDayChange)
-          ? `${formatPercent(benchmarkDayChange, 2)} today`
+          ? `${formatPercent(benchmarkDayChange, 2)} vs previous close`
           : benchmarkWindow,
       ]
         .filter(Boolean)
@@ -157,25 +177,18 @@ export default function Valuations() {
   const visibleRows = matchingRows.slice(0, MAX_RENDERED_ROWS)
   const hiddenRowCount = matchingRows.length - visibleRows.length
 
-  const books = bookRisksOf(openRows, bookRisk)
+  const books = bookRisksOf(openRows, bookRisk).map((book) => {
+    const reported = reportedTotals({
+      subtotals: book.subtotals, currency: book.currency, values: book,
+    })
+    return {
+      ...book,
+      unrealizedReported: reported.values?.unrealized ?? null,
+      unrealizedCurrency: reported.currency,
+      unrealizedNote: reported.title,
+    }
+  })
   const bookOptions = bookOptionsOf(openRows)
-  const convertedSummary =
-    summary.currency == null && reportingCurrency && fx.rates != null
-      ? convertedTotalsOf(
-          currencySubtotals, fx.rates, reportingCurrency,
-          FX_COLUMNS.map((column) => column.id),
-        )
-      : null
-  const headlineConverted =
-    convertedSummary != null && convertedSummary.excluded.length === 0
-  const currency = summary.currency ?? (headlineConverted ? reportingCurrency : 'MIXED')
-  const headlineTitle = headlineConverted ? convertedSummary.applied.join('; ') : undefined
-  const capitalHeadline = summary.currency != null
-    ? summary.notional
-    : headlineConverted ? convertedSummary.totals.notional : null
-  const unrealizedHeadline = summary.currency != null
-    ? summary.unrealized
-    : headlineConverted ? convertedSummary.totals.unrealized : null
 
   let tableContent
   if (visibleRows.length > 0) {
@@ -183,7 +196,7 @@ export default function Valuations() {
       <ValuationTable
         table={table}
         rows={visibleRows}
-        caption="Open positions ranked by return and unrealized PnL, capped at the top 100"
+        caption="Valued open positions ranked by return and unrealized PnL, capped at the top 100"
       />
     )
   } else if (openRows.length > 0) {
@@ -191,18 +204,20 @@ export default function Valuations() {
   } else if (seedStatus === 'error') {
     tableContent = <EmptyState message="Could not load current valuations — retrying on reconnect." />
   } else if (seedStatus === 'loading' || status === 'CONNECTING') {
-    tableContent = <EmptyState message="Connecting to the valuation stream…" />
+    tableContent = (
+      <LoadingSkeleton variant="table" rows={8} label="Connecting to the valuation stream" />
+    )
   } else if (status === 'RECONNECTING') {
     tableContent = <EmptyState message="Valuation stream unavailable — retrying." />
   } else {
-    tableContent = <EmptyState message="No open positions are being valued right now." />
+    tableContent = <EmptyState message="No valued open positions are available right now." />
   }
 
   return (
     <section className="page">
       <StreamHeader
         title="LIVE VALUATIONS"
-        note={`${formatNumber(summary.open)} open positions · as of ${formatClockTime(summary.lastUpdateMs)}`}
+        note={`${formatNumber(summary.open)} valued open positions · as of ${formatClockTime(summary.lastUpdateMs)}`}
         status={status}
         stream="PRICING"
       />
@@ -217,7 +232,7 @@ export default function Valuations() {
         <StatCard
           label={`UNREALIZED PNL · ${currency}`}
           value={unrealizedHeadline == null ? '—' : formatSignedAmount(unrealizedHeadline)}
-          sub={`${summary.open} open positions · ${summary.books} books`}
+          sub={`${summary.open} valued open positions · ${summary.books} books`}
           tone={
             unrealizedHeadline == null
               ? 'default'
@@ -281,7 +296,7 @@ export default function Valuations() {
       <section className="valuation-section" aria-labelledby="valuation-table-title">
         <div className="valuation-section__head">
           <div hidden={matchingRows.length === 0}>
-            <h2 id="valuation-table-title">Top 100 open positions</h2>
+            <h2 id="valuation-table-title">Top 100 valued open positions</h2>
             <p>Ranked by return or unrealized PnL</p>
           </div>
           <span>
@@ -292,14 +307,14 @@ export default function Valuations() {
         <FilterBar
           label="CLASS"
           ariaLabel="Filter valuations by asset class"
-          options={countOptions(openRows, (row) => row.valuation.assetClass)}
+          options={countOptions(openRows, (row) => row.valuation.assetClass, assetClassLabel)}
           value={activeClass}
           onChange={selectClass}
           search={{
             label: 'TRADE',
             value: query,
             onChange: setQuery,
-            placeholder: 'Search trade, book or symbol…',
+            placeholder: 'Search trade, book or instrument…',
           }}
         >
           <label className="filter-bar__select-field">

@@ -53,7 +53,7 @@ the report.
 ### One fixing's journey (NBP EUR/PLN, a business day)
 
 1. **11:45 Warsaw** — the calendar says the window is open and no fixing with today's
-   as-of exists yet, so `ReferenceFeed` starts retrying every 5 minutes. *(Step 3, 4)*
+   as-of exists yet, so `OfficialFixingFeed` starts retrying every 5 minutes. *(Step 3, 4)*
 2. **~12:10** — `NbpClient.table_a()` returns table `162/A/NBP/2026` with 32 rates;
    the shared transport logged one `provider_http_response` line. *(Step 2)*
 3. **Normalize** — `normalize_nbp_rate` picks the EUR row, builds a quote with
@@ -114,7 +114,7 @@ The policy layer; the steps and the table below carry the mechanics.
 | Decision | Chose | Rejected | Why |
 | --- | --- | --- | --- |
 | Reference rows are a fourth board origin | `reference` flag beside watched/held/benchmark; watchlist and search offer `shared/providers.QUOTE_PROVIDERS` only; `/instruments` stays watched ∪ held; trade-action refuses reference providers | Reference pairs as watchlist items | User-owned scope would mix with system-owned data — removing a watchlist row must never break conversion; a fixing is not a fillable price. Four independent guards (watchlist validation, search sources, instruments derivation, execution gate) mean no single regression makes a fixing tradeable. |
-| Reference universe | Configured defaults (`NBP_REFERENCE_SYMBOLS`, `ECB_REFERENCE_SYMBOLS`) ∪ settlement currencies of ACTIVE trades, while the source publishes them | Ingesting the full ~32-row tables as board rows | The board stays signal, not noise; nothing is lost because every reference snapshot retains the complete raw table response. |
+| Official-fixing universe | Configured defaults (`NBP_FIXING_SYMBOLS`, `ECB_FIXING_SYMBOLS`) ∪ settlement currencies of reportable trades, while the source publishes them | Ingesting the full ~32-row tables as board rows | The board stays signal, not noise; nothing is lost because every fixing snapshot retains the complete raw table response. |
 | Conversion is a display overlay | `GET /fx/rates` + browser-side multiplication on Valuations and Books; nothing converted persisted; no service calls another's API | Server-side enrichment in blotter/pricing | Converted numbers are only displayed; enriching read models would couple services or duplicate the resolver for display-only values. Positions keep their settlement currency — converting at write time would bake one day's rate into a position's book value. |
 | NBP table C deferred | Table A mid only | Feeding C's bid/ask into the same rows | C's bid/ask would win `build_quote`'s BID_ASK precedence over A's `reference_mid` and silently change what the resolver reads. Revisit only if official buy/sell rates are asked for. |
 | Registry split | `scheduler.wired_providers()` (streams, detail, history, refresh) vs `wired_quote_providers()` (watchlist, search) | One `wired` list for everything | The moment NBP registered as a wired feed, a single list would have made `POST /watchlist {providers:["NBP"]}` legal — precisely the fixing-becomes-tradeable hole the reference-origin decision exists to close. Verified: the add is refused 400 while `GET /market-data/stream/NBP` works. |
@@ -226,7 +226,7 @@ freshness threshold had to come from the same calendar.
       as_of = datetime.combine(as_of_date, time(0, 0), tzinfo=timezone.utc)
       deadline = self._next_publication_end(as_of_date).astimezone(timezone.utc)
       return round((deadline - as_of).total_seconds()
-                   + REFERENCE_PUBLICATION_GRACE_SECONDS)
+                   + OFFICIAL_FIXING_FEED_PUBLICATION_GRACE_SECONDS)
   ```
 
   No new freshness states: the ordinary classifier walks the provider-clock path
@@ -249,24 +249,24 @@ gantt
     STALE if Monday publication missed    :crit, 2026-08-24 16:20, 8h
 ```
 
-## Step 4 — one `ReferenceFeed`, composed twice
+## Step 4 — one `OfficialFixingFeed`, composed twice
 
 **Needed:** NBP and ECB behave identically at the orchestration level (window → fetch →
 normalize → store → publish → sleep) and differently only in *facts*: timezone, window,
 universe, fetch. The quote feeds solved a different problem (budgets, tiers, batches), so
 neither copying `finnhub_feed` nor subclassing it fit.
 
-- **`ReferenceFeed` is one class taking its differences as constructor arguments** —
-  `ReferenceFeed(provider, runtime, calendar, universe_fn, fetch_fn)` — and each provider
+- **`OfficialFixingFeed` is one class taking its differences as constructor arguments** —
+  `OfficialFixingFeed(provider, runtime, calendar, universe_fn, fetch_fn)` — and each provider
   module is ~50 lines of facts plus module-level aliases
   (`poll_loop = _feed.poll_loop`, …) so `scheduler.FEEDS` sees the exact same duck-typed
   module protocol the quote feeds expose. Registration stayed one line per provider.
   - This is composition doing what inheritance would have obscured: the feed *has* a
     calendar and *has* a fetch function; it *is not* a kind of Finnhub feed.
 - **The loop is three guarded questions per tick** (cooldown? universe stale? fetch
-  due?), with the retry interval switching between `REFERENCE_WINDOW_RETRY_SECONDS`
+  due?), with the retry interval switching between `OFFICIAL_FIXING_FEED_WINDOW_RETRY_SECONDS`
   (5 min, only while the window is open *and* today's as-of has not arrived) and
-  `REFERENCE_CONFIRM_SECONDS` (hourly otherwise).
+  `OFFICIAL_FIXING_FEED_CONFIRM_SECONDS` (hourly otherwise).
 - **Keyless runtime.** `ProviderRuntime` learned `budget_per_minute=None` (no token
   bucket — `try_take` degrades to "yes") and `keyless=True` for the ops card. The status
   machine, cooldowns and audit transitions are unchanged — which is why the NBP blackhole
@@ -281,9 +281,9 @@ neither copying `finnhub_feed` nor subclassing it fit.
 in one place both feeds and the board filter can read, so "which reference rows exist"
 can never fork between them.
 
-- **`reference_set.py`, complete logic:** `active_trade_currencies()` (one DISTINCT query
+- **`official_fixing_set.py`, complete logic:** `reportable_trade_currencies()` (one DISTINCT query
   over ACTIVE trades), `nbp_symbols()` = defaults ∪ `{code}PLN`, `ecb_symbols()` =
-  defaults ∪ `EUR{code}`, and `reference_board_symbols()` returning the per-provider
+  defaults ∪ `EUR{code}`, and `official_fixing_board_symbols()` returning the per-provider
   frozensets. The feeds re-read it every 60 s; the board payload and the stray-sweep read
   the same function, so "which reference rows exist" has exactly one owner.
 - Defaults: NBP `EURPLN`, `USDPLN`, gold; ECB `EURUSD`, `EURPLN` — the pairs the
@@ -304,7 +304,7 @@ normalized quote, without inventing anything.
   is what lets the board stay bounded without losing anything, and the reproducibility
   the brief requires.
 - Per-symbol misses raise `ProviderDataError` and are logged per pair
-  (`reference_rate_unpublished`) without touching provider health — the same
+  (`official_fixing_unpublished`) without touching provider health — the same
   one-bad-symbol-never-quarantines-the-feed rule the quote feeds follow.
 - **Gold is `XAUPLN_G`, deliberately not a pair.** NBP publishes PLN per **gram**; a
   six-letter `XAUPLN` would read as per-troy-ounce by market convention and be wrong by
@@ -464,8 +464,8 @@ two panels on one screen *are* the consolidated-feed-versus-official-fixing less
 | Concern | Main files |
 | --- | --- |
 | Clients + decode hook | `clients/base.py` (`decode_body`), `clients/nbp.py`, `clients/ecb.py` |
-| Calendar + feed engine | `reference_calendar.py`, `reference_feed.py`, `nbp_feed.py`, `ecb_feed.py` |
-| Reference universe | `reference_set.py`, `config.py` (`*_REFERENCE_SYMBOLS`, windows, grace) |
+| Calendar + feed engine | `reference_calendar.py`, `official_fixing_feed.py`, `providers/nbp/feed.py`, `providers/ecb/feed.py` |
+| Official-fixing universe | `official_fixing_set.py`, `config.py` (`*_FIXING_SYMBOLS`, windows, grace) |
 | Normalizing + gold | `normalizer.py` (`normalize_nbp_rate/_gold`, `normalize_ecb_rate`, `as_of_timestamp`) |
 | Keyless runtime | `provider_runtime.py` (`budget_per_minute=None`, `keyless`) |
 | Board origin + guards + sweep | `api.py` (`_board_payload`, `/fx/rates`, add-refresh thread), `persistence.py` (`sweep_board_strays`, `history raw`), `scheduler.py` (`wired_providers` vs `wired_quote_providers`, `refresh_table`) |

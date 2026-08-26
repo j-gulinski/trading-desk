@@ -1,10 +1,11 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiGet } from '../services/apiClient.js'
 import { endpoints } from '../services/endpoints.js'
 import { useBufferedUpdates } from './useBufferedUpdates.js'
 import { useSseStream } from './useSseStream.js'
 import { useStreamSeed } from './useStreamSeed.js'
 import { LOG_SEED_LIMIT } from '../config/logs.js'
+import { STREAM_STATUS } from '../config/stream.js'
 import { mergeLogLines, normalizeLogLine, normalizeLogLines } from '../domain/logLines.js'
 
 export function useLogsFeed() {
@@ -26,7 +27,7 @@ export function useLogsFeed() {
     return true
   }, [])
 
-  const pushLine = useBufferedUpdates((pending) => {
+  const { push: pushLine } = useBufferedUpdates((pending) => {
     if (pausedRef.current) {
       pendingRef.current = mergeLogLines(pendingRef.current, pending)
       setPendingCount(pendingRef.current.length)
@@ -35,7 +36,7 @@ export function useLogsFeed() {
     }
   })
 
-  const { status } = useSseStream(endpoints.monitoring.logsStream, {
+  const { status, reconnect } = useSseStream(endpoints.monitoring.logsStream, {
     events: ['run', 'log_line'],
     onEvent: (name, data) => {
       if (name === 'run') {
@@ -48,12 +49,21 @@ export function useLogsFeed() {
   })
 
   const seedStatus = useStreamSeed(status, (signal) =>
-    apiGet(endpoints.monitoring.logs({ limit: LOG_SEED_LIMIT }), { signal }).then((payload) => {
+    apiGet(endpoints.monitoring.logs({ limit: LOG_SEED_LIMIT }), {
+      signal,
+      timeoutMs: 10000,
+    }).then((payload) => {
       const reset = applyRun(payload?.meta?.run_id)
       const seeded = normalizeLogLines(payload?.lines)
       setLines((previous) => mergeLogLines(reset ? [] : previous, seeded))
     }),
   )
+
+  useEffect(() => {
+    if (seedStatus !== 'error' || status !== STREAM_STATUS.connected) return undefined
+    const timer = window.setTimeout(reconnect, 2000)
+    return () => window.clearTimeout(timer)
+  }, [reconnect, seedStatus, status])
 
   const setPaused = useCallback((next) => {
     pausedRef.current = next

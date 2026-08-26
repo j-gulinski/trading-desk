@@ -20,7 +20,7 @@ import {
   providerStrategiesOf,
   summarizeFeed,
 } from '../../domain/marketData.js'
-import { formatMarketSymbol } from '../../domain/marketFormat.js'
+import { formatMarketSymbol, marketLabelOf } from '../../domain/marketFormat.js'
 import { countOptions } from '../../domain/filters.js'
 import { formatElapsedTime, formatNumber } from '../../domain/formatting.js'
 import StatCard from '../../components/cards/StatCard.jsx'
@@ -28,31 +28,67 @@ import StreamHeader from '../../components/status/StreamHeader.jsx'
 import FilterBar from '../../components/filters/FilterBar.jsx'
 import { STORAGE_KEYS } from '../../config/storage.js'
 import EmptyState from '../../components/EmptyState.jsx'
+import LoadingSkeleton from '../../components/LoadingSkeleton.jsx'
 import ColumnPicker from '../../components/tables/ColumnPicker.jsx'
 import MarketTable from '../../components/marketdata/MarketTable.jsx'
 import WatchlistSearch from '../../components/marketdata/WatchlistSearch.jsx'
 import ProviderStrategyStrip from '../../components/marketdata/ProviderStrategyStrip.jsx'
 import MarketBenchmark from '../../components/marketdata/MarketBenchmark.jsx'
 import OfficialRates from '../../components/marketdata/OfficialRates.jsx'
+import CurveSection from '../../components/marketdata/CurveSection.jsx'
 import QuoteHistoryPanel from '../../components/marketdata/QuoteHistoryPanel.jsx'
 import { providerLabel } from '../../config/providers.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
+import { usePanelCoordinator } from '../../layout/panelContext.js'
 
 function matchesSearch(row, search) {
   if (!search) return true
   return (
     row.instrument.symbol.toLowerCase().includes(search) ||
-    formatMarketSymbol(row.instrument).toLowerCase().includes(search)
+    formatMarketSymbol(row.instrument).toLowerCase().includes(search) ||
+    row.instrument.name?.toLowerCase().includes(search)
   )
 }
 
-function sortGroupedRows(rows, direction) {
-  const symbolDirection = direction === 'desc' ? -1 : 1
-  return [...rows].sort((left, right) => {
-    const symbol = left.instrument.symbol.localeCompare(right.instrument.symbol)
-    if (symbol !== 0) return symbol * symbolDirection
-    const provider = left.instrument.provider.localeCompare(right.instrument.provider)
-    return provider || left.instrument.id.localeCompare(right.instrument.id)
-  })
+function groupSortValue(group, column) {
+  const first = group[0]?.instrument
+  if (column === 'name') return first?.name ?? null
+  if (column === 'assetClass') return first?.assetClass ?? null
+  if (column === 'market') {
+    const observed = group.find((row) => row.instrument.market)?.instrument ?? first
+    const market = observed ? marketLabelOf(observed) : null
+    return market === '—' ? null : market
+  }
+  return first?.symbol ?? null
+}
+
+function sortGroupedRows(rows, sort) {
+  const groups = new Map()
+  for (const row of rows) {
+    const group = groups.get(row.instrument.symbol) ?? []
+    group.push(row)
+    groups.set(row.instrument.symbol, group)
+  }
+  for (const group of groups.values()) {
+    group.sort((left, right) =>
+      left.instrument.provider.localeCompare(right.instrument.provider) ||
+      left.instrument.id.localeCompare(right.instrument.id),
+    )
+  }
+  const direction = sort.direction === 'desc' ? -1 : 1
+  return [...groups.values()]
+    .sort((left, right) => {
+      const a = groupSortValue(left, sort.column)
+      const b = groupSortValue(right, sort.column)
+      if (a == null || b == null) {
+        if (a == null && b == null) return left[0].instrument.symbol.localeCompare(right[0].instrument.symbol)
+        return a == null ? 1 : -1
+      }
+      const compared = String(a).localeCompare(String(b))
+      if (compared !== 0) return compared * direction
+      return left[0].instrument.symbol.localeCompare(right[0].instrument.symbol)
+    })
+    .flat()
 }
 
 function watchedProvidersOf(items) {
@@ -69,9 +105,10 @@ function watchedProvidersOf(items) {
 }
 
 export default function MarketData() {
-  const { instruments, tickCount, status, seedStatus, dropRows } = useMarketFeedContext()
+  const { instruments, curves, tickCount, status, seedStatus, dropRows } = useMarketFeedContext()
   const watchlist = useWatchlist()
   const { now } = useElapsedTime()
+  const { activePanel } = usePanelCoordinator()
   const providersPoll = usePolling(
     ({ signal }) => apiGet(endpoints.marketData.providers, { signal }),
     { intervalMs: PROVIDERS_POLL_INTERVAL_MS },
@@ -117,6 +154,10 @@ export default function MarketData() {
     if (selectedId && selectedRow == null) setSelectedId(null)
   }, [selectedId, selectedRow])
 
+  useEffect(() => {
+    if (activePanel != null && selectedId != null) setSelectedId(null)
+  }, [activePanel, selectedId])
+
   const marketTable = useTableState({
     columns: MARKET_COLUMNS,
     storageKey: STORAGE_KEYS.marketColumns,
@@ -133,7 +174,7 @@ export default function MarketData() {
         (!activeProvider || row.instrument.provider === activeProvider) &&
         matchesSearch(row, search),
     ),
-    marketTable.sort.direction,
+    marketTable.sort,
   )
   const visibleSymbols = new Set(visibleRows.map((row) => row.instrument.symbol)).size
 
@@ -143,14 +184,13 @@ export default function MarketData() {
   )
   const providerOptions = countOptions(quoteRows, (row) => row.instrument.provider)
     .map((option) => ({ ...option, label: providerLabel(option.value) }))
+  const boardLoading =
+    quoteRows.length === 0 && (seedStatus === 'loading' || status === 'CONNECTING')
 
   function boardEmptyMessage() {
     if (quoteRows.length > 0) return 'No board rows match these filters.'
     if (seedStatus === 'error') {
       return 'Could not load the market snapshot — retrying on reconnect.'
-    }
-    if (seedStatus === 'loading' || status === 'CONNECTING') {
-      return 'Connecting to market data…'
     }
     if (status === 'RECONNECTING') return 'Market data stream unavailable — retrying.'
     return 'The watchlist is empty — search for a symbol above to start the board.'
@@ -199,7 +239,7 @@ export default function MarketData() {
       <FilterBar
         label="CLASS"
         ariaLabel="Filter market instruments by asset class"
-        options={countOptions(symbolRows, (row) => row.instrument.assetClass)}
+        options={countOptions(symbolRows, (row) => row.instrument.assetClass, assetClassLabel)}
         value={activeClass}
         onChange={setActiveClass}
         search={{
@@ -225,28 +265,40 @@ export default function MarketData() {
             ))}
           </select>
         </label>
-        <ColumnPicker
-          ariaLabel="Watchlist board columns"
-          columns={MARKET_COLUMNS}
-          visibleColumns={marketTable.visibleColumns}
-          onToggle={marketTable.toggleColumn}
-          onReorder={marketTable.reorderColumn}
-          onReset={marketTable.resetColumns}
-        />
+        <div className="market-column-picker">
+          <ColumnPicker
+            ariaLabel="Watchlist board columns"
+            columns={MARKET_COLUMNS}
+            visibleColumns={marketTable.visibleColumns}
+            onToggle={marketTable.toggleColumn}
+            onReorder={marketTable.reorderColumn}
+            onReset={marketTable.resetColumns}
+          />
+        </div>
+        <span
+          className="market-compact-mode"
+          title="Compact quote columns with row actions retained"
+        >
+          Compact trading view
+        </span>
       </FilterBar>
 
       <section className="market-section" aria-labelledby="market-board-title">
         <div className="market-section__head">
           <div>
             <h2 id="market-board-title">Market quotes</h2>
-            <p>Provider feeds grouped by symbol</p>
+            <p>Instrument identity first, provider observations second</p>
           </div>
           <div className="market-section__actions">
             <span>Select a row for observed history</span>
             <span>{visibleSymbols} symbols · {visibleRows.length} feeds</span>
           </div>
         </div>
-        <ProviderStrategyStrip providers={providersPoll.data} />
+        <ProviderStrategyStrip
+          providers={providersPoll.data}
+          now={now}
+          snapshotAtMs={providersPoll.lastUpdated}
+        />
         <WatchlistSearch
           watchedProviders={watchedProvidersOf(watchlist.items)}
           onAdd={watchlist.add}
@@ -256,27 +308,42 @@ export default function MarketData() {
         />
         {watchlist.removeError && (
           <p className="watchlist-search__error" role="alert">
-            {watchlist.removeError}
+            Could not remove the feed: {watchlist.removeError}
             <button type="button" onClick={watchlist.clearRemoveError}>
               dismiss
             </button>
           </p>
         )}
-        {visibleRows.length > 0 ? (
+        {watchlist.refreshError && (
+          <p className="watchlist-search__error" role="alert">
+            Could not refresh {watchlist.refreshError.symbol} on{' '}
+            {providerLabel(watchlist.refreshError.provider)}: {watchlist.refreshError.message}
+            <button type="button" onClick={watchlist.clearRefreshError}>
+              dismiss
+            </button>
+          </p>
+        )}
+        {boardLoading ? (
+          <LoadingSkeleton variant="table" rows={8} label="Connecting to market data" />
+        ) : visibleRows.length > 0 ? (
           <MarketTable
             table={marketTable}
             rows={visibleRows}
             strategies={strategies}
             onRemove={handleRemove}
+            onRefresh={watchlist.refresh}
             busyKey={watchlist.busyKey}
+            refreshingKey={watchlist.refreshingKey}
             selectedId={selectedId}
             onSelect={(row) => setSelectedId(row.instrument.id)}
-            caption="Watchlist symbols with provider subrows for normalized mark, last-tick move, daily move, freshness, and quote time. Select a provider row for observed change history."
+            caption="Watchlist instruments grouped by symbol, with name, class and listing venue followed by provider-level mark, day move, tick move, status and quote age. Select a provider row for observed change history."
           />
         ) : (
           <EmptyState message={boardEmptyMessage()} />
         )}
       </section>
+
+      <CurveSection curves={curves} seedStatus={seedStatus} />
 
       {selectedRow && (
         <QuoteHistoryPanel row={selectedRow} onClose={() => setSelectedId(null)} />

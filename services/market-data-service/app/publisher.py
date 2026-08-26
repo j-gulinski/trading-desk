@@ -9,6 +9,7 @@ from app.config import SERVICE_NAME
 log = get_logger(SERVICE_NAME)
 clients_lock = threading.Lock()
 client_event_queues = set()
+STREAM_OVERFLOW = object()
 
 stream_id = str(uuid.uuid4())
 _event_lock = threading.Lock()
@@ -35,12 +36,30 @@ def publish_tick(event_type, tick):
         try:
             q.put_nowait(message)
         except queue.Full:
-            log.debug("client_event_dropped")
+            # Keeping a live connection after a gap would leave consumers with corrupt
+            # state. Force this client to reconnect; its snapshot handshake then repairs
+            # the complete quote/curve map.
+            try:
+                while True:
+                    q.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                q.put_nowait(STREAM_OVERFLOW)
+            except queue.Full:
+                pass
+            log.warning("stream_client_overflow_reconnect_required")
 
 
 def publish_quote(tick):
     publish_tick(
         "market_tick", {**tick, "stream_id": stream_id, "event_id": _next_event_id()}
+    )
+
+
+def publish_curve(tick):
+    publish_tick(
+        "curve_tick", {**tick, "stream_id": stream_id, "event_id": _next_event_id()}
     )
 
 

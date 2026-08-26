@@ -25,7 +25,15 @@ class ActiveSymbol:
 
     @property
     def tradeable(self):
-        return bool(self.watched_by or self.held_by)
+        """Whether the symbol may be used for a new trade.
+
+        A held-only symbol remains pollable so its open position can be valued, but
+        removing it from the watchlist removes it from the new-trade catalog.
+        """
+        return bool(self.watched_by)
+
+    def serves_open(self, provider):
+        return provider in self.watched_by and supports_quotes(provider, self.asset_class)
 
     def serves(self, provider):
         return provider in self.providers and supports_quotes(provider, self.asset_class)
@@ -46,7 +54,7 @@ def _read(session):
     ]
     open_rows = (
         session.query(Trade.symbol, Trade.asset_class, Trade.trade_currency,
-                      Trade.market_data_provider)
+                      Trade.market_data_provider, Trade.trade_metadata)
         .filter(Trade.status == "ACTIVE")
         .distinct()
         .all()
@@ -63,7 +71,16 @@ def load_active_set(session=None):
 
     held = {}
     holders = {}
-    for symbol, asset_class, currency, provider in open_rows:
+    watched_terms = {
+        symbol: (asset_class, currency)
+        for symbol, asset_class, currency, _ in watched
+    }
+    for symbol, asset_class, currency, provider, metadata in open_rows:
+        if asset_class == "EUROPEAN_OPTION" and (metadata or {}).get("underlying_symbol"):
+            symbol = metadata["underlying_symbol"]
+            asset_class, currency = watched_terms.get(symbol, ("EQUITY", currency))
+        elif asset_class in ("BOND", "IRS"):
+            continue
         held[symbol] = (asset_class, currency)
         holders.setdefault(symbol, set()).add(provider or DEFAULT_QUOTE_PROVIDER)
 

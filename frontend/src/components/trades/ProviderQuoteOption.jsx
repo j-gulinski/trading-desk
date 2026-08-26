@@ -23,13 +23,14 @@ export default function ProviderQuoteOption({
   onSelect,
 }) {
   const unavailable = UNAVAILABLE_LABELS[quote.state]
+  const priceUnit = unit ?? quote.currency
   return (
     <li className="quote-option">
       <button
         type="button"
         className="quote-option__button"
         aria-pressed={selected}
-        disabled={!Number.isFinite(quote.price)}
+        disabled={!quote.tradeable}
         title={quote.reason ?? FRESHNESS_HINTS[quote.state]}
         onClick={() => onSelect(quote.provider)}
       >
@@ -44,9 +45,9 @@ export default function ProviderQuoteOption({
         ) : (
           <>
             <span className="quote-option__price">
-              {side === 'BUY' ? 'buy' : 'sell'} at{' '}
+              {side == null ? 'underlying mark' : `${side === 'BUY' ? 'buy' : 'sell'} at`}{' '}
               {formatUnitPrice(quote.price, assetClass)}
-              {unit ? ` ${unit}` : ''}
+              {priceUnit ? ` ${priceUnit}` : ''}
             </span>
             <span className="quote-option__meta">
               {quote.atMs != null

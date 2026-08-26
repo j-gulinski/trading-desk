@@ -1,43 +1,79 @@
-from shared.providers import PROVIDERS, QUOTE_PROVIDERS
-from app import ecb_feed, finnhub_feed, nbp_feed, twelve_data_feed
+from app.providers import REGISTRATIONS
+from shared.curves import curve_provider
+from shared.providers import FINNHUB, PROVIDERS, QUOTE_PROVIDERS
 
-FEEDS = {
-    feed.PROVIDER: feed
-    for feed in (finnhub_feed, twelve_data_feed, nbp_feed, ecb_feed)
+SYMBOL_QUOTE_FEEDS = {
+    provider.name: provider.quote_feed
+    for provider in REGISTRATIONS
+    if provider.quote_mode == "symbol"
 }
 
-POLL_LOOPS = tuple(feed.poll_loop for feed in FEEDS.values())
+TABLE_QUOTE_FEEDS = {
+    provider.name: provider.quote_feed
+    for provider in REGISTRATIONS
+    if provider.quote_mode == "table"
+}
 
-DEFAULT_PROVIDER = finnhub_feed.PROVIDER
+QUOTE_FEEDS = {
+    **SYMBOL_QUOTE_FEEDS,
+    **TABLE_QUOTE_FEEDS,
+}
+
+CURVE_FEEDS = {
+    provider.name: provider.curve_feed
+    for provider in REGISTRATIONS
+    if provider.curve_feed is not None
+}
+
+PROVIDER_HEALTH_READERS = {
+    provider.name: provider.runtime_snapshot
+    for provider in REGISTRATIONS
+}
+
+POLL_LOOPS = tuple(
+    loop
+    for provider in REGISTRATIONS
+    for loop in provider.poll_loops()
+)
+
+DEFAULT_PROVIDER = FINNHUB
 
 
 def wired_providers():
-    return list(FEEDS)
+    return list(PROVIDER_HEALTH_READERS)
 
 
 def wired_quote_providers():
-    return [name for name in FEEDS if name in QUOTE_PROVIDERS]
+    return [name for name in QUOTE_FEEDS if name in QUOTE_PROVIDERS]
 
 
 def reload_active_set():
-    for feed in FEEDS.values():
+    for feed in QUOTE_FEEDS.values():
         feed.reload_active()
 
 
 def refresh_symbol(symbol, provider=None):
-    feed = FEEDS.get(provider or DEFAULT_PROVIDER)
+    selected = provider or DEFAULT_PROVIDER
+    feed = QUOTE_FEEDS.get(selected)
     if feed is None:
+        if selected in CURVE_FEEDS:
+            return None, f"{selected} serves curves, not quotes", 422
         return None, f"unknown or unwired provider: {provider}", 404
     return feed.refresh_symbol(symbol)
 
 
 def refresh_all(provider=None):
-    if provider is not None and provider not in FEEDS:
+    if provider is not None and provider not in PROVIDER_HEALTH_READERS:
         return [], [{"provider": provider, "reason": "unknown or unwired provider"}]
-    feeds = [FEEDS[provider]] if provider is not None else list(FEEDS.values())
+    if provider is not None and provider not in QUOTE_FEEDS:
+        return [], []
+    feeds = (
+        [(provider, QUOTE_FEEDS[provider])]
+        if provider is not None else list(QUOTE_FEEDS.items())
+    )
     refreshed, skipped = [], []
-    for feed in feeds:
-        if hasattr(feed, "refresh_table"):
+    for name, feed in feeds:
+        if name in TABLE_QUOTE_FEEDS:
             table_refreshed, table_skipped = feed.refresh_table()
             refreshed.extend(table_refreshed)
             skipped.extend(table_skipped)
@@ -52,15 +88,50 @@ def refresh_all(provider=None):
     return refreshed, skipped
 
 
+def _curve_feeds(provider=None):
+    return {
+        name: feed for name, feed in CURVE_FEEDS.items()
+        if provider is None or name == provider
+    }
+
+
+def curve_provider_of(curve_name):
+    return curve_provider(curve_name)
+
+
+def refresh_curve(curve_name, provider=None):
+    """Returns (entry, error, http_status)."""
+    provider = provider or curve_provider_of(curve_name)
+    feed = _curve_feeds().get(provider)
+    if feed is None:
+        return None, f"no wired curve source for {curve_name}", 404
+    return feed.refresh_curve(curve_name)
+
+
+def refresh_curves(provider=None):
+    feeds = _curve_feeds(provider)
+    if provider is not None and not feeds:
+        return [], [{"provider": provider, "reason": "provider serves no curves"}]
+    refreshed, skipped = [], []
+    for feed in feeds.values():
+        feed_refreshed, feed_skipped = feed.refresh_all()
+        refreshed.extend(feed_refreshed)
+        skipped.extend(feed_skipped)
+    return refreshed, skipped
+
+
 def providers_overview():
     return [
         {
             "provider": name,
             "group": spec["group"],
-            "wired": name in FEEDS,
+            "wired": name in PROVIDER_HEALTH_READERS,
             "quotes": spec["quotes"],
             "serves_curves": spec["serves_curves"],
-            **({"runtime": FEEDS[name].runtime_snapshot()} if name in FEEDS else {}),
+            **(
+                {"runtime": PROVIDER_HEALTH_READERS[name]()}
+                if name in PROVIDER_HEALTH_READERS else {}
+            ),
         }
         for name, spec in PROVIDERS.items()
     ]
@@ -69,7 +140,7 @@ def providers_overview():
 def provider_health(name):
     if name not in PROVIDERS:
         return None
-    detail = {"provider": name, "wired": name in FEEDS}
-    if name in FEEDS:
-        detail.update(FEEDS[name].runtime_snapshot())
+    detail = {"provider": name, "wired": name in PROVIDER_HEALTH_READERS}
+    if name in PROVIDER_HEALTH_READERS:
+        detail.update(PROVIDER_HEALTH_READERS[name]())
     return detail

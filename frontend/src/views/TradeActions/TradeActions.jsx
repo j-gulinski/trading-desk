@@ -7,6 +7,7 @@ import { intentRowsOf, lastActionAtOf, queueStatusOf, summarizeIntents } from '.
 import { formatClockTime, formatElapsedTime, formatNumber } from '../../domain/formatting.js'
 import Panel from '../../components/Panel.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
+import LoadingSkeleton from '../../components/LoadingSkeleton.jsx'
 import StatCard from '../../components/cards/StatCard.jsx'
 import StatusPill from '../../components/status/StatusPill.jsx'
 import IntentFeed from '../../components/tradeactions/IntentFeed.jsx'
@@ -98,7 +99,7 @@ export default function TradeActions() {
           </>
         }
       >
-        {feed.loading && <EmptyState message="Loading recent actions…" />}
+        {feed.loading && <LoadingSkeleton variant="list" label="Loading recent actions" />}
         {!feed.loading && feed.error && (
           <EmptyState message="Audit feed unavailable — retrying." />
         )}

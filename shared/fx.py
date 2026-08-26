@@ -2,14 +2,12 @@ from decimal import Context, Decimal
 
 from shared.db import session_scope
 from shared.models import MarketDataSpotPrice
-from shared.providers import ECB, NBP
-
-REFERENCE_FX_PROVIDERS = (ECB, NBP)
+from shared.providers import ECB, NBP, OFFICIAL_FIXING_PROVIDERS
 
 _RATE_DIGITS = Context(prec=8)
 
 
-def load_reference_rates(session=None):
+def load_official_rates(session=None):
     def read(active_session):
         rows = (
             active_session.query(
@@ -19,7 +17,7 @@ def load_reference_rates(session=None):
                 MarketDataSpotPrice.provider_timestamp,
             )
             .filter(
-                MarketDataSpotPrice.provider.in_(REFERENCE_FX_PROVIDERS),
+                MarketDataSpotPrice.provider.in_(OFFICIAL_FIXING_PROVIDERS),
                 MarketDataSpotPrice.asset_class == "FX",
             )
             .all()
@@ -36,7 +34,7 @@ def load_reference_rates(session=None):
     else:
         extracted = read(session)
 
-    rates = {provider: {} for provider in REFERENCE_FX_PROVIDERS}
+    rates = {provider: {} for provider in OFFICIAL_FIXING_PROVIDERS}
     for provider, symbol, mid, as_of in extracted:
         rates[provider][symbol] = (mid, as_of)
     return rates
@@ -64,7 +62,7 @@ def _resolution(rate, path, provider, as_of, symbols):
 
 def _direct(rates, from_ccy, to_ccy):
     candidates = []
-    for provider in REFERENCE_FX_PROVIDERS:
+    for provider in OFFICIAL_FIXING_PROVIDERS:
         table = rates.get(provider, {})
         symbol = f"{from_ccy}{to_ccy}"
         if symbol in table:
@@ -122,7 +120,7 @@ def resolve_rate(from_ccy, to_ccy, rates):
 
 def convert(amount, from_ccy, to_ccy, rates=None):
     if rates is None:
-        rates = load_reference_rates()
+        rates = load_official_rates()
     resolution = resolve_rate(from_ccy, to_ccy, rates)
     converted = (
         Decimal(str(amount)) * resolution["rate"]
@@ -133,7 +131,7 @@ def convert(amount, from_ccy, to_ccy, rates=None):
 
 def rates_to(to_ccy, rates=None):
     if rates is None:
-        rates = load_reference_rates()
+        rates = load_official_rates()
     return {
         currency: resolve_rate(currency, to_ccy, rates)
         for currency in sorted(known_currencies(rates) | {to_ccy})

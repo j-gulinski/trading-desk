@@ -3,21 +3,11 @@ import { groupOptions } from './filters.js'
 import { formatShortId } from './formatting.js'
 import { freshnessOf } from './marketData.js'
 import { sortRows } from './tableSort.js'
+import { toNum, toTime } from './values.js'
 
 const STATUS_RANK = { LIVE: 3, MARKET_CLOSED: 2, STALE: 1, CLOSED: 0 }
 
 const DEFAULT_QUOTE_PROVIDER = 'FINNHUB'
-
-function toNum(value) {
-  if (value == null || value === '') return null
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
-}
-
-function toTime(value) {
-  const parsed = Date.parse(value ?? '')
-  return Number.isFinite(parsed) ? parsed : null
-}
 
 export function valuationOf(data) {
   if (!data || typeof data.trade_id !== 'string' || data.trade_id.length === 0) return null
@@ -55,6 +45,13 @@ export function valuationOf(data) {
     closed: payload.final === true,
     marketDataProvider: data.market_data_provider ?? null,
     marketDataTimestampMs: toTime(data.market_data_timestamp),
+    discountCurve: payload.discount_curve ?? null,
+    curveAsOf: payload.curve_as_of ?? null,
+    curveReceivedAtMs: toTime(payload.curve_received_at),
+    projectionCurve: payload.projection_curve ?? null,
+    projectionCurveAsOf: payload.projection_curve_as_of ?? null,
+    projectionCurveReceivedAtMs: toTime(payload.projection_curve_received_at),
+    underlyingSymbol: payload.underlying_symbol ?? null,
     valuationTimeMs: Number.isFinite(valuationTime) ? valuationTime : null,
   }
 }
@@ -178,9 +175,10 @@ export function mergeValuations(previous, updates) {
 }
 
 function feedInstrumentOf(valuation, instruments) {
-  if (valuation.symbol == null) return null
+  const symbol = valuation.underlyingSymbol ?? valuation.symbol
+  if (symbol == null) return null
   const provider = valuation.marketDataProvider ?? DEFAULT_QUOTE_PROVIDER
-  return instruments?.[`${provider}:${valuation.symbol}`] ?? null
+  return instruments?.[`${provider}:${symbol}`] ?? null
 }
 
 function keepsUpWith(valuation, instrument, now) {
@@ -196,8 +194,35 @@ function keepsUpWith(valuation, instrument, now) {
   return valuation.receivedAtMs != null && now - valuation.receivedAtMs <= window
 }
 
-export function statusOf(valuation, now, instruments = null) {
+export function statusOf(valuation, now, instruments = null, curves = null) {
   if (valuation.closed) return 'CLOSED'
+
+  if (valuation.discountCurve != null) {
+    const discount = curves?.[valuation.discountCurve]
+    if (
+      discount?.asOfDate == null ||
+      valuation.curveAsOf !== discount.asOfDate ||
+      (Number.isFinite(discount.receivedAtMs) &&
+        (!Number.isFinite(valuation.curveReceivedAtMs) ||
+          valuation.curveReceivedAtMs < discount.receivedAtMs))
+    ) {
+      return 'STALE'
+    }
+  }
+  if (valuation.projectionCurve != null) {
+    const projection = curves?.[valuation.projectionCurve]
+    if (
+      projection?.asOfDate == null ||
+      valuation.projectionCurveAsOf !== projection.asOfDate ||
+      (Number.isFinite(projection.receivedAtMs) &&
+        (!Number.isFinite(valuation.projectionCurveReceivedAtMs) ||
+          valuation.projectionCurveReceivedAtMs < projection.receivedAtMs))
+    ) {
+      return 'STALE'
+    }
+  }
+
+  if (valuation.discountCurve != null && valuation.underlyingSymbol == null) return 'LIVE'
   const instrument = feedInstrumentOf(valuation, instruments)
   if (instrument == null) {
     if (valuation.receivedAtMs == null) return 'STALE'
@@ -209,10 +234,10 @@ export function statusOf(valuation, now, instruments = null) {
   return keepsUpWith(valuation, instrument, now) ? 'LIVE' : 'STALE'
 }
 
-export function valuationRowsOf(valuations, now, instruments = null) {
+export function valuationRowsOf(valuations, now, instruments = null, curves = null) {
   return valuations.map((valuation) => ({
     valuation,
-    status: statusOf(valuation, now, instruments),
+    status: statusOf(valuation, now, instruments, curves),
   }))
 }
 
@@ -294,6 +319,7 @@ export function bookRisksOf(rows, riskMetrics = {}) {
         notional: 0,
         unrealized: 0,
         realized: 0,
+        byCurrency: new Map(),
         alpha: null,
         beta: null,
       }
@@ -303,6 +329,16 @@ export function bookRisksOf(rows, riskMetrics = {}) {
     book.trades += 1
     if (book.assetClass !== valuation.assetClass) book.assetClass = 'MIXED'
     if (book.currency !== valuation.currency) book.currency = null
+    if (valuation.currency != null) {
+      const bucket = book.byCurrency.get(valuation.currency)
+        ?? { notional: 0, unrealized: 0, realized: 0 }
+      if (!valuation.closed) {
+        bucket.notional += valuation.notional ?? 0
+        bucket.unrealized += valuation.unrealizedPnl ?? 0
+      }
+      bucket.realized += valuation.realizedPnl ?? 0
+      book.byCurrency.set(valuation.currency, bucket)
+    }
     accumulate(book, row)
   }
 
@@ -326,7 +362,14 @@ export function bookRisksOf(rows, riskMetrics = {}) {
     book.benchmark = metric.benchmark
   }
 
-  return Array.from(books.values()).sort((a, b) => a.name.localeCompare(b.name))
+  return Array.from(books.values())
+    .map(({ byCurrency, ...book }) => ({
+      ...book,
+      subtotals: [...byCurrency.entries()]
+        .map(([currency, values]) => ({ currency, values }))
+        .sort((a, b) => a.currency.localeCompare(b.currency)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export function bookOptionsOf(rows) {

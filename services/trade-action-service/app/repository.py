@@ -4,6 +4,7 @@ from sqlalchemy import update
 
 from shared.models import Trade, Book
 from shared.functions import utcnow
+from shared.symbols import CURVE_PRICED_ASSET_CLASSES
 from app.config import SERVICE_NAME
 
 
@@ -18,14 +19,23 @@ def get_active_book(session, book_id):
     return book
 
 
+def trade_by_client_request_id(session, client_request_id):
+    return session.query(Trade).filter_by(client_request_id=client_request_id).one_or_none()
+
+
 def insert_trade(session, intent, terms, market_data_provider, executed_price, quote):
     now = utcnow()
     symbol = intent.get("symbol")
+    trade_id = uuid.UUID(intent["trade_id"])
     trade = Trade(
-        trade_id=uuid.UUID(intent["trade_id"]),
+        trade_id=trade_id,
         book_id=uuid.UUID(intent["book_id"]),
         asset_class=intent.get("asset_class"),
-        instrument_id=symbol,
+        instrument_id=(
+            str(trade_id)
+            if intent.get("asset_class") in CURVE_PRICED_ASSET_CLASSES
+            else symbol
+        ),
         symbol=symbol,
         side=intent.get("side"),
         quantity=intent.get("quantity"),
@@ -61,21 +71,26 @@ def active_trades(session):
     return session.query(Trade).filter(Trade.status == "ACTIVE").all()
 
 
-def close_trade(session, trade_id, close_price, close_reason, quote) -> int:
+def close_trade(
+    session, trade_id, close_price, close_reason, quote, trade_metadata=None
+) -> int:
     now = utcnow()
+    values = dict(
+        status="CLOSED",
+        close_price=close_price,
+        close_price_timestamp=quote.provider_timestamp,
+        close_snapshot_id=quote.snapshot_id,
+        close_reason=close_reason,
+        closed_at=now,
+        updated_at=now,
+        valuation_finalized=False,
+    )
+    if trade_metadata is not None:
+        values["trade_metadata"] = trade_metadata
     result = session.execute(
         update(Trade)
         .where(Trade.trade_id == trade_id, Trade.status == "ACTIVE")
-        .values(
-            status="CLOSED",
-            close_price=close_price,
-            close_price_timestamp=quote.provider_timestamp,
-            close_snapshot_id=quote.snapshot_id,
-            close_reason=close_reason,
-            closed_at=now,
-            updated_at=now,
-            valuation_finalized=False,
-        )
+        .values(**values)
     )
     return result.rowcount
 

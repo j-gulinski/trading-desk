@@ -48,6 +48,9 @@ export default function TradeTable({
       cellTitle={cellTitle}
       onRowClick={(row) => onSelect(row.trade.id)}
       caption={caption}
+      tableClassName="trade-blotter-table"
+      wrapClassName="trade-blotter-table-wrap"
+      minWidth={960}
     />
   )
 }

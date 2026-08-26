@@ -2,11 +2,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from app.providers import REGISTRATIONS
+from app.providers.base import ProviderError
 from shared.logging_config import get_logger
-from shared.providers import FINNHUB, TWELVE_DATA
-from shared.symbols import is_valid_symbol
-from app import finnhub_feed, twelve_data_feed
-from app.clients.base import ProviderError
 from app.config import (
     SERVICE_NAME,
     SYMBOL_SEARCH_CACHE_SECONDS,
@@ -15,55 +13,8 @@ from app.config import (
 
 log = get_logger(SERVICE_NAME)
 
-METAL_BASES = ("XAU", "XAG", "XPT", "XPD")
-
 _cache_lock = threading.Lock()
 _cache = {}
-
-
-def _finnhub_results(payload):
-    results = []
-    for item in (payload.get("result") or []) if isinstance(payload, dict) else []:
-        symbol = (item.get("symbol") or "").upper()
-        if not is_valid_symbol(symbol):
-            continue
-        results.append({
-            "provider": FINNHUB,
-            "symbol": symbol,
-            "provider_symbol": symbol,
-            "name": item.get("description") or symbol,
-            "asset_class": "EQUITY",
-            "currency": "USD",
-            "exchange": "US",
-        })
-    return results
-
-
-def _twelve_data_results(payload):
-    results = []
-    for item in (payload.get("data") or []) if isinstance(payload, dict) else []:
-        raw = (item.get("symbol") or "").upper()
-        if "/" in raw:
-            base, _, quote = raw.partition("/")
-            symbol = f"{base}{quote}"
-            asset_class = "COMMODITY" if base in METAL_BASES else "FX"
-            currency = quote
-        else:
-            symbol = raw
-            asset_class = "EQUITY"
-            currency = (item.get("currency") or "USD").upper()
-        if not is_valid_symbol(symbol):
-            continue
-        results.append({
-            "provider": TWELVE_DATA,
-            "symbol": symbol,
-            "provider_symbol": raw,
-            "name": item.get("instrument_name") or symbol,
-            "asset_class": asset_class,
-            "currency": currency,
-            "exchange": item.get("exchange") or None,
-        })
-    return results
 
 
 def _rank(query):
@@ -79,33 +30,40 @@ def _rank(query):
     return key
 
 
-def _provider_results(source, query):
-    fetch, normalize, provider = source
+def _provider_results(provider, query):
     try:
-        payload = fetch(query)
+        payload = provider.search(query)
     except ProviderError as error:
-        log.warning("symbol_search_failed", provider=provider, detail=error.detail)
-        return []
+        log.warning("symbol_search_failed", provider=provider.name, detail=error.detail)
+        return [], provider.name, error.detail
+    except Exception as error:
+        log.exception("symbol_search_failed", provider=provider.name)
+        return [], provider.name, f"unexpected {type(error).__name__}"
     if payload is None:
-        return []
+        return [], provider.name, "provider search is unavailable or out of budget"
     seen = set()
     results = []
-    for result in sorted(normalize(payload), key=_rank(query)):
+    for result in sorted(provider.normalize_search(payload), key=_rank(query)):
         if result["symbol"] in seen:
             continue
         seen.add(result["symbol"])
         results.append(result)
-    return results[:SYMBOL_SEARCH_RESULT_LIMIT]
+    return results[:SYMBOL_SEARCH_RESULT_LIMIT], provider.name, None
 
 
 def _collect(query):
-    sources = (
-        (finnhub_feed.search, _finnhub_results, FINNHUB),
-        (twelve_data_feed.search, _twelve_data_results, TWELVE_DATA),
+    providers = tuple(
+        provider for provider in REGISTRATIONS
+        if provider.normalize_search is not None
     )
-    with ThreadPoolExecutor(max_workers=len(sources)) as pool:
-        parts = pool.map(lambda source: _provider_results(source, query), sources)
-    return sorted((result for part in parts for result in part), key=_rank(query))
+    with ThreadPoolExecutor(max_workers=len(providers)) as pool:
+        parts = list(pool.map(lambda provider: _provider_results(provider, query), providers))
+    results = sorted(
+        (result for part, _, _ in parts for result in part),
+        key=_rank(query),
+    )
+    errors = {provider: error for _, provider, error in parts if error is not None}
+    return results, errors
 
 
 def search(query):
@@ -114,10 +72,12 @@ def search(query):
     with _cache_lock:
         cached = _cache.get(query)
         if cached and cached[0] > now:
-            return cached[1]
-    results = _collect(query)
-    with _cache_lock:
-        if len(_cache) > 200:
-            _cache.clear()
-        _cache[query] = (now + SYMBOL_SEARCH_CACHE_SECONDS, results)
-    return results
+            return cached[1], {}
+    results, errors = _collect(query)
+    # Never turn an outage or exhausted search budget into a cached "no matches" fact.
+    if not errors:
+        with _cache_lock:
+            if len(_cache) > 200:
+                _cache.clear()
+            _cache[query] = (now + SYMBOL_SEARCH_CACHE_SECONDS, results)
+    return results, errors

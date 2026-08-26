@@ -3,6 +3,7 @@ import {
   TRADE_QUANTITY_BOUNDS,
 } from '../config/tradeActions.js'
 import { freshnessOf, instrumentId } from './marketData.js'
+import { curveTitle } from './curves.js'
 import { formatNumber } from './formatting.js'
 
 export function newOpenTradeRequestId() {
@@ -28,8 +29,57 @@ export function isCurvePriced(assetClass) {
   return CURVE_PRICED_ASSET_CLASSES.includes(assetClass)
 }
 
+export function termSchemasOf(raw) {
+  return {
+    schemas: raw?.schemas && typeof raw.schemas === 'object' ? raw.schemas : {},
+    curves: Array.isArray(raw?.curves) ? raw.curves : [],
+  }
+}
+
+export function curveChoicesFor(
+  curves,
+  currency,
+  fieldName = 'discount_curve',
+  indexTenor = null,
+  assetClass = null,
+) {
+  const role = fieldName === 'projection_curve' ? 'PROJECTION' : 'DISCOUNT'
+  const tradeUse = assetClass == null ? null : `${assetClass}:${role}`
+  return curves
+    .filter((curve) => (currency ? curve.currency === currency : true))
+    .filter((curve) => (curve.roles ?? []).includes(role))
+    .filter((curve) => tradeUse == null || (curve.uses ?? []).includes(tradeUse))
+    .filter((curve) => (
+      role !== 'PROJECTION' ||
+      indexTenor == null ||
+      curve.index_tenor == null ||
+      curve.index_tenor === indexTenor
+    ))
+    .sort((a, b) => curveTitle(a).localeCompare(curveTitle(b)))
+}
+
+export function termFormComplete(schema, terms) {
+  if (!schema) return false
+  return schema.fields.every((field) => {
+    const value = terms[field.name]
+    return value != null && value !== ''
+  })
+}
+
+export function termCurrencyOf(assetClass, terms, catalog) {
+  if (assetClass === 'EUROPEAN_OPTION' && terms.underlying_symbol) {
+    const entry = (catalog ?? []).find(
+      (instrument) => instrument.symbol === terms.underlying_symbol,
+    )
+    return entry?.currency ?? null
+  }
+  if (terms.settlement_currency) return terms.settlement_currency
+  return null
+}
+
 function executionPriceOf(instrument, side) {
   if (instrument == null) return null
+  if (side == null) return instrument.value
   const quoted = side === 'BUY' ? instrument.ask : instrument.bid
   return Number.isFinite(quoted) ? quoted : instrument.value
 }
@@ -64,6 +114,8 @@ export function providerQuotesOf({ instrument, feed, side, now }) {
       last: quote.last,
       currency: quote.currency,
       atMs: quote.providerTimestampMs,
+      providerTimestamp: quote.providerTimestamp,
+      receivedAt: quote.receivedAt,
       tradeable: TRADEABLE_STATES.includes(state) && Number.isFinite(price) && price > 0,
     }
   })
@@ -77,7 +129,7 @@ export function tradeableInstrumentsOf(instruments, assetClass) {
     .sort((a, b) => a.symbol.localeCompare(b.symbol))
 }
 
-const WHOLE_UNIT_CLASSES = ['EQUITY']
+const WHOLE_UNIT_CLASSES = ['EQUITY', 'EUROPEAN_OPTION']
 
 export function tradeFormErrorsOf({ bookId, symbol, quantity, quote, assetClass }) {
   const errors = {}
@@ -96,7 +148,8 @@ export function tradeFormErrorsOf({ bookId, symbol, quantity, quote, assetClass 
     quantity < TRADE_QUANTITY_BOUNDS.min ||
     quantity > TRADE_QUANTITY_BOUNDS.max
   ) {
-    errors.quantity = `${whole ? 'Quantity must be a whole number' : 'Notional must be'} between ${formatNumber(
+    const amountLabel = assetClass === 'FX' ? 'Notional' : 'Quantity'
+    errors.quantity = `${whole ? 'Quantity must be a whole number' : `${amountLabel} must be`} between ${formatNumber(
       TRADE_QUANTITY_BOUNDS.min,
     )} and ${formatNumber(TRADE_QUANTITY_BOUNDS.max)}.`
   }
@@ -112,7 +165,7 @@ export function buildOpenTradeIntent({
   quantity,
   quote,
 }) {
-  const intent = {
+  return {
     action_type: 'OPEN_TRADE',
     client_request_id: clientRequestId,
     book_id: bookId,
@@ -125,7 +178,32 @@ export function buildOpenTradeIntent({
     client_seen_price: String(quote.price),
     source: 'MANUAL',
   }
-  return intent
+}
+
+export function buildCurveTradeIntent({
+  clientRequestId,
+  bookId,
+  assetClass,
+  side,
+  quantity,
+  terms,
+  currency,
+  provider,
+  previewPrice,
+}) {
+  return {
+    action_type: 'OPEN_TRADE',
+    client_request_id: clientRequestId,
+    book_id: bookId,
+    asset_class: assetClass,
+    side,
+    quantity,
+    terms,
+    currency: currency ?? undefined,
+    market_data_provider: provider || undefined,
+    client_seen_price: String(previewPrice),
+    source: 'MANUAL',
+  }
 }
 
 export function buildReassignIntent(sourceBookId, targetBookId) {
@@ -137,10 +215,11 @@ export function buildReassignIntent(sourceBookId, targetBookId) {
   }
 }
 
-export function buildCloseTradeIntent(tradeId) {
+export function buildCloseTradeIntent(tradeId, clientSeenPrice) {
   return {
     action_type: 'CLOSE_TRADE',
     trade_id: tradeId,
+    client_seen_price: String(clientSeenPrice),
     close_reason: 'MANUAL_CLOSE',
     client_request_id: crypto.randomUUID(),
   }

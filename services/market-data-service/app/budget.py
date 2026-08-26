@@ -1,36 +1,65 @@
+import math
 import threading
 import time
+from collections import deque
 
 from shared.functions import utcnow
 
 
-class TokenBucket:
-    def __init__(self, capacity, refill_per_second):
+class RollingMinuteBudget:
+    WINDOW_SECONDS = 60
+
+    def __init__(self, capacity):
         self.capacity = capacity
-        self.refill_per_second = refill_per_second
-        self._tokens = float(capacity)
-        self._refilled_at = time.monotonic()
+        self._events = deque()
+        self._used = 0
         self._lock = threading.Lock()
 
-    def _refill(self):
-        now = time.monotonic()
-        self._tokens = min(
-            self.capacity, self._tokens + (now - self._refilled_at) * self.refill_per_second
-        )
-        self._refilled_at = now
+    def _expire(self, now):
+        cutoff = now - self.WINDOW_SECONDS
+        while self._events and self._events[0][0] <= cutoff:
+            _, cost = self._events.popleft()
+            self._used -= cost
 
     def try_take(self, cost=1):
+        if cost < 1 or cost > self.capacity:
+            return False
         with self._lock:
-            self._refill()
-            if self._tokens < cost:
+            now = time.monotonic()
+            self._expire(now)
+            if self._used + cost > self.capacity:
                 return False
-            self._tokens -= cost
+            self._events.append((now, cost))
+            self._used += cost
             return True
+
+    def seconds_until_available(self, cost=1):
+        if cost < 1 or cost > self.capacity:
+            return None
+        with self._lock:
+            now = time.monotonic()
+            self._expire(now)
+            needed = self._used + cost - self.capacity
+            if needed <= 0:
+                return 0
+            released = 0
+            for happened_at, event_cost in self._events:
+                released += event_cost
+                if released >= needed:
+                    return max(
+                        0,
+                        math.ceil(happened_at + self.WINDOW_SECONDS - now),
+                    )
+        return None
 
     def state(self):
         with self._lock:
-            self._refill()
-            return {"tokens_available": int(self._tokens), "capacity": self.capacity}
+            self._expire(time.monotonic())
+            return {
+                "tokens_available": self.capacity - self._used,
+                "capacity": self.capacity,
+                "window_seconds": self.WINDOW_SECONDS,
+            }
 
 
 class DailyLedger:

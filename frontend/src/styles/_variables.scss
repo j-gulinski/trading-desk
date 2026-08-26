@@ -45,4 +45,5 @@
 
   --panel-width: 440px;
   --panel-width-wide: 620px;
+  --panel-width-roomy: clamp(620px, 48vw, 720px);
 }

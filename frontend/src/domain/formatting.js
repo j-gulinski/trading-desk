@@ -25,9 +25,27 @@ export function formatDateTime(ms, { millis = false } = {}) {
   return `${date} ${formatClockTime(ms, { millis })}`
 }
 
+const GROUP_SEPARATOR = ' '
+
+export function groupDigits(text) {
+  return text.replace(/,/g, GROUP_SEPARATOR)
+}
+
 export function formatNumber(n) {
   if (n == null || Number.isNaN(n)) return '—'
-  return new Intl.NumberFormat('en-US').format(n)
+  return groupDigits(new Intl.NumberFormat('en-US').format(n))
+}
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+export function formatLongDate(isoDate) {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate ?? '')
+  if (parts == null) return isoDate ?? '—'
+  const [, year, month, day] = parts
+  return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`
 }
 
 export function formatShortId(id) {
@@ -45,10 +63,10 @@ function amountDecimals(value) {
 
 export function formatAmount(value, decimals = amountDecimals(value)) {
   if (!Number.isFinite(value)) return '—'
-  return new Intl.NumberFormat('en-US', {
+  return groupDigits(new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
-  }).format(value)
+  }).format(value))
 }
 
 export function formatSignedAmount(value, decimals = amountDecimals(value)) {

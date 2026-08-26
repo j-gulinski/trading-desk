@@ -1,8 +1,8 @@
-import { VALUATION_STALE_AFTER_MS } from '../config/valuations.js'
 import { groupOptions } from './filters.js'
 import { formatShortId } from './formatting.js'
 import { sortRows } from './tableSort.js'
-import { statusOf as liveValuationStatusOf } from './valuations.js'
+import { statusOf as liveValuationStatusOf, valuationOf } from './valuations.js'
+import { toNum, toTime } from './values.js'
 
 const VALUATION_STATUS_RANK = {
   LIVE: 5,
@@ -13,15 +13,41 @@ const VALUATION_STATUS_RANK = {
   CANCELLED: 0,
 }
 
-function toNum(value) {
-  if (value == null || value === '') return null
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
+const IRS_DIRECTION_LABELS = {
+  PAY_FIXED_RECEIVE_FLOAT: 'PAY FIXED',
+  RECEIVE_FIXED_PAY_FLOAT: 'RECEIVE FIXED',
 }
 
-function toTime(value) {
-  const parsed = Date.parse(value ?? '')
-  return Number.isFinite(parsed) ? parsed : null
+export function irsDirectionLabel(direction) {
+  return IRS_DIRECTION_LABELS[direction] ?? 'IRS'
+}
+
+export function tradePositionLabel(trade) {
+  return trade.assetClass === 'IRS'
+    ? irsDirectionLabel(trade.terms?.direction)
+    : trade.side
+}
+
+export function tradeSize(trade) {
+  if (trade.assetClass === 'IRS') return toNum(trade.terms?.notional)
+  if (trade.assetClass === 'BOND') {
+    const face = toNum(trade.terms?.face_value)
+    return face == null ? null : face * (trade.quantity ?? 1)
+  }
+  return trade.quantity
+}
+
+export function tradeSizeLabel(trade) {
+  if (trade.assetClass === 'IRS') return 'Notional'
+  if (trade.assetClass === 'BOND') return 'Face amount'
+  return 'Quantity'
+}
+
+export function tradePriceForDisplay(trade, value) {
+  const price = toNum(value)
+  if (trade.assetClass !== 'BOND' || price == null) return price
+  const face = toNum(trade.terms?.face_value)
+  return face != null && face > 0 ? price / face * 100 : price
 }
 
 export function booksFromSummary(data) {
@@ -31,6 +57,7 @@ export function booksFromSummary(data) {
     .map((book) => ({
       id: book.book_id,
       name: book.name ?? formatShortId(book.book_id),
+      activeTrades: toNum(book.active_trades) ?? 0,
       closedTrades: toNum(book.closed_trades) ?? 0,
     }))
 }
@@ -45,14 +72,19 @@ export function closedTradeCountOf(books) {
 
 function snapshotValuationOf(data, trade) {
   if (!data || typeof data !== 'object') return null
-
-  return {
-    id: trade.id,
-    fairValue: toNum(data.fair_value),
-    unrealizedPnl: toNum(data.unrealized_pnl),
-    realizedPnl: toNum(data.realized_pnl),
+  const normalized = valuationOf({
+    ...data,
+    trade_id: trade.id,
+    book_id: trade.bookId,
+    book_name: trade.bookName,
+    asset_class: trade.assetClass,
+    symbol: trade.symbol,
+    quantity: trade.side === 'SELL' ? -trade.quantity : trade.quantity,
+    trade_price: trade.entryPrice,
     currency: data.currency ?? trade.currency,
-    valuationTimeMs: toTime(data.valuation_time),
+  })
+  return normalized == null ? null : {
+    ...normalized,
     receivedAtMs: null,
     closed: trade.status !== 'ACTIVE',
   }
@@ -85,6 +117,7 @@ function tradeOf(data, bookNames = new Map()) {
     closedAtMs: toTime(data.closed_at),
     closePrice: toNum(data.close_price),
     closeReason: data.close_reason ?? null,
+    terms: data.terms && typeof data.terms === 'object' ? data.terms : null,
   }
 
   trade.latestValuation = snapshotValuationOf(data.latest_valuation, trade)
@@ -129,20 +162,18 @@ function lifecycleOf(trade, valuation) {
   return trade.status === 'ACTIVE' && !valuation?.closed ? 'OPEN' : 'CLOSED'
 }
 
-function valuationStatusOf(trade, valuation, source, now, instruments) {
+function valuationStatusOf(trade, valuation, source, now, instruments, curves) {
   if (trade.status === 'CANCELLED') return 'CANCELLED'
   if (trade.status !== 'ACTIVE' || valuation?.closed) return 'CLOSED'
   if (!valuation) return 'PENDING'
-  if (source === 'feed') return liveValuationStatusOf(valuation, now, instruments)
-  if (!Number.isFinite(valuation.valuationTimeMs)) return 'STALE'
-  return now - valuation.valuationTimeMs > VALUATION_STALE_AFTER_MS ? 'STALE' : 'LIVE'
+  return liveValuationStatusOf(valuation, now, instruments, curves)
 }
 
-export function tradeRowsOf(trades, liveValuations, now, instruments = null) {
+export function tradeRowsOf(trades, liveValuations, now, instruments = null, curves = null) {
   return trades.map((trade) => {
     const { valuation, source } = latestValuationOf(trade, liveValuations[trade.id])
     const lifecycle = lifecycleOf(trade, valuation)
-    const valuationStatus = valuationStatusOf(trade, valuation, source, now, instruments)
+    const valuationStatus = valuationStatusOf(trade, valuation, source, now, instruments, curves)
     return {
       trade,
       valuation,
@@ -188,16 +219,16 @@ function structuralValueOf(row, column) {
   if (column === 'book') return trade.bookName
   if (column === 'assetClass') return trade.assetClass
   if (column === 'symbol') return trade.symbol
-  if (column === 'side') return trade.side
-  if (column === 'quantity') return trade.quantity
-  if (column === 'entry') return trade.entryPrice
+  if (column === 'side') return tradePositionLabel(trade)
+  if (column === 'quantity') return tradeSize(trade)
+  if (column === 'entry') return tradePriceForDisplay(trade, trade.entryPrice)
   if (column === 'provider') return trade.provider
   if (column === 'opened') return trade.openedAtMs
   return undefined
 }
 
 function snapshotValueOf(row, column) {
-  if (column === 'price') return row.valuation?.price ?? null
+  if (column === 'price') return tradePriceForDisplay(row.trade, row.valuation?.price)
   if (column === 'fairValue') return row.valuation?.fairValue ?? null
   if (column === 'pnl') return row.pnl
   if (column === 'return') return row.valuation?.closed ? null : row.valuation?.returnPercent ?? null

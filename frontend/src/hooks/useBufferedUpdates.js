@@ -17,7 +17,17 @@ export function useBufferedUpdates(onFlush) {
     [],
   )
 
-  return useCallback((key, update) => {
+  const push = useCallback((key, update) => {
     bufferRef.current.set(key, update)
   }, [])
+
+  const drop = useCallback((keys) => {
+    for (const key of keys) bufferRef.current.delete(key)
+  }, [])
+
+  const clear = useCallback(() => {
+    bufferRef.current = new Map()
+  }, [])
+
+  return { push, drop, clear }
 }

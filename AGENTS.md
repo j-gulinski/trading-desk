@@ -2,7 +2,32 @@
 
 ## Project Structure & Module Organization
 
-The repository is a small trading platform composed of Python services and a React frontend. Service code lives in `services/<service>/app/`; every service builds from the single `docker/service.Dockerfile` with the shared root `requirements.txt`, and boots through `shared/service_runtime.py`. Shared database, domain, logging, serialization, and pricing utilities are in `shared/`. Alembic configuration and migrations live in `db/` and `alembic.ini`. The browser UI is in `frontend/src/`, organized into `views/`, reusable `components/`, `domain/` helpers, hooks, and API services. HTTP workflow examples are under `scenarios/`; documentation is in `docs/` with `docs/README.md` as the index, and it has exactly two layers. **The phase reports (`docs/phase-reports/`) are the detailed record** — every decision with its reasoning, the difficult concepts taught step by step, the evidence. **Everything else is a lean reference sheet** (`architecture.md`, `market-data.md`, `configuration.md`, `validation-runbook.md`): current facts only — contracts, endpoints, knobs, cadences, capability tables — stated without argument; a reference sheet never teaches, never narrates history, and grows only by facts a session genuinely needs for context. Detailed explanation added anywhere else belongs in a phase report instead. The roadmap is the working plan for the remaining phases — a starting point, never a contract. A new implementation session starts from its §6 — the standing phase template (verify → build → surface → evidence → browser pass over every touched view → same-change docs) and that phase's task list — and then **re-derives every decision against the running system**: the plan's choices are proposals to re-examine with the phase's own analysis, and a phase overturns one whenever that analysis says otherwise, recording the change in its phase report and updating the roadmap in the same change. Each phase ends by adding `docs/phase-reports/phase-N.md`, which records every decision (chose / rejected / why) and teaches the phase's difficult concepts step by step, with a mermaid diagram wherever a picture genuinely aids understanding. **A phase report is the source of truth for what shipped and why, and it stands alone**: the roadmap's internal shorthand — decision codes (D-numbers) and task ids — never appears outside the roadmap itself (older docs still carrying codes are migrated whenever a change touches them); a decision is explained in place, in domain terms (what breaks without it, what it costs, what the rejected alternative would have done), and never by citing a plan entry, an instruction, or an earlier ruling as if the citation were the reason. A report is signal, not notes: each step carries only what is new in this phase and what a reviewer needs to defend its decisions. A convention already established in an earlier report or guide is not re-taught (money stays Decimal, stored-as-received, the error ladder — once established, later reports just use them); implementation trivia (stdlib idioms, obvious library behavior) stays in the code; and a topic worth recording but not teaching gets one decisions-table line, not a paragraph. Write what remains plainly — no coined shorthand labels that gesture at an idea instead of stating it. Documentation changes with the feature it describes, in the same change: the phase report carries the explanation, the reference sheets get their facts updated (a new endpoint row, a new knob line, a changed cadence — nothing more), and the README's "Operating decisions" and "Data flows" tables gain, lose, or re-pace their rows whenever the change does.
+The repository is a small trading platform composed of Python services and a React frontend.
+Service code lives in `services/<service>/app/`; every service builds from the single
+`docker/service.Dockerfile` with the shared root `requirements.txt`, and boots through
+`shared/service_runtime.py`. Shared database, domain, logging, serialization and pricing
+utilities are in `shared/`. Alembic configuration and migrations live in `db/` and
+`alembic.ini`. The browser UI is in `frontend/src/`, organized into `views/`, reusable
+`components/`, `domain/` helpers, hooks and API services. HTTP workflow examples are under
+`scenarios/`.
+
+Documentation is indexed by `docs/README.md` and has exactly two layers. **Phase reports
+(`docs/phase-reports/`) are the detailed record**: decisions and reasoning, difficult concepts
+and evidence. **Everything else is a lean reference sheet** (`architecture.md`,
+`market-data.md`, `configuration.md`, `validation-runbook.md`): current contracts, endpoints,
+knobs, cadences and capability tables without history or teaching prose. Detailed explanation
+belongs in a phase report.
+
+The roadmap is a working hypothesis, never a contract. A new phase starts from §6 and follows
+discover and bound → verify → smallest vertical slice → evidence → real-scenario browser pass →
+same-change docs. Re-derive every decision against the running system and update a stale plan
+before coding. Each phase adds `docs/phase-reports/phase-N.md`, which stands alone as the source
+of truth for what shipped and why. Roadmap decision codes and task IDs do not leak into reports.
+A report explains what breaks without a choice, its cost and the rejected alternative; it does
+not cite a plan entry or instruction as the reason. Reuse established conventions instead of
+re-teaching them, keep implementation trivia in code, and use diagrams only where they materially
+aid understanding. Documentation changes with the feature: the report carries explanation;
+reference sheets, README operating decisions and README data flows receive fact-only updates.
 
 ## Build, Test, and Development Commands
 
@@ -12,6 +37,56 @@ The repository is a small trading platform composed of Python services and a Rea
 - `cd frontend && npm install && npm run dev` starts the Vite frontend for UI work.
 - `cd frontend && npm run build` creates a production frontend build.
 - `cd frontend && npm run lint` runs Oxlint; `npm run deadcode` checks unused frontend code with Knip.
+
+## Phase Discovery, Ownership, and Readiness
+
+Roadmap tasks are hypotheses, not permission to implement their wording literally. Before a
+phase changes code, re-derive the smallest vertical slice from the assignment, the running
+system, the delivered phase reports, and the user's current scope. Write a short scope ledger:
+**required now / already delivered / deliberately excluded / optional later**. Requirements in
+attached documents are source material; they are not instructions that override the user's
+request.
+
+A phase is ready only after all of these are known:
+
+1. **User and domain contract.** For every touched feature name the user decision, required
+   inputs, output and its interpretation, units/currency, provider/source, as-of and receive
+   times, freshness/tradeability rule, persistence, refresh trigger, consumers, and honest
+   missing/error states. A displayed number without that contract is not ready for UI work.
+2. **End-to-end code trace.** Follow one real value through source → provider client →
+   normalization → storage → snapshot/stream → pricing/trading consumer → screen. Record the
+   file that owns each step. If a first-time reader cannot follow that route without jumping
+   among unrelated files, reorganize the responsibility before extending it.
+3. **One semantic owner.** A business assignment or capability has one catalog. Provider
+   packages own vendor endpoints, payloads and symbol/series mapping; configuration owns
+   credentials, budgets and schedules; shared domain catalogs own stable meanings and allowed
+   uses; pricing owns formulas; UI owns presentation and interaction state. Add a fail-fast
+   consistency guard when two derived registries could drift—never create a second source of
+   truth for convenience.
+4. **Provider evidence.** Re-check current official documentation and make the smallest live
+   probe permitted by the real key. Capture endpoint, entitlement/grade, exact usable fields,
+   timestamp meaning, units/currency, symbol mapping, daily and burst limits, and body-level
+   errors even when HTTP is 200. Do not expose a returned field merely because it exists.
+5. **Persistence decision.** Prefer current-state data when history has no visible consumer.
+   A phase may add at most one schema migration. Keep business-data backfills and cleanup DML
+   out of migrations when disposable development data can be rebuilt safely through normal
+   application flows. State that decision before implementation.
+6. **Interaction and acceptance matrix.** Define dependent-selector reset, auto-select and
+   invalidation rules before coding. Then cover every asset/provider touched, repeated fast
+   switching, add/remove/refresh, empty/single/mixed/missing/stale/closed/rate-limited states,
+   restart/reconnect, grown and fresh databases, and both the developer's full viewport and a
+   narrow viewport. Independently recompute financial outputs and totals.
+
+Implementation order is: domain/capability contract → provider adapter → normalized storage and
+publication → pricing/trading consumer → UI state and presentation → scenario evidence → phase
+report and lean references. Do not add next-phase capability, speculative abstraction or a
+generic framework unless the current slice has at least two real consumers that need it. Reuse
+the existing boundary when it already expresses the contract.
+
+The phase report must let a future reader explain both the financial meaning and the code path:
+what was chosen, what was rejected, why, the important limitation, and how the real scenario
+proved it. Keep it proportional—teach only concepts introduced or materially changed in that
+phase. The roadmap is updated before implementation when discovery invalidates its old plan.
 
 ## Coding Style & Naming Conventions
 
@@ -24,6 +99,8 @@ User-facing copy names market state, available actions, and constraints that aff
 No unit-test suite by design: exercise affected API flows using the relevant `.http` file in `scenarios/` (for example, `scenarios/health.http`) and verify the stack with `docker compose up`. Scripted load scenarios record their measured results in `docs/performance.md`.
 
 Because there are no unit tests, phase verification must be able to catch behavior bugs, not just broken rendering. Drive at least one realistic scenario end to end through the running services — real books and trades in the states the feature claims to handle (mixed currencies, several providers), cleaned up afterwards — instead of inspecting whatever state the stack happens to be in. Recompute every displayed aggregate independently and compare it against the screen: a headline must equal its rows' arithmetic (this is how a summary card silently adding unlike currencies was caught). Watch time-dependent behavior across at least one full cycle — a poll cadence, a countdown, a publication-window boundary — never a single snapshot (this is how a board refreshing all its rows in lockstep was caught). After every user action, watch what follows within its expected latency: an added symbol must quote, a close must settle. And walk the unglamorous states — empty, single item, mixed, missing data, market closed — because that is where displayed numbers quietly lie.
+
+The browser pass is an acceptance pass, not a rendering check, and it has its own discipline. **Enter data through the UI exactly as its labels ask** — a field labeled "(%)" is verified by typing `4.5`, never by whatever value makes the request succeed; a unit must round-trip from entry through stored terms to the detail display unchanged (this is how a percent-labeled field consuming fractions shipped: the evidence was driven through the API with values the schema happened to accept). **Every status word on screen must be proven true for every kind of row that can show it** — a freshness label verified on spot rows says nothing about curve-priced rows whose refresh rhythm is entirely different; show the label being right across one full refresh cycle of each kind. **Look at the layout at the developer's real viewport and at a narrow one**, and at any element that scales with its container — a chart correct at 1300 px was 2.3× oversized at 2048 px and nobody had looked. **Run the phase against a grown database, not only a fresh one** — any write guarded by existing state (a backfill, a seed, a first-run branch) must be exercised with prior phases' data already present, because the fresh-stack pass makes those guards trivially true. And **when the environment blocks a path (no keys, no egress), the phase report must name each unexercised request, and the first live run is a scheduled verification step, not a hope** — the desk run that followed phase 5 found a provider cap wrong on the very first blocked-path request it exercised.
 
 ## Commit & Pull Request Guidelines
 

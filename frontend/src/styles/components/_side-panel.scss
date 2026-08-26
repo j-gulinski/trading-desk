@@ -16,6 +16,15 @@
 .side-panel--wide {
   width: var(--panel-width-wide);
 }
+.side-panel--roomy {
+  width: var(--panel-width-roomy);
+}
+.side-panel--compact .side-panel__head {
+  padding: 10px var(--sp-4);
+}
+.side-panel--compact .side-panel__heading p {
+  display: none;
+}
 .side-panel--no-enter {
   animation: none;
 }
@@ -155,9 +164,12 @@
   font-size: 10px;
 }
 
-@media (max-width: 900px) {
+// A 620px trade/detail drawer leaves too little useful board space on a 1024px laptop
+// once the desktop sidebar is accounted for. Use the focused full-viewport mode there.
+@media (max-width: 1100px) {
   .side-panel,
-  .side-panel--wide {
+  .side-panel--wide,
+  .side-panel--roomy {
     width: 100vw;
   }
 }

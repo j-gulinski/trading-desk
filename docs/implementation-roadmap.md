@@ -7,15 +7,14 @@ behavior is authoritative in the phase reports and the reference sheets (`archit
 
 The migration starts from `trading-microservices`, removes synthetic/static market flows and
 rebuilds market data around real providers. Provider facts come from live probes performed on
-2026-08-17 or from provider documentation and are marked accordingly. Revalidate documented
-limits when registering production keys.
+2026-08-17, the Alpha Vantage readiness probe on 2026-08-26, or provider documentation and are
+marked accordingly. Revalidate documented limits when registering production keys.
 
 The original core sequence was budgeted at roughly 14–15 focused engineering days. With
-Phase 4 delivered (2026-08-23), the remaining sequence is roughly 5.5–6.5 focused days
-(P5 ~2.5–3 · P6 ~1–1.5 · P7 ~1.5–2) — P5 re-sized 2026-08-23 when the quote-detail
-enrichment and official-history backfill folded in (D35). Hosting and the technical load dashboard remain a separate capability
-group. Automated strategy execution is deliberately deferred until every required v2 provider,
-curve, execution and verification gate is complete.
+Phase 5 delivered, **Phase 6 is the single remaining project phase**: it adds the final required
+quote source, closes the small contract gaps and verifies the whole application as one coherent
+system. Hosting, strategies and product experiments remain optional post-acceptance extensions,
+not more phases required for the next review.
 
 ---
 
@@ -106,7 +105,8 @@ From the survey — everything that constitutes "static previously defined flows
 - **market-data-service simulator**: `generator.py` (random-walk threads), hardcoded seeds in
   `persistence.py:19-49` (ACME/XAUUSD/ES_FUT/EURUSD/MARKET_INDEX + `USD_GOV` anchors),
   `MARKET_INDEX` synthetic basket.
-- **Scenarios**: `full-flow.http` (generator-driven); others get rewritten in Phase 7.
+- **Scenarios**: `full-flow.http` (generator-driven); final provider scenarios are completed in
+  Phase 6.
 - **Catalog**: `INSTRUMENT_CATALOG` is *not* generator-only — trade-action validation, term
   schemas and the ticket depend on it — so it is **replaced** by the symbol master (D4) in
   Phase 1, not deleted in Phase 0.
@@ -167,16 +167,16 @@ Postgres, flat under retention. This answers "fresh enough without overflowing t
 numbers.
 
 **D6 (upgraded) — Curve catalog, now fully verified.**
-- `USD_TREASURY` — 11 FRED DGS series, 1–2 business-day lag; par-treated-as-zero documented.
-- `EUR_GOV_AAA` / `EUR_GOV_ALL` — ECB `G_N_A` / `G_N_C` (both keys verified), `SR_3M…SR_30Y`,
-  `csvdata` format; two real EUR curves make projection-vs-discount selection genuine.
-- `PLN_REF` — **composite from live FRED/OECD series**: 3M interbank + 10Y gov bond, monthly,
+- `USD_GOVERNMENT_BONDS` — 11 FRED DGS series, 1–2 business-day lag; par-treated-as-zero documented.
+- `EUR_GOVERNMENT_BONDS_AAA` / `EUR_GOVERNMENT_BONDS_ALL` — ECB `G_N_A` / `G_N_C` (both keys verified),
+  `SR_3M…SR_30Y`, `csvdata` format; deliberately limited to EUR bond context/discounting.
+- `PLN_REFERENCE_PROJECTION_3M` — **composite from live FRED/OECD series**: 3M interbank + 10Y gov bond, monthly,
   ~2-month lag, interpolated between two real anchors, explicitly labeled; the investigation
   write-up (NBP has no rates API — 404 verified; WIBOR licensed; what the lag costs) remains
   the domain-analysis centerpiece.
-- `PLN_NBP_BASE` — a second PLN curve: flat at the NBP reference rate (config-sourced — NBP
-  publishes the rate but not via the API — clearly labeled a proxy). Two PLN curves make
-  **projection-vs-discount selection demonstrable on the PLN swap itself**.
+- `EUR_RISK_FREE` / `USD_RISK_FREE` / `PLN_RISK_FREE` — EIOPA monthly risk-free term
+  structures, kept as a coherent discount source for the three model currencies. Their
+  source derivations and any extrapolated points remain visible.
 - **The tenor dimension, honestly** (audit fix — the review's driving example: a 3M vs 6M
   WIBOR projection choice on a PLN-settled swap): curve metadata gains an
   `index_tenor` label, IRS terms gain `floating_rate_index_tenor`, and validation matches the
@@ -277,8 +277,8 @@ has no free FX anyway).
 
 **D24 (new) — Config is explained or it doesn't exist; code explains itself.** Every tunable is
 an env var whose line in `.env.example` carries a one-line rationale saying *why this value for
-this provider* — e.g. `ALPHA_VANTAGE_DAILY_BUDGET=20` (25/day free tier minus a 5-call
-manual-refresh reserve), `FINNHUB_TIER1_POLL_SECONDS=15` (60/min free tier below its safe utilization
+this provider* — e.g. `ALPHA_VANTAGE_DAILY_BUDGET=22` (90% of the published 25/day free tier),
+`FINNHUB_TIER1_POLL_SECONDS=15` (60/min free tier below its safe utilization
 across a 25-symbol set), `TRADE_PRICE_TOLERANCE_PCT=1.0` (fills rejected beyond 1% of the seen
 price), `IDLE_PAUSE_MINUTES=12` (inside the 10–15 min window; above Railway's 10-min sleep
 threshold). `docs/configuration.md` mirrors the full table with per-profile defaults. The
@@ -293,7 +293,7 @@ the others.
 
 **D25 — Verification = scenario flows + scenario load tests;
 no unit-test suite.** The house convention stays: `scenarios/*.http` flows verify behavior
-end-to-end through the real system (rewritten for the provider world in Phase 7). The
+end-to-end through the real system (completed for the provider world in final Phase 6). The
 load layer uses **scripted scenarios** — small stdlib scripts (urllib + threads, no frameworks)
 injecting load at
 the system's internal seams, each with a measured result recorded in `performance.md`:
@@ -312,12 +312,13 @@ the gateway. Every run records `docker stats` before/during/after. A unit-test s
 out of scope because the scenario harness
 exercises the same logic through the real system instead. *(Owner ruling 2026-08-23:
 structural/contract tests are also out — the load scripts stay because they are the
-brief's stress test, and the ABC's incomplete-adapter-cannot-instantiate guarantee is
-demonstrated in the Phase 6 report rather than enforced by a test.)*
+brief's stress test. The existing provider registration and end-to-end scenarios are the useful
+contract checks; no extra inheritance demonstration is required.)*
 
 **D26 (new) — Reference rows are a fourth board origin, never tradeable.** NBP/ECB fixing
 pairs join the board with a `reference` origin flag (alongside watched/held/benchmark) but
-never the tradeable universe: `/instruments` keeps deriving from watched ∪ held only, and
+never the tradeable universe: `/instruments` derives from watched symbols only (held-only
+symbols remain pollable for existing positions), and
 the ticket never offers a REFERENCE-grade row. Corollary pinned in code: watchlist choices
 and symbol search offer **Group A only** (`shared/providers.QUOTE_PROVIDERS`, not "all
 wired feeds") — otherwise `POST /watchlist {providers: ["NBP"]}` becomes legal for FX the
@@ -325,9 +326,10 @@ moment NBP registers as a wired feed. *Rejected:* reference pairs as watchlist i
 user-owned scope would mix with system-owned reference data, and removing one would
 silently break currency conversion.
 
-**D27 (new) — The reference universe is configured defaults ∪ active-trade currencies.**
+**D27 (new) — The reference universe is configured defaults ∪ reportable-trade currencies.**
 Defaults: NBP `EURPLN`, `USDPLN`, gold; ECB `EURUSD`, `EURPLN`. Settlement currencies of
-open trades auto-join when the source publishes them; when no official path exists the
+active and closed trades auto-join when the source publishes them, so realized P&L remains
+convertible after the final position closes; when no official path exists the
 resolver says so and the UI shows the unconverted subtotal with the reason. *Rejected:*
 ingesting full tables as board rows (~35 noise rows per source) — the full raw table
 response is retained in each row's snapshot anyway.
@@ -359,8 +361,10 @@ response = one `raw_payload` on `market_data_curves`; points keep `source_series
 `source_as_of` (NULL series marks a derived point). *Rejected:* duplicating the same blob
 per point.
 
-**D32 (new) — `curve_type` is a small documented text vocabulary** (e.g. GOV_ZERO,
-INTERBANK_REF, POLICY_PROXY) satisfying the brief's column sketch. *Rejected:*
+**D32 (new) — the curve's stored label is a small documented text vocabulary**
+satisfying the brief's column sketch. It shipped as `curve_basis`, naming how the
+numbers were derived rather than a modelling shorthand, because that is the fact the
+role rules read. *Rejected:*
 modeling discount-vs-projection as a curve property — that is a per-trade choice and lives
 in the frozen terms.
 
@@ -372,28 +376,22 @@ curve-set writes and `VALUATION_BLOCKED` join the matrix. *Rejected:* mapping th
 brief's fetch event onto the structured log alone — defensible, but it argues with an
 explicit requirement list for no real saving.
 
-**D34 (new) — The valuation write throttle moves up from D20 into Phase 7.** At most one
+**D34 (new) — The valuation write throttle closes in final Phase 6.** At most one
 persisted valuation per trade per `VALUATION_WRITE_INTERVAL_SECONDS` (local default 60 s);
 SSE stays per-tick so the UI loses nothing; each persisted row is auditable. The 38 M-row /
 12 GB three-day local measurement (§10.2) makes this a current-phase correctness ceiling,
 not hosting polish. *Rejected:* leaving it hosted-only — the local database provably blows
 up within days, and a review window can span days.
 
-**D35 (new) — Free-tier surface is mined before it is expanded.** Two principles decided
-2026-08-23 after auditing what the wired responses already contain. (1) **Fields already
-paid for ship first**: day range (both quote providers), 52-week range and volume
-(Twelve Data — documented; Alpha Vantage EOD volume verified, joins in Phase 6) enter the
-normalized quote as nullable stored-as-received extras and surface in the Quote Detail
-session block, with an honest n/a where a tier does not publish — zero additional
-requests, and the review's volume question becomes a shipped feature instead of a
-deferred one. Order-book depth and open interest remain genuinely unpublished on the free
-tiers and stay out. (2) **Every further capability passes the runbook §6 five-answers
-bar** (exact measure, instrument scope, interval/as-of, units, entitlement) before any
-field or endpoint is added: company profile/fundamentals (Finnhub, budget-priced),
-provider candles/`time_series` (would reopen the intraday-chart decision as a labeled
-per-provider capability), and company news are recorded on the post-acceptance list under
-exactly that gate. *Rejected:* adding capabilities because an endpoint exists — budget
-spend and false-completeness are the two ways a free-tier desk starts lying.
+**D35 (revised) — Free-tier surface is intentional, not exhaustive.** Phase 5 keeps the
+small comparable quote contract needed for execution: mark/side prices, previous close,
+two clocks, grade, state and provenance. Day/52-week ranges, volume, order-book depth and
+open interest stay out even when one response happens to contain them; their meanings and
+coverage differ and they do not improve this phase's trade flow. Every later capability
+must pass the runbook §6 five-answers bar (exact measure, instrument scope, interval/as-of,
+units, entitlement) and belong to that later phase before it enters schema or UI.
+*Rejected:* adding fields because an endpoint already returned them — zero extra requests
+does not mean zero product or teaching complexity.
 
 ---
 
@@ -405,12 +403,16 @@ spend and false-completeness are the two ways a free-tier desk starts lying.
 app/
   api.py           # /providers, /providers/<p>/health, /market-data/{snapshot,quotes,stream,refresh},
                    # /curves(/…,/refresh), /symbols/search — plus SSE
-  clients/base.py  # urllib: timeout, retries, key injection, body-aware error classification
-  clients/{finnhub,twelve_data,alpha_vantage,nbp,ecb,fred}.py
-  normalizer.py    # raw payload -> NormalizedQuote / CurvePoints (basis, grade, two clocks)
-  scheduler.py     # per-provider threads, priority tiers, calendar windows, stagger offsets
-  budget.py        # token buckets + daily ledgers (surfaced on /providers)
-  persistence.py   # board upsert, change-only history append, curve upsert, retention sweep
+  providers/registration.py      # one runtime capability contract
+  providers/<provider>/          # client + normalizer/curves + feed wiring
+  providers/base.py              # urllib transport and typed provider errors
+  quote_service.py # board/watchlist/refresh use cases
+  quote_store.py   # current board + change-only quote history
+  curve_service.py # curve read/refresh use cases
+  curve_store.py   # curve set + point persistence
+  scheduler.py     # maps/loops derived from provider registrations
+  budget.py        # rolling minute budgets + daily ledgers (surfaced on /providers)
+  retention.py     # protected quote-history retention sweep
   publisher.py     # provider-tagged SSE fan-out (kept from today)
 ```
 
@@ -477,19 +479,26 @@ compliance matrix retained outside the repo) changed four things:
   → Phase 4; and the planned shared external feed — participants plug into it *as one more
   provider* — becomes an explicit extensibility probe → Phase 6.
 - **Tests ruled out** (owner decision): no structural/unit tests; D25 amended above. The
-  Phase 7 load scripts stay — they are the brief's stress test.
+  final-phase load scenarios stay — they are the brief's stress test.
 - **The demo's live bugs become Phase 4 inputs (B1–B5)**, folded into Phase 4 below with
   their code-level hypotheses.
-- **A standing phase template** now governs phases 4–7 so every phase is one complete,
+- **A standing phase template** now governs every remaining phase so each is one complete,
   reviewable step.
 
-### The standing phase template (phases 4–7)
+### The standing phase template
 
-1. **Verify** — re-run the previous phase's gate on a fresh stack before building.
-2. **Build** — backend, then surface (UI), then ops/audit visibility.
-3. **Evidence** — a phase scenario `.http` flow plus a retained evidence record in the
+1. **Discover and bound** — compare the assignment, current roadmap and running system;
+   classify work as required now, already delivered, explicitly excluded or optional later.
+   Trace each new value end to end, name its semantic owner, verify provider facts against
+   current official documentation and a minimal live probe, and decide persistence/migration
+   before implementation. A stale task is rewritten here rather than implemented literally.
+2. **Verify** — re-run the previous phase's gate on both retained and fresh state before building.
+3. **Build the smallest vertical slice** — domain/capability contract, provider adapter,
+   normalized storage/publication, pricing/trading consumer, UI state, then ops/audit visibility.
+   Reuse an existing boundary instead of adding a speculative abstraction.
+4. **Evidence** — a phase scenario `.http` flow plus a retained evidence record in the
    phase-3b format (commit, market session, IDs, both clocks, probes).
-4. **Browser pass, driven by a real scenario** — every touched view exercised in the
+5. **Browser pass, driven by a real scenario** — every touched view exercised in the
    browser against at least one realistic scenario opened end to end through the running
    services (real books and trades in the states the feature claims to handle — mixed
    currencies, several providers — cleaned up afterwards), never just whatever state the
@@ -502,7 +511,7 @@ compliance matrix retained outside the repo) changed four things:
    missing-data and market-closed states. UX/UI reviewed deliberately (layout, copy,
    error states, side-panel behavior — the established design language), zero console
    errors or warnings, screenshots retained for the phase report.
-5. **Docs & report, after implementation, in the same change** — the
+6. **Docs & report, after implementation, in the same change** — the
    `phase-reports/phase-N.md` is the detailed record: every decision (chose / rejected /
    why), the difficult implementation concepts taught step by step, **with a mermaid
    diagram wherever a picture genuinely aids understanding** — each phase below names its
@@ -717,232 +726,299 @@ view.
 **Out of scope:** curves (P5), FRED (P5), best-rate logic (D13 stands), NBP table C
 (D30), converted persisted values, new chart types, intraday history.
 
-### Phase 5 — FRED + ECB yield curves, curve plotting, curve-driven pricing, quote-detail enrichment *(~2.5–3 days)*
+### Phase 5 — rate curves, model-priced execution, and the curve catalog *(complete 2026-08-26)*
 
-**Goal.** Real rate curves with per-point provenance in the schema, the brief's
-`/curves*` routes live, **curves drawn as a real, comparative chart** (the plot is a
-deliverable, not a garnish), and curve-priced classes pricing from selectable,
-currency-consistent, tenor-labeled curves — the review's projection-vs-discount ask made
-concrete on screen. Decisions: D31–D32 (+ D6, D15).
+The original task list is intentionally not retained here: it contained session widgets,
+history backfill, a locally configured NBP flat curve and a New York Fed short-end series
+that were later removed as unrelated or misleading. The complete shipped record and the
+reasons are in [`phase-reports/phase-5.md`](phase-reports/phase-5.md); the Polish defense
+guide is [`phase-reports/phase-5-krzywe-i-kod.md`](phase-reports/phase-5-krzywe-i-kod.md).
 
-**Verify *(0.25 d)*:** Phase-4 gate green on a fresh stack (reference rows, resolver,
-conversion labels).
+**Delivered boundary.** Finnhub and Twelve Data provide tradeable quotes. NBP and ECB
+provide official FX/reference observations. FRED, ECB and EIOPA
+provide the seven intentional curves. Bonds, IRS and equity-underlying European options
+are model-priced from validated terms and selected curves. The server re-reads market data,
+recomputes before execution and freezes provenance. Alpha Vantage remains Phase 6.
 
-**T5.1 Migration *(0.25 d)*.** `market_data_curves` gains `raw_payload JSONB` (one fetch =
-one raw source response per set — the brief's reproducibility requirement, currently
-missing from the schema) and `curve_type` (D32 vocabulary); the spot board gains D35's
-nullable session columns (day open/high/low, 52-week bounds, volume, average volume) —
-change-only snapshots stay untouched; up/down clean on a fresh DB — the phase-1 gauntlet
-re-run.
+**Deliberate simplifications.** One schema-only migration adds curve basis/raw provenance
+and instrument identity; it contains no data backfill or cleanup DML. Disposable local data
+was reset once, after which the live feeds repopulated current curves and application flows
+created the demonstration state. There is no quote session-statistics schema, synthetic
+spread, fake NBP curve or realized-overnight "forward" curve. The chart uses linear maturity
+years and an explicit auto-scaled rate axis. The ticket uses short curve choices plus separate
+labeled facts.
 
-**T5.2 Clients + assembly *(~0.75 d)*.** `clients/fred.py` (JSON; values are strings,
-`"."` = missing; the 120/min key budget fits the shared bucket shape) and ECB yield curves
-via the csvdata path. Builders on the `shared/curves.py` contracts: `USD_TREASURY`
-(11 DGS series), `EUR_GOV_AAA` + `EUR_GOV_ALL` (a real projection-vs-discount choice),
-`PLN_REF` composite (two live OECD anchors, monthly, ~2-month lag, **linear**
-interpolation, per-point `source_series`/`source_as_of`, NULL series = derived point),
-`PLN_NBP_BASE` (flat at the configured NBP reference rate, labeled a proxy). Calendar
-windows: FRED ~16:15 ET daily, OECD weekly, ECB YC ~12:00 CET.
+**Asset-language acceptance.** Equity uses whole-share quantity; FX uses base-currency
+notional; commodity uses quoted-unit quantity; bonds show PV per bond; IRS shows direction,
+notional and full-position NPV rather than internal `BUY × 1`; options show an equity
+underlying mark and a multiplier-1 model premium. A closed benchmark says `last session`
+versus `prior session close`, not `today`. Futures remain absent because this phase has no
+provider/model for them.
 
-**T5.3 Routes + stream.** `GET /curves`, `GET /curves/<provider>`,
-`POST /curves/refresh`, curve sets in `/market-data/snapshot` (the placeholder finally
-filled), a `curve_update` SSE event on the existing contract; curve-set writes audited
-(D33).
+**Acceptance check.** Exactly seven intended curves are ingested by runtime feeds; currency/role/product/
+index guards reject incompatible selections; bond, IRS and option preview and execution
+use the same shared math; a curve tick refreshes affected tickets and valuations; point
+provenance is inspectable; the one schema-only migration reaches head on a fresh database;
+full-width and narrow browser passes are clean for Market Data and every asset ticket.
 
-**T5.4 CurveChart + pickers *(~0.75 d)*.** Hand-rolled SVG (D15, zero chart
-dependencies), built to be *used*: tenor axis in years with labeled tenors, rate axis,
-**multi-curve overlay** (any sets side by side — EUR AAA vs ALL; PLN composite vs NBP
-base; USD Treasury), a legend naming provider + as-of per curve, hover on a point opens
-the **inspector** (tenor, rate, source series, source as-of, ingest time, raw-response
-drill), derived/interpolated points visually distinct from real anchors. `TERM_SCHEMAS`
-gain `settlement_currency`, `discount_curve`, `projection_curve`,
-`floating_rate_index_tenor`; currency and tenor guards reject incompatible choices with a
-readable reason ("PLN swap cannot discount on USD_TREASURY"); pricing swaps `USD_GOV` for
-the live curve registry; curve-priced classes unblock at the ticket for currencies with a
-wired curve, and the ticket's curve pickers show currency + tenor + as-of so the choice is
-informed. The PLN proxy/composite limitations stay explicit rather than being presented as
-observed WIBOR curves.
+**Out of scope.** Alpha Vantage, complete three-provider comparison, bootstrapping,
+licensed term-index curves, vol surfaces, historical analysis, session analytics and
+futures.
 
-**T5.5 Quote-detail enrichment + official history backfill *(~0.5 d, D35)*.** Two
-additions that cost no new provider requests, converting the review's volume question
-into a shipped, honest feature:
+### Phase 6 — final project closure *(~3–4 focused days)*
 
-- **Session fields the quote responses already carry and the normalizer discards.**
-  Finnhub `/quote` publishes `o/h/l`; Twelve Data's quote publishes `open/high/low`,
-  `fifty_two_week` and — per its documentation — `volume` + `average_volume` for
-  supported instruments (verify live with the registered key; the probes verified Alpha
-  Vantage's EOD volume, which slots into the same fields in Phase 6). Ingest them as
-  **nullable, stored-as-received** extras on the normalized quote and the board row
-  (columns ride T5.1's migration; change-only snapshots stay price-provenance and are
-  untouched); the wire tick carries them; the **Quote Detail panel gains a session
-  block** — day range, 52-week range where published, volume where published, each
-  provider-labeled, honest "n/a" where the free tier does not publish (Finnhub volume —
-  the UNSUPPORTED lesson again, one level down). The board table itself does not change.
-  Each field enters through the runbook §6 five-answers bar: measure (session cumulative
-  share volume / prior-close volume for EOD grade), instrument scope, interval/as-of,
-  units, entitlement.
-- **Official-fixing history backfill.** NBP serves dated fixing ranges (93-day window
-  cap) and gold history; ECB EXR serves `lastNObservations=N`. On feed boot, when a
-  reference pair's stored history is sparse, backfill up to `REFERENCE_BACKFILL_DAYS`
-  (default 90, matching retention) as ordinary change-only snapshots — each with its own
-  as-of `provider_timestamp`, the backfill moment as `received_at` (the two-clock
-  contract stays honest: "when the market said it" vs "when we ingested it"), and the
-  range-response slice as raw. The reference drill then shows weeks of daily fixings
-  instead of "first observed value", and — unlike the sparse quote tapes — a fixing
-  series is *complete by construction* (one value per business day), which the guide
-  should note as the reason the tape reads as a real series here.
+**Goal.** Make the next review the final project review. Add Alpha Vantage as the third
+tradeable quote source, close the small correctness and compliance gaps left by earlier phases,
+and verify the complete application from provider response to persisted trade, revaluation,
+close and portfolio presentation. This phase does not redesign working architecture.
 
-**T5.6 Evidence + browser pass + docs *(~0.5 d)*.** `scenarios/curves.http` (the
-brief's curl forms) + evidence record. Browser pass: the curve section and chart
-interactions (overlay toggling, inspector, derived-point styling), ticket curve pickers
-and rejection copy, Trades/Valuations for a curve-priced trade, the FRED ops card, the
-enriched Quote Detail session block on all three row kinds (Finnhub, Twelve Data,
-reference). Docs per the standing template, including the PLN investigation narrative
-(NBP has no rates API — 404 verified; WIBOR licensed; what the monthly lag costs) as the
-domain-analysis centerpiece, and the **brief-to-source mapping** the review clarified:
-the brief's NBP row ("kursy walutowe i dane referencyjne dla krzywych") maps to FX
-fixings + the reference-point set + the config-sourced `PLN_NBP_BASE` rate, while the
-term structures come from ECB (EUR) and FRED (USD, PLN anchors) — stated against the
-brief's own detailed bullets so the reasoning is on paper before anyone asks. Candidate
-diagrams: the curve assembly pipeline (series → points → set → chart → pricing), the
-curves/points ER with the new raw/type columns, an annotated sketch of the interpolation
-between the two PLN anchors, and the chart's own screenshot as evidence.
+**T6.0 Discovery and frozen scope.** Re-run the Phase 5 gate on retained and fresh data. Check
+the assignment against the running routes, UI and schemas; record every remaining item as
+required, already delivered, deliberately excluded or optional extension. Re-probe the current
+Alpha Vantage free entitlement before coding: published limits and endpoint grades can change.
+No schema migration is expected; if discovery proves one unavoidable, this phase may contain at
+most one schema-only migration and no business-data cleanup DML.
 
-**Acceptance check:** a USD instrument prices from `USD_TREASURY`; EUR AAA vs ALL is
-selectable and **visually comparable on one chart**; a PLN swap chooses a PLN construct
-and rejects `USD_TREASURY` with the reason; the inspector traces every plotted point to
-provider, series, source date, ingest time and raw response; interpolated points are
-visually distinct; `/curves*` and curve SSE work via the brief's curls; the Quote Detail
-session block shows day range on both quote providers, 52-week and volume on Twelve Data
-rows, and an honest n/a for Finnhub volume; a reference drill shows a multi-week fixing
-tape with per-row as-of dates and backfill-time receive stamps; migration up/down clean;
-browser pass clean.
+**Readiness evidence (2026-08-26).** The configured key returned an AAPL `GLOBAL_QUOTE` with a
+latest trading date and returned EUR/USD rate, bid, ask and full refresh timestamp from
+`CURRENCY_EXCHANGE_RATE`. A request made too quickly returned HTTP 200 with an `Information`
+body asking the client to slow down; the same FX request succeeded after spacing. The official
+[support page](https://www.alphavantage.co/support/) states 25 requests/day for the standard free
+service, and the [endpoint documentation](https://www.alphavantage.co/documentation/) defines the
+payload contracts. Therefore Phase 6 must guard
+both one daily ledger and provider-wide request spacing, and must classify the body before
+normalization.
 
-**Out of scope:** bootstrapping/splines, curve-versioning UI, vol surfaces, chart
-libraries, licensed WIBOR/Euribor data (documented, not silently narrowed), order-book
-depth and open interest (still unpublished on the free tiers — the volume answer does
-not reopen them), candles/intraday charts (post-acceptance, D35's gate).
+**T6.1 Alpha Vantage vertical.** Add
+`providers/alpha_vantage/{client.py,normalizer.py,feed.py,__init__.py}` and one
+`ProviderRegistration`, reusing the existing shared transport, normalized quote, scheduler,
+store, SSE and provider-runtime contracts. There is no new inheritance contract, client
+hierarchy or generic scheduler rewrite.
 
-### Phase 6 — Alpha Vantage and the complete three-source ticket *(~1–1.5 days)*
+- `GLOBAL_QUOTE` supplies US equity/ETF **EOD** marks. Its latest trading date is displayed as
+  `EOD (date)`, never `LIVE`, and missing bid/ask remain empty.
+- `CURRENCY_EXCHANGE_RATE` supplies supported FX marks with its provider timestamp and real
+  bid/ask when returned. Provider-specific symbol and currency mapping stays in this package.
+- HTTP-200 bodies containing `Information`, `Note` or `Error Message` become typed provider
+  failures rather than quotes. Response identity, currency and venue are checked before storage.
+- One persisted daily ledger guards the published 25-call/day free tier with a safe default of
+  22 calls; a provider-wide minimum spacing also guards burst responses. Scheduled refresh,
+  targeted manual refresh and explicit search share the same ledger.
+- Alpha is not called on every typeahead keystroke. Existing normalized US-equity/ETF and FX
+  identities can attach the Alpha provider explicitly; any Alpha catalog lookup is an explicit,
+  budget-visible action. Equities refresh once after the US session; selected FX rows at most
+  twice daily. Exhaustion is shown honestly and never bypassed by the refresh button.
 
-**Goal.** The third quote provider closes the brief's comparison view; the provider
-transport boundary goes formally abstract exactly when it earns its keep (the third
-adapter); the ticket gains its last two required fields.
+**T6.2 Complete the trading and provenance contract.** Trade-action provider choices remain
+derived from the shared provider catalog. The ticket compares every capable row but requires an
+explicit provider choice when several exist; changing book, underlying or instrument clears or
+auto-selects dependent provider/curve state according to the Phase 5 rules. UI-created opens use
+`source=TRADING_TICKET`. Entry, valuation and close remain bound to the selected provider and
+retain the exact normalized/raw observation or curve provenance. Prove that an open option stays
+closable after its underlying leaves the watchlist; repair only if the retained active-set path
+does not already do so.
 
-**Verify *(0.25 d)*:** Phase-5 gate green (curves price, chart draws, guards reject).
+Close the bounded audit/persistence items required for a defensible final project: external
+fetch success/error/rate-limit metadata without response bodies; change-only quote and curve
+writes; trade create/reject/close; sampled persisted valuation updates and
+`VALUATION_BLOCKED`. Add the valuation write interval so SSE can remain live without unbounded
+database growth. Split provider health by feed where one provider serves both fixings and curves,
+and require an explicit acknowledgement for a genuinely stale curve used to open a model trade.
 
-**T6.1 Client + feed *(~0.5 d)*.** `clients/alpha_vantage.py`: body-aware
-`"Information"` / `"Note"` / `"Error Message"` classification (errors hide in 200s);
-`GLOBAL_QUOTE` equities as **EOD grade** (date-only timestamp → the UI renders
-"EOD (Aug 21)", never fake-LIVE); `CURRENCY_EXCHANGE_RATE` FX with real bid/ask + full
-datetime — the one free true-spread feed, so basis `BID_ASK` finally appears live.
-`alpha_vantage_feed.py`: 25/day ledger with a 5-call manual-refresh reserve (budget 20),
-fixed slots — equities once after US close, the FX anchor 2×/day; search joins the merged
-discovery path.
+**T6.3 Final executable evidence and reliability pass.** Create one
+`scenarios/full-provider-flow.http` covering the public routes and all seven registered sources:
+Finnhub, Twelve Data and Alpha Vantage for tradeable quotes; NBP and ECB for official FX; FRED,
+ECB and EIOPA for curves. Prove AAPL under three independent quote rows, EUR/USD through the
+supported FX sources, and one representative trade from every supported asset class. For each
+trade prove preview → server recomputation → persisted entry provenance → live revaluation →
+same-source close. Recompute bond PV/par coupon, IRS legs/fair rate, option premium, currency
+conversion, fair value and PnL independently.
 
-**T6.2 ABC + registry-driven choices *(~0.25 d)*.** `ProviderClient` becomes an ABC:
-`provider`/`base_url` abstract and `classify_body` an `@abstractmethod` — every adapter
-must state its body-error rule even when it is "none", and an incomplete adapter is
-uninstantiable (the demoable `TypeError`, shown in the phase report per the D25 ruling —
-no test enforces it). Feeds stay **composed**, not inherited: cadence, budget and calendar
-policies differ materially, now proven across three unlike providers. Trade-action
-provider options go registry-driven with the per-symbol capability cache resolved at
-watchlist-add (closing the open item in `market-data.md`); the ticket adds the **optional
-comment** (persisted into the frozen terms) and the explicit **`TRADING_TICKET` source**.
+Add a repeatable **final desk walkthrough** that builds the review state through normal APIs and
+the browser, never by inserting business rows directly:
 
-**T6.3 Evidence + browser pass + docs *(~0.5 d)*.** The provider scenario extended to
-three sources + evidence record. Browser pass: the ticket with three provider rows (grades
-honest, N/A where unsupported, comment field UX), the board's AV rows reading
-"EOD (date)", the AV ops card (25/day gauge + reserve), Trades/Valuations showing comment
-and source. Docs per the standing template; candidate diagrams: the client class hierarchy
-(ABC → three quote clients + two official clients, hooks marked), the three-provider
-ticket sequence (compare → choose → server-price → freeze), the AV daily-budget timeline
-(slots + reserve). The report also carries the honest typing answer (a `TypeVar` bound
-informs the checker; the runtime contract here is ABC) and the MRO paragraph.
+1. Start once with the retained Phase 5 database and once with a fresh disposable database.
+   Create or verify named books for equity, FX, bond, IRS and option activity.
+2. Search and add a recognisable instrument set: AAPL under Finnhub, Twelve Data and Alpha
+   Vantage; MSFT, NVDA, JPM and KO under every selected capable intraday provider; `ASB:GPW`
+   under Twelve Data as the Polish venue/currency regression; EUR/USD plus GBP/USD or USD/PLN for
+   the FX path; and XAU/USD for commodity coverage. Add only providers explicitly selected by the
+   user. Confirm symbol, company/name, asset class, exact venue, base/quote convention and quote
+   currency before accepting the first mark. If a catalog lists an instrument that its quote
+   endpoint cannot serve under the current entitlement, show and record UNSUPPORTED/NO DATA
+   instead of substituting another symbol silently.
+3. Verify the watchlist interaction itself: provider rows for one asset stay grouped; duplicate
+   add is idempotent; manual refresh targets the chosen row and reports budget/failure honestly;
+   removing one provider leaves the others; re-adding it refreshes Market Data and the New Trade
+   choices; fast company switching never shows the previous row's details.
+4. Open provider-bound spot trades that exercise different paths: equities through Finnhub,
+   Twelve Data and Alpha Vantage EOD; EUR/USD through every capable selected FX provider; a second
+   FX pair with a different quote currency; and XAU/USD through Twelve Data. Confirm the ticket's
+   market/currency, side-aware executable basis, class-specific quantity unit, provider time,
+   receive time and `TRADING_TICKET` provenance.
+5. Build the curve-priced contracts from their inputs rather than using hidden fixtures. Use the
+   minimum coverage matrix below, apply the curve-implied bond coupon/fair IRS rate where useful,
+   and deliberately try one wrong-currency curve and one incompatible projection index to prove
+   readable rejection.
 
-**Acceptance check:** AAPL displays three independent provider rows, with Alpha Vantage
-reading `EOD (date)` rather than LIVE; EURUSD exposes real Alpha Vantage bid/ask while
-equities stay LAST; a trade opened on Alpha Vantage persists its comment and
-`TRADING_TICKET` source and moves only when that provider's quote changes; instantiating a
-deliberately incomplete client raises `TypeError` (demonstrated in the report);
-**extensibility probe: adding a seventh provider = one client + one feed + one registry
-line, nothing else edited** — stated in the report as the shared-feed readiness note
-(a future external shared feed plugs in as exactly this); browser pass clean.
+   | Category | Required review examples | What the pair proves |
+   | --- | --- | --- |
+   | Equity | AAPL plus another US company; `ASB:GPW` when its verified PLN feed is usable | multiple providers, BUY/SELL, US vs Polish venue/currency |
+   | FX | EUR/USD plus GBP/USD or USD/PLN | base-notional/quote-currency units and two currency paths |
+   | Commodity | XAU/USD; optionally XAG/USD only if the live catalog and entitlement both confirm it | quoted-unit quantity and no guessed commodity capability |
+   | Bond | USD government 5Y, EUR government 10Y and a PLN risk-free example | face amount/coupon/frequency, different curves and currencies |
+   | IRS | EUR receive-fixed 6M-index example and PLN pay-fixed 3M-index example | opposite directions and honest discount/projection approximation |
+   | European option | AAPL call and another-company put; optionally a PLN-equity option only after its underlying currency is verified | call/put, strike/maturity, provider-bound underlying and same-currency discounting |
 
-**Out of scope:** AV premium endpoints, bulk anything, spread synthesis for last-only
-feeds, an inheritance tree over the feeds, any test harness.
+6. For **each supported category** leave at least one position open and close at least one other
+   position after a valid refresh, so both unrealized and realized paths are visible. Across those
+   trades, close at least one Finnhub, Twelve Data and Alpha position. Confirm every close uses the
+   provider or curves frozen by the trade, writes terminal provenance once and survives a
+   refresh/restart. Futures are not part of the matrix because the project has neither a futures
+   quote contract nor a futures pricing model.
+7. Inspect every resulting Trade Detail: terms, entry price/model value, provider or curve
+   provenance, current/close value, settlement currency and realized or unrealized PnL. Compare
+   each number with the corresponding provider row or an independent pricing calculation.
+8. Inspect Valuations and Books: all remaining open positions are present once; status and age
+   match their actual feed; gross entry value and unrealized PnL equal the visible rows; each book
+   has correct open/closed counts and realized PnL; reporting-currency conversion names rate,
+   provider, path and as-of. During an open US session, retain at least 20 real SPY observations
+   to verify portfolio/book alpha and beta; outside it, document the honest insufficient-data or
+   zero-benchmark-variance state rather than manufacturing observations.
+9. Inspect Business Overview last. Its open gross entry value, unrealized PnL, realized PnL,
+   total PnL, open count and closed count must reconcile exactly to Books and Valuations after FX
+   conversion. Refresh and reconnect once to prove the same totals return from durable state.
 
-### Phase 7 — brief compliance, provenance and hardening *(~1.5–2 days)*
+Record the actual symbols, provider timestamps, trade IDs, entry/close values and independently
+recomputed totals in the Phase 6 evidence. The walkthrough may leave one clearly named review
+portfolio populated after acceptance; its companion cleanup removes only those scenario-owned
+books/trades/watchlist memberships so repeated runs cannot accumulate ambiguous data.
 
-**Goal.** Close every remaining compliance gap, prove the system honest under load and
-restart, and bring the README + reference sheets to the full brief contract so a stranger
-can run, verify and grade the system from the repository alone. The load scripts are the brief's
-required stress test, not a test suite (D25 + owner ruling). Decisions: D33–D34.
+Run the four bounded stress scenarios behind the provider gateway—ticket idempotency, SSE
+fan-out, active-board growth and valuation soak—and record `docker stats` plus table growth.
+Provider APIs themselves are never load-tested. Restart Market Data and Pricing, prove ledger
+recovery, snapshot-before-SSE seeding, no economic duplicate on repeated observations, one trade
+for a repeated `client_request_id`, and retained entry provenance after cleanup.
 
-**Verify *(0.25 d)*:** Phase-6 gate green; six providers on `/providers`.
+**T6.4 Whole-application browser pass.** Exercise every page and every supported action, not
+only the new Alpha rows: navigation, search/add/remove/manual refresh, grouped provider rows,
+quote and curve detail, every trade ticket, Trades, Valuations, Books, Business Overview,
+Trade Actions, Logs and System Overview. Cover empty, single, mixed-currency, missing,
+unsupported, stale, closed and rate-limited states; fast switching and reconnect; full Mac
+viewport and narrow viewport; zero overlaps, unnecessary one-row horizontal scrolling, console
+errors or false status/currency labels. Check all totals against their rows and observe at least
+one full real refresh cycle.
 
-**T7.1 Provenance closure *(0.25 d)*.** The exact normalized and raw observation used by
-entry/close stays immutable and reachable (FK sweep-skips re-proved); official curve rows
-retain raw payloads (T5.1); the valuation-stream fields checked one-for-one against the
-brief's example event. No transient log file is the only evidence for anything.
+As a final presentation closure, Business Overview gets one reporting-currency portfolio
+summary derived from the existing durable book totals and live valuation state: **open gross
+entry value, unrealized PnL, realized PnL, total PnL, open count and closed count**. Realized PnL
+is cumulative profit/loss from closed trades; closed positions do not remain in open capital.
+The value currently called capital is explicitly labeled gross entry value because the project
+has no cash account, deposits/withdrawals or margin model, and an IRS NPV is not regulatory or
+economic capital. The same aggregation helper must feed Business Overview, Books and Valuations
+so their totals cannot drift.
 
-**T7.2 Audit matrix *(0.5 d, D33 + D34)*.** The brief's ten events with bounded
-payloads: fetch success per call (minimal payload — provider, endpoint class, status,
-duration; never bodies; retention-swept), fetch error / rate limit (existing transitions +
-severity review), `QUOTE_WRITTEN` on change-only writes (replacing first-quote-only —
-README's noise rationale updates in the same change), curve-set writes (from P5), trade
-create/reject/close (existing), persisted valuation updates, and `VALUATION_BLOCKED` for
-the frozen-provider-missing case. D34 lands here: at most one persisted valuation per trade
-per `VALUATION_WRITE_INTERVAL_SECONDS` (local 60 s; SSE stays per-tick), which is what
-makes the valuation event auditable without row explosion — and removes the measured
-38 M-row local failure mode.
+**T6.5 Final documentation.** Add one `phase-reports/phase-6.md` that stands alone as the final
+project handoff: system flow, Alpha payload normalization and budgets, complete provider/capability
+matrix, trade/provenance lifecycle, audit/idempotency/restart guarantees, important financial
+calculations and honest limitations. Update the README and lean references with current facts,
+exact endpoints, keys, cadences and repeatable commands. Keep the optional extension backlog
+below separate from shipped behavior.
 
-**T7.3 Idempotency & restart proofs *(0.25 d)*.** Duplicate provider observations add no
-economic duplicate; a repeated `client_request_id` stays one trade; provider
-ledgers/cooldowns recover across restart; snapshots seed consumers before SSE follow-up;
-referenced provenance survives a forced retention sweep.
+**Final acceptance check.** A fresh `docker compose up --build` exposes seven registered sources
+and all documented routes. The ticket compares Alpha Vantage, Finnhub and Twelve Data where they
+are capable; Alpha equities are EOD, Alpha FX uses the returned basis, and no budget/error body is
+mislabelled as a quote. Every supported asset can be created, priced, revalued and closed with
+correct units, currency and frozen provenance; the retained review state contains both an open
+and a closed example for equity, FX, commodity, bond, IRS and European option. Required audit
+events, restart/idempotency proofs,
+stress evidence and the whole-app browser matrix are reproducible from the repository. There is
+one consistent all-books summary for open entry value and realized/unrealized/total PnL. There is
+one reproducible walkthrough from provider catalog search and watchlist membership through open
+and closed trades, valuation inspection and the reconciled Business Overview. There is no Phase
+7 required for project completion.
 
-**T7.4 Six-provider scenario + stress test *(~0.5 d)*.** The final
-`scenarios/full-provider-flow.http` — the brief's curl list runs verbatim — then the
-four D25 loads (`load_ticket_storm`, `load_sse_fanout`, `load_active_board`,
-`load_valuation_soak`) with `docker stats` before/during/after and database growth vs the
-D20 ceilings recorded in `docs/performance.md`. Full-system browser pass: every view
-touched this cycle plus a whole-app UX sweep (navigation, empty states, error copy,
-side-panel stacking), zero console errors, screenshots retained.
+**Explicitly out of scope for completion.** Alpha premium/bulk endpoints, synthetic spreads,
+automatic best-price routing, historical charts/analytics, bootstrapped or licensed index
+curves, volatility surfaces, futures, company fundamentals/news, order-book depth, open interest,
+volume expansion, the optional trade comment, strategies, gamification, hosting and a
+provider/scheduler rewrite.
 
-**T7.5 README + reference sheets to the full contract *(~0.5 d)*.** Every brief-required README section
-present (architecture, services, all six integrations with the endpoints used, keys
-how-to, schema, normalization, curve construction, ticket, realized/unrealized PnL,
-compose run, test commands, known limitations) as lean prose linking into docs/ (D24),
-plus the **deviation table**: `ENABLE_RANDOM_MARKET_DATA_FALLBACK` intentionally absent
-(the fork removed the generator, D1 — the archived repo is the fallback), the brief's
-generic poll-interval names mapped to the actual per-provider knobs, and the spot-board
-raw-via-snapshot-FK note. Final checks re-run: Decimal boundary, lint, build, dead-code,
-`git diff --check`, fresh `docker compose up --build` acceptance with a retained evidence
-record. Phase report teaches: the idempotency proofs step by step, monotonic vs wall
-clocks, queue/thread behavior under the load scripts; candidate diagrams: the audit-event
-map (which service writes which of the ten events, where) and the load-test topology
-(where each script injects, what it measures).
+### Optional extensions after final acceptance
 
-**Final acceptance check:** one fresh `docker compose up --build` exposes all six
-providers; the brief's curl routes succeed as written; the ticket compares Alpha
-Vantage, Finnhub and Twelve Data; entry, live PnL and close use one frozen source;
-NBP/ECB/FRED reference data drives the documented, plotted curves; every required audit
-event is observable; the full scenario and stress-test report are repeatable from the
-repository alone; browser pass clean across the application.
+These are product experiments, not missing requirements. Start one only when it has a visible
+consumer, exact data meaning, provider entitlement and a small acceptance scenario. The most
+valuable first extension is the shock and sensitivity lab below; hosting and an explainable
+strategy runner remain later independent tracks. A true portfolio NAV is also separate: it
+requires a cash ledger, deposits/withdrawals, fees, margin/collateral treatment and a return
+methodology rather than relabeling trade entry values as cash capital.
 
-Not on the v2 critical path: a connected intraday chart and provider candles
-(`time_series`), order-book depth and open interest (unpublished on the free tiers —
-published volume itself ships in Phase 5, D35), company profile/fundamentals and company
-news (each gated by the runbook §6 five-answers bar, D35), best-quote routing,
-BusinessOverview expansion, gamification, strategies, hosting and a broad
-provider/scheduler rewrite. They begin only after the final acceptance check. (The
-gamification hook needs nothing beyond Phase 6's extensibility probe — a shared external
-feed will be one more client + feed + registry line.)
+#### Post-acceptance candidate — interactive shock and sensitivity lab
+
+**Portfolio purpose.** Turn the existing one-position `POST /scenario` calculation into a
+visual explanation of *which input moved, how the model price reacted and why*. This is a
+post-acceptance extension, not a reason to expand final Phase 6. It uses the
+existing pricing functions and current spot/curve snapshots; it needs no historical series
+and introduces no new market-data provider.
+
+**Two entry points, one engine.**
+
+- **Existing position:** open the scenario tab from Trade Detail or Valuations. Contractual
+  terms—bond coupon/face/maturity, IRS fixed rate/notional/direction, option strike/type and
+  original maturity—remain fixed. Only hypothetical market inputs move. This answers the
+  risk question: “what would this position be worth if the market changed?”
+- **New trade:** after the ticket has a valid model preview, open `Explore sensitivity`.
+  Market shocks can be applied to the draft, while the normal ticket fields may also be
+  changed. This answers the structuring question: “how would another coupon, maturity,
+  strike or direction change the price before I book anything?” The lab never submits a
+  trade; execution remains an explicit return to the ticket.
+
+**Supported one-factor controls.** Keep the first version small and interpretable:
+
+| Asset | Existing-position market shocks | Additional pre-trade terms to explore | Expected teaching point |
+| --- | --- | --- | --- |
+| Equity | underlying spot % | side and quantity | price follows spot; position PnL reverses for SELL |
+| FX / spot commodity | quoted spot % | side and base/quoted-unit quantity | value change is in the quote currency |
+| Bond | parallel discount-curve bp shock | coupon, face value, maturity, payment frequency | yields up → PV down; maturity/coupon change sensitivity |
+| IRS | parallel shock plus separate discount/projection bp shocks | fixed rate, maturity, notional, pay/receive direction | projection moves floating cashflows; discounting reweights both legs |
+| European option | underlying spot %, assumed volatility percentage-point shock and risk-free-rate bp shock | strike, maturity, call/put and side | non-linear spot/vol response; call/put rate direction under Black–Scholes assumptions |
+
+Volatility remains an explicit **model assumption** until a defensible market-volatility
+source exists; the UI must not label it live or implied. Curve-shape scenarios, correlated
+multi-factor stress and Greeks are a later increment only after the one-factor lab is clear.
+
+**Presentation.** A compact control combines a slider, exact numeric input and reset/preset
+buttons. Beside it, a one-factor sweep plots model price against the shocked input, with the
+current point and selected shocked point marked. The result block shows base model price,
+shocked model price, absolute/percentage price change, position value and incremental
+scenario PnL in currency. Bonds and IRS additionally overlay the base and shocked curve;
+options show the changed spot/vol/rate assumption. A short asset-specific explanation states
+the observed direction (“rates rose 25 bp, so discounted bond cashflows are worth less”) and
+names the assumptions that were held constant.
+
+**Architecture and guardrails.** The frontend never implements pricing math. A pricing API
+accepts a base draft or persisted trade plus a typed shock definition and returns base,
+shocked and sweep results from the same valuation engine used by preview/live valuation.
+Requests are stateless: no trade, quote, curve or valuation row is mutated. Provider, curve,
+as-of and assumption provenance stay visible. Results are labeled **hypothetical model
+scenario — not a forecast, market quote or executable price**. The current single-shock
+endpoint remains the minimal Phase 5 evidence until this UI is deliberately scheduled.
+
+**Acceptance examples.** From an open bond, `+25 bp` leaves coupon/face/maturity unchanged,
+shows a lower shocked PV and explains the discounting effect. From a pay-fixed IRS, separate
+projection and discount shocks produce separately labeled contributions rather than one
+unexplained number. From a call draft, a spot or assumed-volatility sweep draws the expected
+non-linear price curve while strike/maturity changes remain clearly identified as contract
+edits. Closing the lab leaves trade count, stored curves, quote snapshots and valuations
+unchanged. A later book-level view may aggregate the returned per-position scenario P&L, but
+only after the position-level units and shock definitions are unambiguous.
 
 ---
 
-## 7. UI plan — reuse map
+## 7. Delivered UI reuse map *(reference, not another phase)*
+
+This table records the design direction used across the delivered phases and the final pass. It
+does not create work after Phase 6; shipped behavior remains authoritative in phase reports.
 
 | View | Keeps | Changes |
 | --- | --- | --- |
@@ -985,7 +1061,7 @@ an instruments table, backtesting (the strategy milestone's opening), the replay
 
 ---
 
-## 9. Locked implementation decisions
+## 9. Constraints retained for optional extensions
 
 1. **Repo name** → **`trading-desk`** (D16).
 2. **`MAX_ACTIVE_SYMBOLS`** → **25** to start; adding beyond the cap blocks with an
@@ -1000,7 +1076,7 @@ an instruments table, backtesting (the strategy milestone's opening), the replay
 
 ---
 
-## 10. Hosted operation, strategies and load visibility
+## 10. Optional extension track — hosted operation, strategies and load visibility
 
 This capability group is based on measurements from the running local stack and Railway
 platform constraints checked on 2026-08-17.
@@ -1118,10 +1194,11 @@ never triggers under polling), app pause alone (saves API budgets but not a cent
 billing).
 
 **D20 (new) — Data ceilings, now evidence-based.**
-(1) **Valuation write throttle**: persist at most one valuation row per trade per
-`VALUATION_WRITE_INTERVAL` (hosted ~5 min, local ~1 min); the live UI is unaffected (it reads
-SSE), the DB keeps a sampled history — kills the 38 M-row failure mode at the source.
-(2) **Nightly retention sweep as a Railway cron service** (quotes history, valuations, audit
+(1) **Valuation write throttle ships in final Phase 6**: persist at most one valuation row per
+trade per `VALUATION_WRITE_INTERVAL` (local ~1 min); the live UI is unaffected because it reads
+SSE, while the database keeps a sampled history. The hosted profile may widen this to ~5 min.
+The remaining items are optional hosting extensions: (2) **nightly retention sweep as a Railway
+cron service** (quotes history, valuations, audit
 beyond their windows; VACUUM; clean exit).
 (3) **DB gauge on the dashboard**: allocated vs used volume, per-table sizes, days-to-full
 projection and a warning threshold.
@@ -1135,7 +1212,7 @@ Each service self-reports via stdlib only (`resource.getrusage`, `os.times` delt
 depth, cache sizes, budget spend, RATE_LIMITED/IDLE states). Monitoring aggregates into
 `/system-load`; a new **System load** panel on SystemOverview provides a visual overview,
 tabular deep-dive and click-through to the service's logs. Local `docker stats`
-comparison goes into `performance.md` (Phase 7's stress-test numbers become this panel's
+comparison goes into `performance.md` (final Phase 6 stress-test numbers become this panel's
 baseline). *Rejected:* psutil (dependency for what stdlib provides) and Docker-API scraping
 (unavailable on Railway; self-reporting works in both worlds).
 

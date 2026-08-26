@@ -14,6 +14,7 @@ import {
 import { streamStatusLevel } from '../../config/stream.js'
 import Panel from '../../components/Panel.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
+import LoadingSkeleton from '../../components/LoadingSkeleton.jsx'
 import FilterBar from '../../components/filters/FilterBar.jsx'
 import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
 import StatusPill from '../../components/status/StatusPill.jsx'
@@ -144,7 +145,7 @@ export default function Logs() {
         }
       >
         {seedStatus === 'loading' && lines.length === 0 && (
-          <EmptyState message="Loading log lines…" />
+          <LoadingSkeleton variant="list" rows={7} label="Loading log lines" />
         )}
         {seedStatus === 'error' && lines.length === 0 && (
           <EmptyState message="Log feed unavailable — retrying." />

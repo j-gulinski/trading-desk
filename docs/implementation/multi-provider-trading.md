@@ -77,15 +77,15 @@ Read one vertical flow instead of reading directories alphabetically.
 | --- | --- |
 | Provider facts and normalized quote | `shared/providers.py`, `shared/quotes.py`, `shared/freshness.py` |
 | Active provider-symbol set | `shared/active_set.py`, `services/market-data-service/app/watchlist.py` |
-| Vendor HTTP | `clients/base.py`, `clients/finnhub.py`, `clients/twelve_data.py` |
-| Vendor payload mapping | `services/market-data-service/app/normalizer.py` |
-| Polling and budgets | `finnhub_feed.py`, `twelve_data_feed.py`, `provider_runtime.py`, `budget.py` |
-| Board, snapshots and observed-history API | `persistence.py`, `publisher.py`, `api.py` |
+| Vendor HTTP | `providers/base.py`, `providers/finnhub/client.py`, `providers/twelve_data/client.py` |
+| Vendor payload mapping | each `providers/<provider>/normalizer.py` |
+| Polling and budgets | each `providers/<provider>/feed.py`, `provider_runtime.py`, `budget.py` |
+| Board, snapshots and observed-history API | `quote_store.py`, `quote_service.py`, `retention.py`, `publisher.py`, `api.py` |
 | Market UI | `useMarketFeed.js`, `useQuoteHistory.js`, `useWatchlist.js`, `MarketData.jsx` |
 | Ticket comparison | `domain/tradeActions.js`, `NewTradePanel.jsx`, `ProviderQuoteOption.jsx` |
-| Server execution | `trade-action-service/app/trade_processor.py`, `market_state.py`, `repository.py` |
-| Provider-bound valuation | `pricing-service/app/cache.py`, `valuation_engine.py` |
-| Provider log inspection | `clients/base.py`, `monitoring-service`, `Logs.jsx` |
+| Server execution | `trade_validation.py`, `trade_handlers.py`, `trade_processor.py`, `market_state.py`, `repository.py` |
+| Provider-bound valuation | `pricing-service/app/cache.py`, `repository.py`, `market_data_client.py`, `valuation_engine.py` |
+| Provider log inspection | `providers/base.py`, `monitoring-service`, `Logs.jsx` |
 
 ## Flow 1: search and watch one provider
 
@@ -173,7 +173,7 @@ it in `still_polled`: an open position still needs it.
 sequenceDiagram
     participant Feed as Provider feed
     participant Client as ProviderClient
-    participant Norm as normalizer.py
+    participant Norm as providers/<provider>/normalizer.py
     participant DB as PostgreSQL
     participant SSE as publisher.py
     participant UI as React
@@ -206,7 +206,7 @@ field changes. This avoids turning unchanged closed-market confirmation polls in
 of history rows.
 
 Network failures are returned to the budget-aware feed loop; the HTTP client does not make a
-hidden second attempt. This keeps the token bucket, daily-credit ledger and upstream calls in
+hidden second attempt. This keeps the rolling minute budget, daily-credit ledger and upstream calls in
 agreement.
 
 ### Today change and snapshot history
@@ -311,7 +311,7 @@ present in the application.
 
 ## Provider pacing and failure isolation
 
-Finnhub and Twelve Data share the client error types, token bucket, runtime health model,
+Finnhub and Twelve Data share the client error types, rolling minute budget, runtime health model,
 normalizer contract, persistence and publisher. Their feed loops remain separate because
 their actual constraints differ:
 
@@ -402,10 +402,10 @@ questions worth being able to answer without memorizing class names:
 | --- | --- | --- |
 | Which clock decides whether a quote is current? | Provider time describes when the market event occurred; received time describes ingestion health and confirms a closed feed is still polling. | Quote detail, `shared/freshness.py`, stored board row. |
 | Why not collapse two AAPL rows into one best price? | A better displayed number is not stable provenance. Provider identity must survive ticket, trade, valuation and close. | Ticket provider choice, trade detail, valuation provider. |
-| Why seed before opening SSE? | A stream carries only future events. The database seed closes the restart/reconnect gap. | `/market-data/snapshot`, `useStreamSeed.js`, pricing cache seed. |
+| Why register SSE before the authoritative reconnect snapshot? | Events emitted during the snapshot request must already be queued; the snapshot watermark then identifies which queued events it covers. | `/market-data/snapshot`, `market_data_client.py`; the browser performs a fast seed and reconciles again when connected. |
 | Why is the tape not a line chart? | Change-only observations have gaps and begin when this application starts; joining points would claim unobserved market movement. | Snapshot rows and the quote detail tape. |
 | Why can CLOSED be booked while STALE cannot? | CLOSED is a known venue state with healthy confirmation polls; STALE means an expected feed update is overdue. | Provider session, both clocks and ticket eligibility. |
-| What does inheritance solve here, and what does it not solve? | The base client is a Template Method for HTTP mechanics. Provider budgets and schedules remain composition. ABC can later prevent incomplete adapters from being instantiated; it does not validate returned market data. | `clients/base.py`, concrete clients, separate feed modules. |
+| What does inheritance solve here, and what does it not solve? | The base client is a Template Method for HTTP mechanics and requires body classification. Provider budgets, schedules and market-data normalization remain composition. | `providers/base.py`, provider clients and feed modules. |
 | Are volume, depth and open interest interchangeable? | Volume counts executions, depth describes resting orders by price level, and open interest counts outstanding derivatives contracts. None can be inferred from the current normalized quote. | [Market-data capability note](../market-data.md#volume-depth-and-open-interest). |
 
 ## Verification route

@@ -1,5 +1,9 @@
 # Finnhub integration — the first real quote path
 
+> Historical Phase 2 walkthrough. The financial and runtime rules still apply, but Phase 5
+> colocated the current implementation in `app/providers/finnhub/` behind
+> `ProviderRegistration`; use the code map in `phase-reports/phase-5.md` for present paths.
+
 This guide follows Finnhub quotes end to end: client → scheduler →
 database → SSE stream → pricing → the screen. The point of doing one provider *deep*
 instead of three providers shallow: everything written here — client shape, error handling,

@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { apiGet } from '../services/apiClient.js'
 import { endpoints } from '../services/endpoints.js'
 import { useBufferedUpdates } from './useBufferedUpdates.js'
 import { useSseStream } from './useSseStream.js'
 import { useStreamSeed } from './useStreamSeed.js'
 import { BOOK_RISK_EVENT, VALUATION_EVENT } from '../config/valuations.js'
+import { STREAM_STATUS } from '../config/stream.js'
 import {
   bookRiskOf,
   bookRisksFromSeed,
@@ -18,11 +19,11 @@ export function useValuationFeed() {
   const [valuations, setValuations] = useState({})
   const [bookRisk, setBookRisk] = useState({})
 
-  const pushUpdate = useBufferedUpdates((pending) => {
+  const { push: pushUpdate } = useBufferedUpdates((pending) => {
     setValuations((previous) => mergeValuations(previous, pending))
   })
 
-  const { status } = useSseStream(endpoints.pricing.stream, {
+  const { status, reconnect } = useSseStream(endpoints.pricing.stream, {
     events: [VALUATION_EVENT, BOOK_RISK_EVENT],
     onEvent: (name, data) => {
       if (name === BOOK_RISK_EVENT) {
@@ -44,8 +45,8 @@ export function useValuationFeed() {
 
   const seedStatus = useStreamSeed(status, (signal) =>
     Promise.all([
-      apiGet(endpoints.pricing.valuations, { signal }),
-      apiGet(endpoints.pricing.bookRisk, { signal }),
+      apiGet(endpoints.pricing.valuations, { signal, timeoutMs: 10000 }),
+      apiGet(endpoints.pricing.bookRisk, { signal, timeoutMs: 10000 }),
     ]).then(([valuationSeed, riskSeed]) => {
       setValuations((previous) =>
         mergeValuations(previous, valuationsFromSeed(valuationSeed)),
@@ -53,6 +54,12 @@ export function useValuationFeed() {
       setBookRisk((previous) => mergeBookRisks(previous, bookRisksFromSeed(riskSeed)))
     }),
   )
+
+  useEffect(() => {
+    if (seedStatus !== 'error' || status !== STREAM_STATUS.connected) return undefined
+    const timer = window.setTimeout(reconnect, 2000)
+    return () => window.clearTimeout(timer)
+  }, [reconnect, seedStatus, status])
 
   return useMemo(
     () => ({ valuations, bookRisk, status, seedStatus }),

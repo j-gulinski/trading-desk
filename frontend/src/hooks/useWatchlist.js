@@ -4,6 +4,7 @@ import { endpoints } from '../services/endpoints.js'
 import { usePolling } from './usePolling.js'
 import { WATCHLIST_POLL_INTERVAL_MS } from '../config/marketData.js'
 import { instrumentId } from '../domain/marketData.js'
+import { announceWatchlistChange } from '../services/watchlistEvents.js'
 
 function messageOf(error) {
   return error?.body?.error ?? error?.message ?? 'Request failed'
@@ -12,7 +13,9 @@ function messageOf(error) {
 export function useWatchlist() {
   const [addError, setAddError] = useState(null)
   const [removeError, setRemoveError] = useState(null)
+  const [refreshError, setRefreshError] = useState(null)
   const [busyKey, setBusyKey] = useState(null)
+  const [refreshingKey, setRefreshingKey] = useState(null)
 
   const { data, loading, error, refetch } = usePolling(
     ({ signal }) => apiGet(endpoints.marketData.watchlist, { signal }),
@@ -26,10 +29,13 @@ export function useWatchlist() {
       try {
         await apiPost(endpoints.marketData.watchlist, {
           symbol: result.symbol,
+          name: result.name,
           asset_class: result.asset_class,
           currency: result.currency,
+          market: result.market ?? result.exchange,
           providers,
         })
+        announceWatchlistChange()
         refetch()
         return true
       } catch (err) {
@@ -50,6 +56,7 @@ export function useWatchlist() {
         const result = await apiDelete(
           endpoints.marketData.watchlistItem(symbol, provider),
         )
+        announceWatchlistChange()
         refetch()
         return result
       } catch (err) {
@@ -62,16 +69,35 @@ export function useWatchlist() {
     [refetch],
   )
 
+  const refresh = useCallback(async (symbol, provider) => {
+    const key = instrumentId(provider, symbol)
+    setRefreshingKey(key)
+    setRefreshError(null)
+    try {
+      await apiPost(endpoints.marketData.refresh(symbol, provider), {})
+      return true
+    } catch (err) {
+      setRefreshError({ symbol, provider, message: messageOf(err) })
+      return false
+    } finally {
+      setRefreshingKey(null)
+    }
+  }, [])
+
   return {
     items: Array.isArray(data) ? data : [],
     loading,
     error,
     add,
     remove,
+    refresh,
     busyKey,
+    refreshingKey,
     addError,
     removeError,
+    refreshError,
     clearAddError: () => setAddError(null),
     clearRemoveError: () => setRemoveError(null),
+    clearRefreshError: () => setRefreshError(null),
   }
 }

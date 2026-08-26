@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { STREAM_STATUS } from '../config/stream.js'
 
 const RECONNECT_DELAY_MS = 2000
 
-export function useSseStream(url, { events = ['message'], onEvent } = {}) {
+export function useSseStream(url, { events = ['message'], onEvent, onOpen } = {}) {
   const [status, setStatus] = useState(STREAM_STATUS.connecting)
+  const [generation, setGeneration] = useState(0)
 
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
+  const onOpenRef = useRef(onOpen)
+  onOpenRef.current = onOpen
 
   const eventNames = events.join(',')
 
@@ -23,7 +26,10 @@ export function useSseStream(url, { events = ['message'], onEvent } = {}) {
       source = current
 
       current.addEventListener('open', () => {
-        if (!stopped) setStatus(STREAM_STATUS.connected)
+        if (!stopped) {
+          onOpenRef.current?.()
+          setStatus(STREAM_STATUS.connected)
+        }
       })
 
       current.addEventListener('error', () => {
@@ -55,7 +61,11 @@ export function useSseStream(url, { events = ['message'], onEvent } = {}) {
       clearTimeout(reconnectTimer)
       source?.close()
     }
-  }, [url, eventNames])
+  }, [url, eventNames, generation])
 
-  return { status }
+  const reconnect = useCallback(() => {
+    setGeneration((current) => current + 1)
+  }, [])
+
+  return { status, reconnect }
 }

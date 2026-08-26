@@ -49,6 +49,18 @@
   }
 }
 
+// Position tables prioritise trade identity and money columns as the page narrows.
+// Desktop column preferences remain intact; responsive hiding only changes presentation.
+.valuation-positions-table {
+  font-size: 12px;
+
+  th,
+  td,
+  .data-table__sort {
+    padding-inline: 10px;
+  }
+}
+
 .book-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
@@ -305,6 +317,72 @@
 
   .business-panels {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container page (max-width: 1240px) {
+  .valuation-positions-table-wrap {
+    overflow-x: hidden;
+  }
+
+  .valuation-positions-table {
+    min-width: 0 !important;
+    table-layout: fixed;
+
+    [data-column='trade'] { width: 14%; }
+    [data-column='book'] { width: 13%; }
+    [data-column='symbol'] { width: 16%; }
+    [data-column='fairValue'] { width: 15%; }
+    [data-column='notional'] { width: 14%; }
+    [data-column='unrealized'] { width: 16%; }
+    [data-column='valuation'] { width: 12%; }
+
+    [data-column='assetClass'],
+    [data-column='provider'],
+    [data-column='price'],
+    [data-column='return'],
+    [data-column='updated'] {
+      display: none;
+    }
+
+    th,
+    td {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+@container page (max-width: 760px) {
+  .valuation-positions-table {
+    [data-column='trade'] { width: 18%; }
+    [data-column='symbol'] { width: 20%; }
+    [data-column='fairValue'] { width: 21%; }
+    [data-column='unrealized'] { width: 23%; }
+    [data-column='valuation'] { width: 18%; }
+
+    [data-column='book'],
+    [data-column='notional'] {
+      display: none;
+    }
+
+    th,
+    td,
+    .data-table__sort {
+      padding-inline: var(--sp-2);
+    }
+
+    .data-table__head-note {
+      display: none;
+    }
+  }
+}
+
+@container page (max-width: 900px) {
+  .valuation-section .table-columns {
+    display: none;
   }
 }
 

@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
 import SidePanel from '../panel/SidePanel.jsx'
 import StatusPill from '../status/StatusPill.jsx'
 import EmptyState from '../EmptyState.jsx'
+import LoadingSkeleton from '../LoadingSkeleton.jsx'
 import { useQuoteHistory } from '../../hooks/useQuoteHistory.js'
 import {
   formatAge,
@@ -10,24 +12,18 @@ import {
   formatPercentDelta,
   unitLabelOf,
 } from '../../domain/marketFormat.js'
-import { directionOf, formatClockTime, formatUnitPrice } from '../../domain/formatting.js'
+import {
+  directionOf,
+  formatClockTime,
+  formatUnitPrice,
+} from '../../domain/formatting.js'
 import { providerLabel } from '../../config/providers.js'
 import {
   FRESHNESS_PILL_LEVELS,
   freshnessHintOf,
   freshnessLabelOf,
 } from '../../config/marketData.js'
-
-function toNumber(value) {
-  if (value == null || value === '') return null
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-function toTime(value) {
-  const parsed = Date.parse(value ?? '')
-  return Number.isFinite(parsed) ? parsed : null
-}
+import { toNum as toNumber, toTime } from '../../domain/values.js'
 
 function basisLabel(value) {
   return value ? value.replaceAll('_', ' ') : '—'
@@ -99,24 +95,29 @@ function HistoryItem({ point, previous, instrument, reference }) {
         <strong>{formatUnitPrice(point.mark, instrument.assetClass)}</strong>
         <Change instrument={instrument} {...change} />
       </div>
-      <div className="quote-history__tick-market">
-        <span>BID {formatUnitPrice(point.bid, instrument.assetClass)}</span>
-        <span>ASK {formatUnitPrice(point.ask, instrument.assetClass)}</span>
-        <span>LAST {formatUnitPrice(point.last, instrument.assetClass)}</span>
-      </div>
+      {!reference && (
+        <div className="quote-history__tick-market">
+          {Number.isFinite(point.bid) && (
+            <span>BID {formatUnitPrice(point.bid, instrument.assetClass)}</span>
+          )}
+          {Number.isFinite(point.ask) && (
+            <span>ASK {formatUnitPrice(point.ask, instrument.assetClass)}</span>
+          )}
+          {Number.isFinite(point.last) && (
+            <span>LAST {formatUnitPrice(point.last, instrument.assetClass)}</span>
+          )}
+        </div>
+      )}
       <div className="quote-history__tick-meta">
-        <span>{basisLabel(point.priceBasis)}</span>
+        {!reference && <span>{basisLabel(point.priceBasis)}</span>}
         <span>received {formatClockTime(point.receivedAtMs, { millis: true })}</span>
       </div>
-      {point.rawPayload != null && (
-        <details className="quote-history__raw">
-          <summary>Raw source response</summary>
-          <pre>{JSON.stringify(point.rawPayload, null, 2)}</pre>
-        </details>
-      )}
     </li>
   )
 }
+
+const INITIAL_HISTORY_ROWS = 15
+const HISTORY_PAGE_ROWS = 15
 
 export default function QuoteHistoryPanel({ row, onClose }) {
   const { instrument, state, tickChange, todayChange, providerAgeMs } = row
@@ -125,7 +126,16 @@ export default function QuoteHistoryPanel({ row, onClose }) {
   const symbol = formatMarketSymbol(instrument)
   const currentTone = directionOf(tickChange.delta)
   const reference = instrument.grade === 'REFERENCE'
+  const changePeriod = state === 'CLOSED' || instrument.marketOpen === false
+    ? 'LAST SESSION'
+    : 'TODAY'
   const unit = unitLabelOf(instrument)
+  const latestRawPayload = points.find((point) => point.rawPayload != null)?.rawPayload ?? null
+  const [visibleRows, setVisibleRows] = useState(INITIAL_HISTORY_ROWS)
+  useEffect(() => {
+    setVisibleRows(INITIAL_HISTORY_ROWS)
+  }, [instrument.provider, instrument.symbol])
+  const visiblePoints = points.slice(0, visibleRows)
 
   return (
     <SidePanel
@@ -160,15 +170,21 @@ export default function QuoteHistoryPanel({ row, onClose }) {
           <div className="quote-history__current-moves">
             <span>LAST TICK</span>
             <Change instrument={instrument} {...tickChange} empty="waiting for next tick" />
-            <span>TODAY</span>
+            <span>{changePeriod}</span>
             <Change instrument={instrument} {...todayChange} empty="no previous close" />
           </div>
         </div>
 
         <dl className="quote-history__metrics">
-          <Metric label="Bid" value={formatUnitPrice(instrument.bid, instrument.assetClass)} />
-          <Metric label="Ask" value={formatUnitPrice(instrument.ask, instrument.assetClass)} />
-          <Metric label="Last" value={formatUnitPrice(instrument.last, instrument.assetClass)} />
+          {!reference && Number.isFinite(instrument.bid) && (
+            <Metric label="Bid" value={formatUnitPrice(instrument.bid, instrument.assetClass)} />
+          )}
+          {!reference && Number.isFinite(instrument.ask) && (
+            <Metric label="Ask" value={formatUnitPrice(instrument.ask, instrument.assetClass)} />
+          )}
+          {!reference && Number.isFinite(instrument.last) && (
+            <Metric label="Last" value={formatUnitPrice(instrument.last, instrument.assetClass)} />
+          )}
           <Metric label="Basis" value={basisLabel(instrument.priceBasis)} note={instrument.grade} />
           <Metric
             label={reference ? 'As of' : 'Provider time'}
@@ -190,7 +206,7 @@ export default function QuoteHistoryPanel({ row, onClose }) {
         <header className="quote-history__section-head">
           <div>
             <h3 id="observed-history-title">Observed price changes</h3>
-            <p>Newest first</p>
+            <p>Newest first · showing {Math.min(visibleRows, points.length)} of {points.length}</p>
           </div>
         </header>
 
@@ -200,12 +216,12 @@ export default function QuoteHistoryPanel({ row, onClose }) {
           aria-label="Observed quote changes"
         >
           {history.loading ? (
-            <EmptyState message="Loading observed quote changes…" />
+            <LoadingSkeleton variant="panel" label="Loading observed quote changes" />
           ) : points.length === 0 ? (
             <EmptyState message="No stored price changes for this provider-symbol yet." />
           ) : (
             <ol className="quote-history__ticks">
-              {points.map((point, index) => (
+              {visiblePoints.map((point, index) => (
                 <HistoryItem
                   key={point.id}
                   point={point}
@@ -217,6 +233,21 @@ export default function QuoteHistoryPanel({ row, onClose }) {
             </ol>
           )}
         </div>
+        {visibleRows < points.length && (
+          <button
+            type="button"
+            className="quote-history__more"
+            onClick={() => setVisibleRows((current) => current + HISTORY_PAGE_ROWS)}
+          >
+            Show 15 older observations
+          </button>
+        )}
+        {latestRawPayload != null && (
+          <details className="quote-history__raw">
+            <summary>Latest raw source response</summary>
+            <pre>{JSON.stringify(latestRawPayload, null, 2)}</pre>
+          </details>
+        )}
       </section>
     </SidePanel>
   )

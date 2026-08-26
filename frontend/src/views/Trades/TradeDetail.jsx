@@ -10,8 +10,9 @@ import { BLOTTER_POLL_INTERVAL_MS } from '../../config/trades.js'
 import TradeDetailPanel from '../../components/trades/TradeDetailPanel.jsx'
 
 const CLOSE_STALL_MS = 15000
+const MODEL_PRICED_CLASSES = new Set(['BOND', 'IRS', 'EUROPEAN_OPTION'])
 
-export default function TradeDetail({ row, bookNames, onClose }) {
+export default function TradeDetail({ row, bookNames, instruments, onClose }) {
   const detail = usePolling(
     ({ signal }) => apiGet(endpoints.blotter.trade(row.trade.id), { signal }),
     { intervalMs: BLOTTER_POLL_INTERVAL_MS },
@@ -22,6 +23,15 @@ export default function TradeDetail({ row, bookNames, onClose }) {
   const [closing, setClosing] = useState(false)
   const [closeNote, setCloseNote] = useState(null)
   const stallTimer = useRef(null)
+  const modelPriced = MODEL_PRICED_CLASSES.has(row.trade.assetClass)
+  const closingSide = row.trade.side === 'SELL' ? 'BUY' : 'SELL'
+  const marketQuote = instruments?.[`${row.trade.provider}:${row.trade.symbol}`] ?? null
+  const quotedClose = closingSide === 'BUY' ? marketQuote?.ask : marketQuote?.bid
+  const closeReference = modelPriced
+    ? row.valuation?.price
+    : Number.isFinite(quotedClose)
+      ? quotedClose
+      : marketQuote?.value
 
   useEffect(() => {
     if (!closing || detailStatus == null || detailStatus === 'ACTIVE') {
@@ -41,7 +51,7 @@ export default function TradeDetail({ row, bookNames, onClose }) {
     try {
       await apiPost(
         endpoints.tradeAction.submit,
-        buildCloseTradeIntent(row.trade.id),
+        buildCloseTradeIntent(row.trade.id, closeReference),
       )
       stallTimer.current = setTimeout(() => {
         setCloseNote('Close pending — awaiting confirmation.')
@@ -67,7 +77,13 @@ export default function TradeDetail({ row, bookNames, onClose }) {
       lastUpdated={detail.lastUpdated}
       onClose={onClose}
       onCloseTrade={closeTrade}
-      canClose={row.lifecycle === 'OPEN' && detailStatus === 'ACTIVE'}
+      closeReference={closeReference}
+      closeReferenceLabel={modelPriced ? 'Current model value' : `${closingSide} quote`}
+      canClose={
+        row.lifecycle === 'OPEN' &&
+        detailStatus === 'ACTIVE' &&
+        Number.isFinite(closeReference)
+      }
       closing={closing}
       closeNote={closeNote}
     />

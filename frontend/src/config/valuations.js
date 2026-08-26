@@ -30,7 +30,7 @@ export const VALUATION_COLUMNS = [
   },
   { id: 'book', label: 'Book', required: true, sortable: true, defaultDirection: 'asc' },
   { id: 'assetClass', label: 'Class', sortable: true, defaultDirection: 'asc' },
-  { id: 'symbol', label: 'Symbol', sortable: true, defaultDirection: 'asc' },
+  { id: 'symbol', label: 'Instrument', sortable: true, defaultDirection: 'asc' },
   {
     id: 'provider',
     label: 'Provider',

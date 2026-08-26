@@ -29,6 +29,7 @@ def _to_cached_trade(row: Trade) -> CachedTrade:
         close_price_timestamp=row.close_price_timestamp,
         close_snapshot_id=str(row.close_snapshot_id) if row.close_snapshot_id else None,
         client_seen_price=row.client_seen_price,
+        terms=row.trade_metadata,
     )
 
 
@@ -88,8 +89,10 @@ def closed_trade_counts_by_book() -> dict[str, int]:
         return {str(book_id): count for book_id, count in rows}
 
 
-def realized_pnl_by_book() -> dict[str, object]:
-    totals: dict[str, object] = {}
+def realized_pnl_by_book() -> dict[str, dict[str, object]]:
+    """Realized PnL per book, split by settlement currency — amounts in different
+    currencies must not be added together."""
+    totals: dict[str, dict[str, object]] = {}
     with session_scope() as session:
         rows = session.query(Trade).filter(Trade.status == "CLOSED").all()
         for t in rows:
@@ -100,8 +103,10 @@ def realized_pnl_by_book() -> dict[str, object]:
                 realized = (t.trade_price - t.close_price) * t.quantity * multiplier
             else:
                 realized = (t.close_price - t.trade_price) * t.quantity * multiplier
-            book_id = str(t.book_id)
-            totals[book_id] = (totals.get(book_id) or Decimal("0")) + realized
+            by_currency = totals.setdefault(str(t.book_id), {})
+            by_currency[t.trade_currency] = (
+                by_currency.get(t.trade_currency) or Decimal("0")
+            ) + realized
     return totals
 
 
@@ -122,6 +127,9 @@ def valuation_history(trade_id: str, limit: int = 100) -> list[dict]:
                 "realized_pnl": v.realized_pnl,
                 "total_pnl": v.total_pnl,
                 "currency": v.currency,
+                "market_data_provider": v.market_data_provider,
+                "market_data_timestamp": v.market_data_timestamp,
+                "valuation_payload": v.valuation_payload or {},
             }
             for v in rows
         ]

@@ -46,7 +46,11 @@ export default function ColumnPicker({
   }, [])
 
   function startDrag(event, column) {
-    if (!visible.has(column) || (event.pointerType === 'mouse' && event.button !== 0)) {
+    if (
+      !visible.has(column) ||
+      columnById.get(column)?.reorderLocked ||
+      (event.pointerType === 'mouse' && event.button !== 0)
+    ) {
       return
     }
     event.preventDefault()
@@ -69,7 +73,14 @@ export default function ColumnPicker({
     const target = targetElement && detailsRef.current?.contains(targetElement)
       ? targetElement.dataset.columnId
       : null
-    if (!target || target === dragging || !visible.has(target)) {
+    const sourceGroup = columnById.get(dragging)?.reorderGroup
+    const targetGroup = columnById.get(target)?.reorderGroup
+    if (
+      !target ||
+      target === dragging ||
+      !visible.has(target) ||
+      (sourceGroup != null && targetGroup != null && sourceGroup !== targetGroup)
+    ) {
       if (dragTargetRef.current == null) return
       dragTargetRef.current = null
       dropPositionRef.current = null
@@ -132,6 +143,7 @@ export default function ColumnPicker({
           {orderedColumns.map((column) => {
             const visibleIndex = visibleColumns.indexOf(column.id)
             const isVisible = visibleIndex >= 0
+            const canReorder = isVisible && !column.reorderLocked
             return (
               <div
                 className={`table-columns__option${draggedColumn === column.id ? ' table-columns__option--dragging' : ''}${dragTarget === column.id ? ` table-columns__option--target-${dropPosition}` : ''}`}
@@ -150,9 +162,15 @@ export default function ColumnPicker({
                 <button
                   type="button"
                   className={`table-columns__drag${draggedColumn === column.id ? ' table-columns__drag--active' : ''}`}
-                  disabled={!isVisible}
+                  disabled={!canReorder}
                   aria-label={`Reorder ${column.label}. Drag, or use Arrow Up and Arrow Down`}
-                  title={isVisible ? 'Drag to reorder' : 'Show column before reordering'}
+                  title={
+                    column.reorderLocked
+                      ? 'Instrument identity keeps a fixed position'
+                      : isVisible
+                        ? 'Drag to reorder'
+                        : 'Show column before reordering'
+                  }
                   onPointerDown={(event) => startDrag(event, column.id)}
                   onPointerMove={moveDrag}
                   onPointerUp={(event) => stopDrag(event, true)}
@@ -160,10 +178,14 @@ export default function ColumnPicker({
                   onKeyDown={(event) => {
                     const direction =
                       event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0
+                    const adjacent = columnById.get(visibleColumns[visibleIndex + direction])
                     if (
                       direction === 0 ||
                       visibleIndex + direction < 0 ||
-                      visibleIndex + direction >= visibleColumns.length
+                      visibleIndex + direction >= visibleColumns.length ||
+                      (column.reorderGroup != null &&
+                        adjacent?.reorderGroup != null &&
+                        column.reorderGroup !== adjacent.reorderGroup)
                     ) {
                       return
                     }

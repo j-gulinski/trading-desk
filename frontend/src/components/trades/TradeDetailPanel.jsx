@@ -1,20 +1,102 @@
 import { useState } from 'react'
 import EmptyState from '../EmptyState.jsx'
+import LoadingSkeleton from '../LoadingSkeleton.jsx'
 import StatusPill from '../status/StatusPill.jsx'
 import SidePanel from '../panel/SidePanel.jsx'
 import PanelTabs from '../panel/PanelTabs.jsx'
 import ValuationHistoryTable from './ValuationHistoryTable.jsx'
 import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
+import { CURVE_ROLE_HINTS } from '../../config/marketData.js'
+import { curveTitle } from '../../domain/curves.js'
 import { providerLabel } from '../../config/providers.js'
 import {
   directionOf,
   formatAmount,
   formatClockTime,
   formatDateTime,
+  formatNumber,
   formatSignedAmount,
   formatUnitPrice,
 } from '../../domain/formatting.js'
 import AuditEventList from '../audit/AuditEventList.jsx'
+import {
+  tradePositionLabel,
+  tradePriceForDisplay,
+  tradeSize,
+  tradeSizeLabel,
+} from '../../domain/trades.js'
+
+const CURVE_TERMS = ['discount_curve', 'projection_curve']
+const HIDDEN_TERMS = new Set([
+  'asset_class',
+  'currency',
+  'direction',
+  'face_value',
+  'notional',
+  'projection_curve_tracks_index',
+])
+const TERM_LABELS = {
+  settlement_currency: 'Currency',
+  face_value: 'Face amount',
+  coupon_rate: 'Coupon',
+  fixed_rate: 'Fixed rate',
+  maturity_years: 'Maturity',
+  payments_per_year: 'Payments / year',
+  floating_rate_index_tenor: 'Floating index tenor',
+  discount_curve: 'Discount curve',
+  projection_curve: 'Projection curve',
+  underlying_symbol: 'Underlying',
+  option_type: 'Type',
+  strike: 'Strike',
+  multiplier: 'Contract multiplier',
+  volatility: 'Volatility assumption',
+  discount_curve_provider: 'Discount curve provider',
+  discount_curve_as_of: 'Discount curve as of',
+  projection_curve_provider: 'Projection curve provider',
+  projection_curve_as_of: 'Projection curve as of',
+}
+const TERM_ORDER = [
+  'settlement_currency',
+  'underlying_symbol',
+  'option_type',
+  'strike',
+  'face_value',
+  'coupon_rate',
+  'fixed_rate',
+  'maturity_years',
+  'payments_per_year',
+  'floating_rate_index_tenor',
+  'multiplier',
+  'volatility',
+  'discount_curve',
+  'discount_curve_provider',
+  'discount_curve_as_of',
+  'projection_curve',
+  'projection_curve_provider',
+  'projection_curve_as_of',
+]
+const TERM_RANK = new Map(TERM_ORDER.map((key, index) => [key, index]))
+
+function visibleTermEntries(terms) {
+  return Object.entries(terms)
+    .filter(([key]) => !HIDDEN_TERMS.has(key))
+    .sort(([left], [right]) => (
+      (TERM_RANK.get(left) ?? TERM_ORDER.length) -
+      (TERM_RANK.get(right) ?? TERM_ORDER.length)
+    ))
+}
+
+function termValueText(key, value) {
+  if (typeof value === 'boolean') return value ? 'yes' : 'no'
+  if (CURVE_TERMS.includes(key)) return curveTitle(String(value))
+  if (key === 'coupon_rate' || key === 'fixed_rate') return `${formatNumber(value)}%`
+  if (key === 'volatility') return `${formatNumber(Number(value) * 100)}%`
+  if (key === 'maturity_years') {
+    return `${formatNumber(value)} ${Number(value) === 1 ? 'year' : 'years'}`
+  }
+  if (typeof value === 'number') return formatNumber(value)
+  return String(value)
+}
 
 function DetailField({ label, children }) {
   return (
@@ -25,7 +107,18 @@ function DetailField({ label, children }) {
   )
 }
 
-function CloseTradeControl({ canClose, closing, closeNote, onCloseTrade }) {
+function CloseTradeControl({
+  canClose,
+  closing,
+  closeNote,
+  indicativeValue,
+  closeReference,
+  closeReferenceLabel,
+  currency,
+  source,
+  valuationTimeMs,
+  onCloseTrade,
+}) {
   const [confirming, setConfirming] = useState(false)
 
   if (!canClose) return null
@@ -43,26 +136,43 @@ function CloseTradeControl({ canClose, closing, closeNote, onCloseTrade }) {
     <span className="trade-detail__close-trade">
       {closeNote && <span className="trade-detail__close-trade-error">{closeNote}</span>}
       {confirming ? (
-        <>
-          <span>Confirm close?</span>
-          <button
-            type="button"
-            className="trade-detail__close-trade-confirm"
-            onClick={() => {
-              setConfirming(false)
-              onCloseTrade()
-            }}
-          >
-            Confirm
-          </button>
-          <button
-            type="button"
-            className="trade-detail__close-trade-cancel"
-            onClick={() => setConfirming(false)}
-          >
-            Cancel
-          </button>
-        </>
+        <span className="trade-detail__close-confirmation" role="dialog" aria-label="Confirm trade close">
+          <strong>Close at current market?</strong>
+          <span>
+            {Number.isFinite(indicativeValue)
+              ? `${formatAmount(indicativeValue)} ${currency ?? ''}`.trim()
+              : 'Indicative fair value unavailable'}
+          </span>
+          <small>
+            {source ?? 'Current valuation'}
+            {valuationTimeMs != null ? ` · ${formatClockTime(valuationTimeMs)}` : ''}
+          </small>
+          <small>
+            {closeReferenceLabel}: {Number.isFinite(closeReference)
+              ? `${formatAmount(closeReference)} ${currency ?? ''}`.trim()
+              : 'unavailable'}
+          </small>
+          <small>Final close value is recomputed from current market data.</small>
+          <span className="trade-detail__close-confirmation-actions">
+            <button
+              type="button"
+              className="trade-detail__close-trade-confirm"
+              onClick={() => {
+                setConfirming(false)
+                onCloseTrade()
+              }}
+            >
+              Confirm close
+            </button>
+            <button
+              type="button"
+              className="trade-detail__close-trade-cancel"
+              onClick={() => setConfirming(false)}
+            >
+              Cancel
+            </button>
+          </span>
+        </span>
       ) : (
         <button
           type="button"
@@ -98,6 +208,8 @@ export default function TradeDetailPanel({
   canClose,
   closing,
   closeNote,
+  closeReference,
+  closeReferenceLabel,
 }) {
   const [tab, setTab] = useState('details')
 
@@ -125,6 +237,12 @@ export default function TradeDetailPanel({
             canClose={canClose}
             closing={closing}
             closeNote={closeNote}
+            indicativeValue={valuation?.fairValue}
+            closeReference={closeReference}
+            closeReferenceLabel={closeReferenceLabel}
+            currency={valuation?.currency ?? trade.currency}
+            source={trade.provider ? providerLabel(trade.provider) : 'Curve model'}
+            valuationTimeMs={valuation?.valuationTimeMs}
             onCloseTrade={onCloseTrade}
           />
           <StatusPill
@@ -188,27 +306,58 @@ export default function TradeDetailPanel({
               <DetailField label="Book">{trade.bookName}</DetailField>
               <DetailField label="Instrument">{trade.symbol}</DetailField>
               <DetailField label="Class">{trade.assetClass}</DetailField>
-              <DetailField label="Side">
+              <DetailField label={trade.assetClass === 'IRS' ? 'Direction' : 'Side'}>
                 <span className={`trade-side trade-side--${trade.side.toLowerCase()}`}>
-                  {trade.side}
+                  {tradePositionLabel(trade)}
                 </span>
               </DetailField>
-              <DetailField label="Quantity">{trade.quantity}</DetailField>
-              <DetailField label="Entry">
-                {formatUnitPrice(trade.entryPrice, trade.assetClass)}
+              <DetailField label={tradeSizeLabel(trade)}>{formatNumber(tradeSize(trade))}</DetailField>
+              <DetailField label={trade.assetClass === 'BOND' ? 'Entry / 100 face' : 'Entry'}>
+                {formatUnitPrice(
+                  tradePriceForDisplay(trade, trade.entryPrice),
+                  trade.assetClass,
+                )}
               </DetailField>
               <DetailField label="Priced by">
-                {trade.provider ? providerLabel(trade.provider) : null}
+                {trade.provider
+                  ? providerLabel(trade.provider)
+                  : ['BOND', 'IRS'].includes(trade.assetClass) ? 'Curve model' : null}
               </DetailField>
-              <DetailField label="Quote time">
+              <DetailField label={['BOND', 'IRS'].includes(trade.assetClass) ? 'Curve as of' : 'Quote time'}>
                 {trade.entryPriceAtMs == null ? null : formatDateTime(trade.entryPriceAtMs)}
               </DetailField>
               <DetailField label="Opened">{formatDateTime(trade.openedAtMs)}</DetailField>
+              {trade.terms != null &&
+                Object.keys(trade.terms).some(
+                  (key) => !HIDDEN_TERMS.has(key),
+                ) && (
+                <DetailField label="Terms">
+                  <dl className="trade-detail__terms">
+                    {visibleTermEntries(trade.terms)
+                      .map(([key, value]) => (
+                        <div key={key}>
+                          <dt
+                            className={
+                              CURVE_ROLE_HINTS[key] ? 'trade-detail__terms-hinted' : undefined
+                            }
+                            title={CURVE_ROLE_HINTS[key]}
+                          >
+                            {TERM_LABELS[key] ?? key.replaceAll('_', ' ')}
+                          </dt>
+                          <dd>{termValueText(key, value)}</dd>
+                        </div>
+                      ))}
+                  </dl>
+                </DetailField>
+              )}
               {row.lifecycle === 'CLOSED' && (
                 <>
                   <DetailField label="Closed">{formatDateTime(trade.closedAtMs)}</DetailField>
-                  <DetailField label="Close price">
-                    {formatUnitPrice(trade.closePrice, trade.assetClass)}
+                  <DetailField label={trade.assetClass === 'BOND' ? 'Close / 100 face' : 'Close price'}>
+                    {formatUnitPrice(
+                      tradePriceForDisplay(trade, trade.closePrice),
+                      trade.assetClass,
+                    )}
                   </DetailField>
                   <DetailField label="Close quote time">
                     {trade.closePriceAtMs == null ? null : formatDateTime(trade.closePriceAtMs)}
@@ -223,7 +372,9 @@ export default function TradeDetailPanel({
 
       {tab === 'history' && (
         <div className="trade-detail__tabpanel">
-          {loading && !detail && <EmptyState message="Loading valuation history…" />}
+          {loading && !detail && (
+            <LoadingSkeleton variant="table" label="Loading valuation history" />
+          )}
           {!loading && !detail && <EmptyState message="Valuation history is unavailable." />}
           {detail && detail.valuationHistory.length === 0 && (
             <EmptyState message="No persisted valuations for this trade yet." />
@@ -236,7 +387,9 @@ export default function TradeDetailPanel({
 
       {tab === 'audit' && (
         <div className="trade-detail__tabpanel">
-          {loading && !detail && <EmptyState message="Loading trade audit events…" />}
+          {loading && !detail && (
+            <LoadingSkeleton variant="list" label="Loading trade audit events" />
+          )}
           {!loading && auditEvents.length === 0 && (
             <EmptyState
               message={

@@ -19,7 +19,7 @@ function SortHeader({ column, sort, onSort, disabledReason }) {
 
   if (!column.sortable) {
     return (
-      <th scope="col" className={className || undefined}>
+      <th scope="col" className={className || undefined} data-column={column.id}>
         <ColumnLabel column={column} />
       </th>
     )
@@ -29,6 +29,7 @@ function SortHeader({ column, sort, onSort, disabledReason }) {
     <th
       scope="col"
       className={classes(className, 'data-table__sort-heading')}
+      data-column={column.id}
       aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}
     >
       <button
@@ -69,13 +70,18 @@ export default function DataTable({
   cellTitle = () => undefined,
   cellProps = () => null,
   onRowClick = null,
+  onRowMouseEnter = null,
+  onRowMouseLeave = null,
   caption,
+  tableClassName,
+  wrapClassName,
+  minWidth: requestedMinWidth,
 }) {
-  const minWidth = Math.max(520, 500 + (columns.length - 2) * 80)
+  const minWidth = requestedMinWidth ?? Math.max(520, 500 + (columns.length - 2) * 80)
 
   return (
-    <div className="data-table-wrap">
-      <table className="data-table" style={{ minWidth }}>
+    <div className={classes('data-table-wrap', wrapClassName)}>
+      <table className={classes('data-table', tableClassName)} style={{ minWidth }}>
         <caption className="data-table__caption">{caption}</caption>
         <thead>
           <tr>
@@ -103,6 +109,8 @@ export default function DataTable({
                 data-panel-trigger={onRowClick ? '' : undefined}
                 tabIndex={onRowClick ? 0 : undefined}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onMouseEnter={onRowMouseEnter ? () => onRowMouseEnter(row) : undefined}
+                onMouseLeave={onRowMouseLeave ? () => onRowMouseLeave(row) : undefined}
                 onKeyDown={onRowClick ? (event) => {
                   if (event.target !== event.currentTarget) return
                   if (event.key !== 'Enter' && event.key !== ' ') return
@@ -116,6 +124,7 @@ export default function DataTable({
                   return (
                     <td
                       key={column.id}
+                      data-column={column.id}
                       rowSpan={props.rowSpan}
                       className={
                         classes(

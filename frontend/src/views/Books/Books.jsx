@@ -11,9 +11,11 @@ import {
   summarizeBooks,
 } from '../../domain/books.js'
 import { describeApiError } from '../../domain/apiErrors.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
 import { countOptions } from '../../domain/filters.js'
 import { formatNumber } from '../../domain/formatting.js'
 import EmptyState from '../../components/EmptyState.jsx'
+import LoadingSkeleton from '../../components/LoadingSkeleton.jsx'
 import ConfirmPanel from '../../components/panel/ConfirmPanel.jsx'
 import FilterBar from '../../components/filters/FilterBar.jsx'
 import BookCard from '../../components/books/BookCard.jsx'
@@ -22,12 +24,15 @@ import MoveTradesPanel from '../../components/books/MoveTradesPanel.jsx'
 import FxReport from '../../components/fx/FxReport.jsx'
 import { useFxRates } from '../../hooks/useFxRates.js'
 import { useReportingCurrency } from '../../hooks/useReportingCurrency.js'
-import { currencySubtotalsOf } from '../../domain/fx.js'
+import { currencySubtotalsOf, reportedTotalsOf } from '../../domain/fx.js'
+import { useMarketFeedContext } from '../../providers/feedContext.js'
 
 const FX_COLUMNS = [
   { id: 'unrealized', label: 'UNREALIZED', signed: true },
   { id: 'realized', label: 'REALIZED', signed: true },
 ]
+
+const FX_METRICS = FX_COLUMNS.map((column) => column.id)
 import { PANEL_ID, usePanelCoordinator } from '../../layout/panelContext.js'
 
 function describeDeleteError(error) {
@@ -54,6 +59,7 @@ export default function Books() {
     { intervalMs: BOOK_SUMMARY_POLL_INTERVAL_MS },
   )
   const { now } = useElapsedTime()
+  const { instruments, curves } = useMarketFeedContext()
   const { activePanel, openPanel, closePanel: closeActivePanel } = usePanelCoordinator()
 
   const [expandedId, setExpandedId] = useState(null)
@@ -69,12 +75,9 @@ export default function Books() {
   const [reportingCurrency, setReportingCurrency] = useReportingCurrency()
   const fx = useFxRates(reportingCurrency)
   const currencySubtotals = currencySubtotalsOf(
-    roster.filter((book) => book.currency != null),
-    (book) => book.currency,
-    (book) => ({
-      unrealized: book.unrealizedPnl ?? 0,
-      realized: book.realizedPnl ?? 0,
-    }),
+    roster.flatMap((book) => book.subtotals),
+    (row) => row.currency,
+    (row) => row.values,
   )
   const deactivatedCount = allBooks.filter((book) => !book.isActive).length
   const search = query.trim().toLowerCase()
@@ -108,7 +111,7 @@ export default function Books() {
 
   let content
   if (summary.loading) {
-    content = <EmptyState message="Loading books…" />
+    content = <LoadingSkeleton variant="cards" label="Loading books" />
   } else if (unavailable) {
     content = (
       <EmptyState message="Blotter service unavailable — retrying." />
@@ -128,8 +131,22 @@ export default function Books() {
           <BookCard
             key={book.id}
             book={book}
+            reported={reportedTotalsOf(
+              {
+                subtotals: book.subtotals,
+                currency: book.currency,
+                values: { unrealized: book.unrealizedPnl, realized: book.realizedPnl },
+              },
+              fx.rates,
+              reportingCurrency,
+              FX_METRICS,
+            )}
             expanded={expandedId === book.id}
-            positions={expandedId === book.id ? bookPositionsOf(book, now) : []}
+            positions={
+              expandedId === book.id
+                ? bookPositionsOf(book, now, instruments, curves)
+                : []
+            }
             onToggleExpand={() =>
               setExpandedId((current) => (current === book.id ? null : book.id))
             }
@@ -146,10 +163,11 @@ export default function Books() {
     <section className="page">
       <div className="books-header">
         <span className="books-header__meta">
-          {formatNumber(totals.books)} books 
+          {formatNumber(totals.books)} {totals.books === 1 ? 'book' : 'books'}
           {deactivatedCount > 0 && !includeDeactivated
             ? ` · ${formatNumber(deactivatedCount)} deactivated hidden`
-            : ''} · {formatNumber(totals.openPositions)} open positions
+            : ''} · {formatNumber(totals.openPositions)} open{' '}
+          {totals.openPositions === 1 ? 'position' : 'positions'}
         </span>
         <button
           type="button"
@@ -168,7 +186,7 @@ export default function Books() {
       <FilterBar
         label="CLASS"
         ariaLabel="Filter books by asset class"
-        options={countOptions(roster, (book) => book.assetClass)}
+        options={countOptions(roster, (book) => book.assetClass, assetClassLabel)}
         value={activeClass}
         onChange={setActiveClass}
         search={{

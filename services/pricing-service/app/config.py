@@ -1,5 +1,5 @@
 from shared.config import env_float, env_int, env_str
-from shared.pricing_math import MINIMUM_OBSERVATIONS
+from shared.pricing.risk import MINIMUM_OBSERVATIONS
 
 SERVICE_NAME = "pricing-service"
 PORT = 8002

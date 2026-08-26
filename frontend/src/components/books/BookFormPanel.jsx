@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import EmptyState from '../EmptyState.jsx'
+import LoadingSkeleton from '../LoadingSkeleton.jsx'
 import SidePanel from '../panel/SidePanel.jsx'
 import { apiGet, apiPost, apiPut } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
@@ -101,7 +102,7 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
       onClose={onClose}
     >
       {editing && values == null && loadError == null && (
-        <EmptyState message="Loading book…" />
+        <LoadingSkeleton variant="panel" rows={4} label="Loading book" />
       )}
       {loadError != null && <EmptyState message={loadError} />}
 

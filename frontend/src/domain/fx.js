@@ -1,10 +1,5 @@
 import { REPORTING_CURRENCY_BASE_OPTIONS } from '../config/marketData.js'
-
-function toNum(value) {
-  if (value == null || value === '') return null
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
-}
+import { toNum } from './values.js'
 
 export function fxConversionOf(rateInfo, currency, toCurrency) {
   if (currency === toCurrency) {
@@ -61,6 +56,32 @@ export function convertedTotalsOf(subtotals, rates, toCurrency, metricIds) {
     if (conversion.label) applied.push(conversion.label)
   }
   return { totals, applied, excluded }
+}
+
+export function reportedTotalsOf(
+  { subtotals, currency, values }, rates, toCurrency, metricIds,
+) {
+  if (currency != null && (!toCurrency || currency === toCurrency)) {
+    return { values, currency }
+  }
+  if (!toCurrency) return { values: null, currency: 'MIXED' }
+  if (rates == null) return { values: null, currency: toCurrency }
+  const source = subtotals.length > 0
+    ? subtotals
+    : [{ currency, values }]
+  const converted = convertedTotalsOf(source, rates, toCurrency, metricIds)
+  if (converted.excluded.length > 0) {
+    return {
+      values: null,
+      currency: toCurrency,
+      title: converted.excluded.map((row) => row.reason).join('; '),
+    }
+  }
+  return {
+    values: converted.totals,
+    currency: toCurrency,
+    title: converted.applied.join('; '),
+  }
 }
 
 export function reportingCurrencyOptions(subtotals) {

@@ -3,13 +3,8 @@ import {
   BOOK_DESCRIPTION_MAX_LENGTH,
   BOOK_NAME_MAX_LENGTH,
 } from '../config/books.js'
-import { VALUATION_STALE_AFTER_MS } from '../config/valuations.js'
-
-function toNum(value) {
-  if (value == null || value === '') return null
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
-}
+import { statusOf } from './valuations.js'
+import { toNum, toTime } from './values.js'
 
 export function bookSummariesOf(raw) {
   return (Array.isArray(raw) ? raw : [])
@@ -23,6 +18,13 @@ export function bookSummariesOf(raw) {
       realizedPnl: toNum(book.realized_pnl),
       unrealizedPnl: toNum(book.unrealized_pnl),
       currency: book.currency ?? null,
+      subtotals: (Array.isArray(book.subtotals) ? book.subtotals : []).map((row) => ({
+        currency: row.currency,
+        values: {
+          unrealized: toNum(row.values?.unrealized) ?? 0,
+          realized: toNum(row.values?.realized) ?? 0,
+        },
+      })),
       isActive: book.is_active !== false,
       positions: Array.isArray(book.positions) ? book.positions : [],
     }))
@@ -42,22 +44,53 @@ export function summarizeBooks(books) {
   }
 }
 
-export function bookPositionsOf(book, now) {
-  return (book?.positions ?? []).map((position) => {
-    const valuedAt = Date.parse(position.valuation_time ?? '')
-    const stale =
-      position.unvalued > 0 ||
-      !Number.isFinite(valuedAt) ||
-      now - valuedAt > VALUATION_STALE_AFTER_MS
-    return {
-      id: position.symbol,
+function positionStatusOf(position, now, instruments, curves) {
+  const unvalued = toNum(position.unvalued) ?? 0
+  const valuedAt = toTime(position.valuation_time)
+  if (unvalued > 0 || !Number.isFinite(valuedAt)) return 'PENDING'
+
+  const payload = position.valuation_payload ?? {}
+  const provider = position.market_data_provider ?? null
+  const underlying = payload.underlying_symbol ?? null
+  const discountCurve = payload.discount_curve ?? null
+
+  return statusOf(
+    {
+      closed: false,
       symbol: position.symbol,
+      marketDataProvider: provider,
+      marketDataTimestampMs: toTime(
+        position.oldest_market_data_timestamp ?? position.market_data_timestamp,
+      ),
+      receivedAtMs: toTime(position.oldest_valuation_time ?? position.valuation_time),
+      discountCurve,
+      curveAsOf: payload.curve_as_of ?? null,
+      curveReceivedAtMs: toTime(payload.curve_received_at),
+      projectionCurve: payload.projection_curve ?? null,
+      projectionCurveAsOf: payload.projection_curve_as_of ?? null,
+      projectionCurveReceivedAtMs: toTime(payload.projection_curve_received_at),
+      underlyingSymbol: underlying,
+    },
+    now,
+    instruments,
+    curves,
+  )
+}
+
+export function bookPositionsOf(book, now, instruments = {}, curves = {}) {
+  return (book?.positions ?? []).map((position) => {
+    const provider = position.market_data_provider ?? null
+    return {
+      id: `${position.symbol}:${position.currency ?? 'N/A'}:${provider ?? 'MODEL'}`,
+      symbol: position.symbol,
+      provider,
+      currency: position.currency ?? null,
       assetClass: position.asset_class ?? 'UNKNOWN',
       netQuantity: toNum(position.net_quantity) ?? 0,
       averageEntry: toNum(position.average_entry),
       price: toNum(position.current_price),
       unrealizedPnl: toNum(position.unrealized_pnl) ?? 0,
-      status: stale ? 'STALE' : 'LIVE',
+      status: positionStatusOf(position, now, instruments, curves),
     }
   })
 }

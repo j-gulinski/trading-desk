@@ -170,11 +170,13 @@ class MarketDataCurve(Base):
     curve_id = Column(UUID(as_uuid=True), primary_key=True)
     provider = Column(Text, nullable=False)
     curve_name = Column(Text, nullable=False)
+    curve_basis = Column(Text, nullable=False)
     currency = Column(Text, nullable=False)
     index_tenor = Column(Text, nullable=True)
     as_of_date = Column(Date, nullable=False)
     received_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
+    raw_payload = Column(JSONB, nullable=False)
 
 
 class MarketDataCurvePoint(Base):
@@ -203,8 +205,10 @@ class WatchlistItem(Base):
     __tablename__ = "watchlist_items"
 
     symbol = Column(Text, primary_key=True)
+    name = Column(Text, nullable=True)
     asset_class = Column(Text, nullable=False)
     currency = Column(Text, nullable=False)
+    market = Column(Text, nullable=True)
     providers = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
 

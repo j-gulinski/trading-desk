@@ -9,6 +9,7 @@ import SidePanel from '../panel/SidePanel.jsx'
 import StatusPill from '../status/StatusPill.jsx'
 import LogPayload from './LogPayload.jsx'
 import EmptyState from '../EmptyState.jsx'
+import LoadingSkeleton from '../LoadingSkeleton.jsx'
 
 const STORY_KINDS = {
   correlation: {
@@ -83,7 +84,7 @@ export default function StoryPanel({ story, onOpenStory, onClose }) {
 
   return (
     <SidePanel wide eyebrow={eyebrow} title={id} subtitle={subtitle} onClose={onClose}>
-      {loading && <EmptyState message="Assembling the story…" />}
+      {loading && <LoadingSkeleton variant="panel" label="Assembling the story" />}
       {!loading && entries.length === 0 && (
         <EmptyState message="Nothing recorded for this id — log lines may have rotated out of the buffer." />
       )}

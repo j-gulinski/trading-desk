@@ -29,6 +29,12 @@ export default function MarketBenchmark({ row }) {
   if (!row) return null
   const { instrument, tickChange, todayChange } = row
   const percent = formatPercentDelta(todayChange.percent)
+  const changePeriod = row.state === 'CLOSED' || instrument.marketOpen === false
+    ? ' last session'
+    : ' today'
+  const closeLabel = row.state === 'CLOSED' || instrument.marketOpen === false
+    ? 'PRIOR SESSION CLOSE'
+    : 'PREVIOUS CLOSE'
 
   return (
     <section className="market-benchmark" aria-labelledby="market-benchmark-title">
@@ -41,40 +47,40 @@ export default function MarketBenchmark({ row }) {
           compact
         />
       </div>
-      <div className="market-benchmark__body">
+      <div className="market-benchmark__hero">
         <div className="market-benchmark__identity">
           <h2 id="market-benchmark-title">{formatMarketSymbol(instrument)}</h2>
           <span>{providerLabel(instrument.provider)}</span>
         </div>
-        <dl className="market-benchmark__stats">
-          <BenchmarkStat
-            label="LAST"
-            className="market-benchmark__last"
-            value={formatUnitPrice(instrument.value, instrument.assetClass)}
-          />
-          <BenchmarkStat
-            label="CHANGE TODAY"
-            className={`delta delta--${row.todayDirection}`}
-            value={`${formatDelta(instrument, todayChange.delta)}${percent ? ` (${percent})` : ''}`}
-          />
-          <BenchmarkStat
-            label="PREVIOUS CLOSE"
-            value={formatUnitPrice(instrument.previousClose, instrument.assetClass)}
-          />
-          {Number.isFinite(tickChange.delta) && (
-            <BenchmarkStat
-              label="LAST TICK"
-              className={`delta delta--${row.tickDirection}`}
-              value={formatDelta(instrument, tickChange.delta)}
-            />
-          )}
-          <BenchmarkStat
-            label="QUOTE AGE"
-            value={formatAge(row.providerAgeMs)}
-            title={AGE_HINT}
-          />
-        </dl>
+        <div className="market-benchmark__quote">
+          <span className="market-benchmark__last">
+            {formatUnitPrice(instrument.value, instrument.assetClass)}
+          </span>
+          <span className={`market-benchmark__today delta delta--${row.todayDirection}`}>
+            {formatDelta(instrument, todayChange.delta)}
+            {percent ? ` (${percent})` : ''}
+            <span className="market-benchmark__today-label">{changePeriod}</span>
+          </span>
+        </div>
       </div>
+      <dl className="market-benchmark__facts">
+        <BenchmarkStat
+          label={closeLabel}
+          value={formatUnitPrice(instrument.previousClose, instrument.assetClass)}
+        />
+        {Number.isFinite(tickChange.delta) && (
+          <BenchmarkStat
+            label="LAST TICK"
+            className={`delta delta--${row.tickDirection}`}
+            value={formatDelta(instrument, tickChange.delta)}
+          />
+        )}
+        <BenchmarkStat
+          label="QUOTE AGE"
+          value={formatAge(row.providerAgeMs)}
+          title={AGE_HINT}
+        />
+      </dl>
     </section>
   )
 }

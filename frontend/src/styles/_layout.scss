@@ -213,9 +213,12 @@
   &:has(.side-panel--wide) {
     padding-right: var(--panel-width-wide);
   }
+  &:has(.side-panel--roomy) {
+    padding-right: var(--panel-width-roomy);
+  }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .content:has(.side-panel) {
     padding-right: 0;
   }

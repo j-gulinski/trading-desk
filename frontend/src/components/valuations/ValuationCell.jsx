@@ -1,6 +1,7 @@
 import StatusPill from '../status/StatusPill.jsx'
 import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
 import { providerLabel } from '../../config/providers.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
 import {
   formatAmount,
   formatClockTime,
@@ -22,7 +23,7 @@ export default function ValuationCell({ column, row }) {
       return (
         <span className="class-tag">
           <span className="class-tag__dot" />
-          {valuation.assetClass}
+          {assetClassLabel(valuation.assetClass)}
         </span>
       )
     case 'symbol':

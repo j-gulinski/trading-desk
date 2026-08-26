@@ -32,6 +32,9 @@ export default function ValuationTable({ table, rows, caption }) {
       rowClassName={rowClassName}
       cellClassName={cellClassName}
       caption={caption}
+      tableClassName="valuation-positions-table"
+      wrapClassName="valuation-positions-table-wrap"
+      minWidth={960}
     />
   )
 }

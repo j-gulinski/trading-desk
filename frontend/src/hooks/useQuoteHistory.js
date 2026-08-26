@@ -40,6 +40,7 @@ export function useQuoteHistory(instrument) {
       signal: controller.signal,
     })
       .then((payload) => {
+        if (controller.signal.aborted) return
         setState({
           key,
           rows: Array.isArray(payload?.rows) ? payload.rows : [],
@@ -60,5 +61,8 @@ export function useQuoteHistory(instrument) {
     return () => controller.abort()
   }, [key, provider, symbol, priceVersion, includeRaw])
 
+  if (state.key !== key) {
+    return { ...EMPTY, key, loading: key != null }
+  }
   return state
 }

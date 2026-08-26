@@ -88,7 +88,7 @@
   color: var(--warn);
 }
 
-@media (max-width: 900px) {
+@container page (max-width: 900px) {
   .fx-report__row {
     grid-template-columns: 56px repeat(2, minmax(0, 1fr));
   }

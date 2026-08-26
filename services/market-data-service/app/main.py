@@ -1,6 +1,6 @@
 from app.api import app
 from app.config import PORT, SERVICE_NAME
-from app.persistence import retention_sweep_loop
+from app.retention import retention_sweep_loop
 from app.scheduler import POLL_LOOPS
 from shared.service_runtime import run_service
 

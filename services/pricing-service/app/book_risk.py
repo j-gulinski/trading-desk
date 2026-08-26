@@ -10,7 +10,7 @@ from app.config import (
 from app.valuation_publisher import publish_book_risk
 from shared.config import BENCHMARK_SYMBOL
 from shared.functions import get_iso_timestamp
-from shared.pricing_math import alpha_beta
+from shared.pricing.risk import alpha_beta
 
 PORTFOLIO_ID = "PORTFOLIO"
 PORTFOLIO_NAME = "All books"

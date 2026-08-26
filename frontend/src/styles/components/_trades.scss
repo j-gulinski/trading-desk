@@ -215,15 +215,53 @@
   color: var(--neg);
 }
 
+.trade-blotter-table {
+  font-size: 12px;
+
+  th,
+  td,
+  .data-table__sort {
+    padding-inline: 10px;
+  }
+}
+
 .trade-detail__tabpanel {
   min-width: 0;
 }
 .trade-detail__close-trade {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
   color: var(--text-secondary);
   font-size: 11px;
+}
+.trade-detail__close-confirmation {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: 3;
+  width: min(300px, calc(100vw - 48px));
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+  color: var(--text-primary);
+
+  small {
+    color: var(--text-muted);
+    line-height: 1.35;
+  }
+}
+.trade-detail__close-confirmation-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
 }
 .trade-detail__close-trade-button,
 .trade-detail__close-trade-confirm,
@@ -379,6 +417,89 @@
   }
   .blotter-toolbar__search {
     width: 100%;
+  }
+}
+
+@container page (max-width: 1240px) {
+  .trade-blotter-table-wrap {
+    overflow-x: hidden;
+  }
+
+  .trade-blotter-table {
+    min-width: 0 !important;
+    table-layout: fixed;
+
+    [data-column='trade'] { width: 13%; }
+    [data-column='book'] { width: 12%; }
+    [data-column='symbol'] { width: 14%; }
+    [data-column='side'] { width: 13%; }
+    [data-column='quantity'] { width: 10%; }
+    [data-column='fairValue'] { width: 14%; }
+    [data-column='pnl'] { width: 14%; }
+    [data-column='valuation'] { width: 10%; }
+
+    [data-column='assetClass'],
+    [data-column='entry'],
+    [data-column='provider'],
+    [data-column='price'],
+    [data-column='return'],
+    [data-column='opened'],
+    [data-column='updated'] {
+      display: none;
+    }
+
+    th,
+    td {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+@container page (max-width: 900px) {
+  .blotter-table-panel__head .table-columns {
+    display: none;
+  }
+
+  .trade-blotter-table {
+    [data-column='trade'] { width: 15%; }
+    [data-column='symbol'] { width: 16%; }
+    [data-column='side'] { width: 15%; }
+    [data-column='quantity'] { width: 11%; }
+    [data-column='fairValue'] { width: 16%; }
+    [data-column='pnl'] { width: 16%; }
+    [data-column='valuation'] { width: 11%; }
+
+    [data-column='book'] {
+      display: none;
+    }
+  }
+}
+
+@container page (max-width: 620px) {
+  .trade-blotter-table {
+    [data-column='symbol'] { width: 20%; }
+    [data-column='side'] { width: 16%; }
+    [data-column='quantity'] { width: 13%; }
+    [data-column='fairValue'] { width: 19%; }
+    [data-column='pnl'] { width: 19%; }
+    [data-column='valuation'] { width: 13%; }
+
+    [data-column='trade'] {
+      display: none;
+    }
+
+    th,
+    td,
+    .data-table__sort {
+      padding-inline: var(--sp-2);
+    }
+
+    .data-table__head-note {
+      display: none;
+    }
   }
 }
 

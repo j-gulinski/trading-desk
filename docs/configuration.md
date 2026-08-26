@@ -42,10 +42,9 @@ join this table then.
 | --- | --- | --- |
 | `FINNHUB_API_KEY` | finnhub.io | Real-time US equities/ETF, 60 req/min free tier; the first provider wired in. |
 | `TWELVE_DATA_API_KEY` | twelvedata.com | Batch quotes; the binding free-tier constraint is 800 credits/day; also the XAU/USD (metals) source. |
-| `ALPHA_VANTAGE_API_KEY` | alphavantage.co | 25 req/day: EOD-grade equities plus the only free FX quote with true bid/ask. |
 | `FRED_API_KEY` | fred.stlouisfed.org | Free instant key, 120 req/min; USD Treasury series and the OECD Poland anchors. |
 
-NBP and ECB require no key — the four above are the complete registration list.
+NBP, ECB and EIOPA require no key. Alpha Vantage is not a Phase 5 runtime dependency.
 
 ## Market data — Finnhub
 
@@ -56,16 +55,20 @@ NBP and ECB require no key — the four above are the complete registration list
 | `FINNHUB_TIER1_POLL_SECONDS` | `15` | market-data-service | Cadence for open-trade symbols + the benchmark — a handful of symbols at 4 req/min each stays far inside the budget; the freshness threshold is 3× this (45 s). |
 | `FINNHUB_TIER2_POLL_SECONDS` | `60` | market-data-service | Rest-of-watchlist cadence: the full 25-symbol cap costs ≤ 25 req/min, leaving tier-1 headroom; threshold 3× = 180 s. |
 | `FINNHUB_CLOSED_POLL_SECONDS` | `300` | market-data-service | Outside US market hours the last trade does not move — 5-minute confirmation polls keep the board honest for a fraction of the budget. |
-| `FINNHUB_PROVIDER_LIMIT_PER_MINUTE` | `60` | market-data-service | Published provider allowance. The scheduler derives a 54 req/min token bucket from this limit and `PROVIDER_BUDGET_USAGE_PERCENT`. |
+| `FINNHUB_PROVIDER_LIMIT_PER_MINUTE` | `60` | market-data-service | Published provider allowance. The scheduler derives a strict rolling 54 req/60 s budget from this limit and `PROVIDER_BUDGET_USAGE_PERCENT`. |
 | `SNAPSHOT_RETENTION_DAYS` | `90` | market-data-service | Quote history stays bounded at roughly 1.5M change-only rows in the worst case for a hosted free-tier database. The daily sweep skips rows referenced by a trade's entry or close snapshot ID, so execution provenance outlives the window. |
 
-Scheduler mechanics that are not tuning surface (active-set refresh 15 s, market-status check
-10 min, HTTP timeout 10 s, threshold multiplier 3, cooldowns, symbol-search cache 10 min,
-history-endpoint bounds) are plain constants in the service's `app/config.py`. The same rule
-covers the official-source publication facts: the NBP window (11:45–12:20 Warsaw), the ECB
-window (15:55–16:45 Frankfurt), the in-window 5-min retry, the hourly off-window confirmation
-poll, and the 4-hour publication grace are source facts and freshness policy, not tuning —
-they change only when a probe shows the source itself changed. `tzdata` is in
+Scheduler mechanics that are not tuning surface (active-set refresh 15 s, Finnhub market-status
+check 10 min, HTTP timeout 10 s, threshold multiplier 3, cooldowns, symbol-search cache 10 min,
+history-endpoint bounds) are plain constants in the service's `app/config.py`. The file groups
+provider-owned settings under `FINNHUB_*`, `TWELVE_DATA_*`, `NBP_*`, `ECB_*`, `FRED_*` and
+`EIOPA_*`. Reused application engines have explicit `OFFICIAL_FIXING_FEED_*` and `CURVE_FEED_*`
+prefixes. Thus the NBP/ECB publication windows are source-specific, while the common in-window
+5-min retry, hourly confirmation, universe refresh and 4-hour freshness grace are application
+policy shared by both fixing feeds—not provider-published limits. Curves are scheduled rather
+than windowed (`CURVE_REFETCH_SECONDS`, `CURVE_RETRY_SECONDS`,
+`EIOPA_CURVE_REFETCH_SECONDS`, `FRED_PLN_CURVE_REFETCH_SECONDS`). Source facts change only when
+a probe shows the source itself changed. `tzdata` is in
 `requirements.txt` solely so `zoneinfo` can evaluate those two source timezones inside the
 `python:slim` images, which ship no system tz database.
 
@@ -73,8 +76,20 @@ they change only when a probe shows the source itself changed. `tzdata` is in
 
 | Variable | Default | Read by | Why |
 | --- | --- | --- | --- |
-| `NBP_REFERENCE_SYMBOLS` | `EURPLN,USDPLN,XAUPLN_G` | market-data-service | The default reference universe for NBP: the two fixing pairs currency conversion actually needs plus the official gold fixing (`XAUPLN_G` is PLN per **1 g** — deliberately not `XAUPLN`, which would read as PLN per troy ounce). Settlement currencies of open trades auto-join as `<CCY>PLN` beyond these; a currency table A does not carry is simply absent, never invented. |
-| `ECB_REFERENCE_SYMBOLS` | `EURUSD,EURPLN` | market-data-service | The default reference universe for ECB: `EURUSD` anchors the resolver's cross-via-EUR path and `EURPLN` powers the NBP-vs-ECB cross-check chip. Open-trade currencies auto-join as `EUR<CCY>` — ECB quotes ~30 currencies against EUR, so one hop covers nearly everything. |
+| `NBP_FIXING_SYMBOLS` | `EURPLN,USDPLN,XAUPLN_G` | market-data-service | The default official-fixing universe for NBP: the two pairs currency conversion actually needs plus the official gold fixing (`XAUPLN_G` is PLN per **1 g** — deliberately not `XAUPLN`, which would read as PLN per troy ounce). Currencies present on active or closed trades auto-join as `<CCY>PLN` beyond these because both unrealized and realized reports may need conversion; a currency table A does not carry is simply absent, never invented. |
+| `ECB_FIXING_SYMBOLS` | `EURUSD,EURPLN` | market-data-service | The default official-fixing universe for ECB: `EURUSD` anchors the resolver's cross-via-EUR path and `EURPLN` powers the NBP-vs-ECB cross-check chip. Active/closed-trade currencies auto-join as `EUR<CCY>` — ECB quotes ~30 currencies against EUR, so one hop covers nearly everything. |
+## Curves — FRED and EIOPA
+
+| Variable | Default | Read by | Why |
+| --- | --- | --- | --- |
+| `FRED_PROVIDER_LIMIT_PER_MINUTE` | `120` | market-data-service | Published FRED allowance; the shared 90% ceiling derives a 108/min bucket. Builders reserve their worst case before starting: 11 requests for Treasury and 2 for PLN. |
+| `EIOPA_REQUEST_BUDGET_PER_MINUTE` | `10` | market-data-service | Local application safety budget—not an EIOPA-published limit. It prevents repeated manual refreshes from hammering a public HTML/download host. Each country build reserves two calls; the downloaded archive is reused across the three builds. |
+
+| `CURVE_REFETCH_SECONDS` | `21600` | market-data-service | How often a curve is re-read when the last read succeeded. Six hours suits every daily source here: they publish once a business day, and a manual refresh covers impatience. Two curves override it — EIOPA at 24 h (a monthly release) and `PLN_REFERENCE_PROJECTION_3M` at 7 days (monthly OECD series). |
+
+Fixed knobs behind these: a 15-minute retry after a failed curve read, and a 60-second
+client timeout for EIOPA alone, because the shared 10-second budget is right for a quote
+and far too short for a three-megabyte archive.
 
 ## Market data — Twelve Data
 
@@ -90,6 +105,8 @@ they change only when a probe shows the source itself changed. `tzdata` is in
 | --- | --- | --- | --- |
 | `MAX_ACTIVE_SYMBOLS` | `25` | market-data-service | Ceiling on watchlist symbols. Sizing comes from the tightest budget: 25 symbols at the Twelve Data best-case cadence already costs 2 400 credits/day against a 720 safe ledger, so the governor paces beyond this point — the cap is what keeps the *board* readable and the pacing explicable. The add is refused with a message that says what to do about it. |
 | `TRADE_PRICE_TOLERANCE_PCT` | `1.0` | trade-action-service | How far the server's execution price may drift from the price the ticket showed before the trade is refused. 1% is wide enough to survive a poll gap on a normal instrument and tight enough that a number the trader read minutes ago cannot fill. The rejection message carries the actual deviation. |
+| `TRADE_ACTION_QUEUE_SIZE` | `1000` | trade-action-service | Bounds accepted-but-not-yet-processed intents in memory. A full queue returns 503 instead of allowing unbounded process growth. |
+| `TRADE_ACTION_BATCH_SIZE` | `100` | trade-action-service | Maximum actions accepted by one batch request; larger payloads return 413 before enqueueing. |
 | `DEFAULT_QUOTE_PROVIDER` | `FINNHUB` | pricing-service, trade-action-service | The fallback for trades written before provider binding existed. Every use logs `trade_provider_defaulted` — the compatibility path exists but can never be silent. New trades always carry an explicit provider. |
 
 ## Risk & benchmark

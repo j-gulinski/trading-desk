@@ -17,6 +17,7 @@ import ServiceCard from '../../components/cards/ServiceCard.jsx'
 import StatCard from '../../components/cards/StatCard.jsx'
 import Panel from '../../components/Panel.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
+import LoadingSkeleton from '../../components/LoadingSkeleton.jsx'
 import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
 import AuditEventList from '../../components/audit/AuditEventList.jsx'
 import StatusPill from '../../components/status/StatusPill.jsx'
@@ -71,7 +72,12 @@ export default function SystemOverview() {
     now,
   )
   const valuationSummary = summarizeValuations(
-    valuationRowsOf(Object.values(valuationFeed.valuations), now, marketFeed.instruments),
+    valuationRowsOf(
+      Object.values(valuationFeed.valuations),
+      now,
+      marketFeed.instruments,
+      marketFeed.curves,
+    ),
   )
   const streamsLastUpdateMs = Math.max(
     marketSummary.lastUpdateMs ?? 0,
@@ -104,7 +110,7 @@ export default function SystemOverview() {
         />
       </div>
 
-      {loading && <EmptyState message="Loading service health…" />}
+      {loading && <LoadingSkeleton variant="cards" label="Loading service health" />}
 
       {!loading && (
         <>
@@ -179,7 +185,7 @@ export default function SystemOverview() {
           title="Active errors & warnings · last 5 min"
           meta={audits.error ? 'UNAVAILABLE' : auditEvents.length || null}
         >
-          {audits.loading && <EmptyState message="Loading recent events…" />}
+          {audits.loading && <LoadingSkeleton variant="list" label="Loading recent events" />}
           {!audits.loading && audits.error && (
             <EmptyState message="Audit feed unavailable — retrying." />
           )}
@@ -207,7 +213,7 @@ export default function SystemOverview() {
             </>
           }
         >
-          {logsFeed.loading && <EmptyState message="Loading recent log lines…" />}
+          {logsFeed.loading && <LoadingSkeleton variant="list" label="Loading recent log lines" />}
           {!logsFeed.loading && logsFeed.error && (
             <EmptyState message="Log feed unavailable — retrying." />
           )}

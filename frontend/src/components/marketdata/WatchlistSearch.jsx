@@ -11,11 +11,26 @@ import { providerLabel } from '../../config/providers.js'
 function mergeBySymbol(results) {
   const bySymbol = new Map()
   for (const result of results) {
+    const market = ['US', 'USA', 'UNITED STATES'].includes(result.exchange?.toUpperCase())
+      ? null
+      : result.exchange
     const existing = bySymbol.get(result.symbol)
     if (!existing) {
-      bySymbol.set(result.symbol, { ...result, providers: [result.provider] })
-    } else if (!existing.providers.includes(result.provider)) {
+      bySymbol.set(result.symbol, {
+        ...result,
+        market,
+        providers: [result.provider],
+      })
+      continue
+    }
+    if (!existing.providers.includes(result.provider)) {
       existing.providers.push(result.provider)
+    }
+    if (!existing.market && market) {
+      existing.market = market
+      existing.exchange = result.exchange
+      existing.name = result.name
+      existing.provider_symbol = result.provider_symbol
     }
   }
   return [...bySymbol.values()].slice(0, SYMBOL_SEARCH_SHOWN_LIMIT)
@@ -48,7 +63,9 @@ function ResultRow({ result, onBoard, busy, onAdd }) {
         {result.name}
       </span>
       <span className="watchlist-search__meta">
-        {result.asset_class} · quoted in {result.currency}
+        {result.asset_class}
+        {result.exchange ? ` · ${result.exchange}` : ''}
+        {' · '}quoted in {result.currency}
       </span>
       <span className="watchlist-search__providers">
         {result.providers.map((provider) => {

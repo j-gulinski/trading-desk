@@ -1,18 +1,14 @@
+"""Thread-safe in-memory state for the pricing process."""
+
 import datetime
-import uuid
 import threading
 from decimal import Decimal
 
-from shared.db import session_scope
-from shared.quotes import as_decimal
-from shared.symbols import CURVE_PRICED_ASSET_CLASSES
-from shared.term_schemas import DEFAULT_CURVE
-from shared.models import Book, Trade, Valuation
-from shared.functions import utcnow, get_iso_timestamp
-from shared.logging_config import get_logger
 from app.config import SERVICE_NAME
 from shared.config import DEFAULT_QUOTE_PROVIDER
-from app.pnl import signed_quantity
+from shared.logging_config import get_logger
+from shared.quotes import as_decimal
+from shared.symbols import SPOT_ASSET_CLASSES
 
 log = get_logger(SERVICE_NAME)
 
@@ -24,10 +20,10 @@ last_event_timestamp = None
 market_data_connection = "DISCONNECTED"
 client_event_queues = set()
 
-# Market state cache, spots keyed (provider, symbol)
+# Live state belongs here; durable data access belongs in repository.py.
+# Spot quotes are keyed by (provider, symbol), while curves use the stable curve name.
 spots = {}
 curves = {}
-
 active_trades = {}
 latest_valuations = {}
 book_risk_metrics = {}
@@ -35,19 +31,70 @@ _active_set_seeded = False
 
 SPOT_PRICE_FIELDS = ("bid", "ask", "last", "mid")
 
+# Market data state
 
-def update_spot(tick):
-    parsed = {
+
+def _parsed_spot(tick):
+    return {
         **tick,
         **{field: as_decimal(tick.get(field)) for field in SPOT_PRICE_FIELDS},
     }
+
+
+def _revision(row, primary):
+    return (str(row.get(primary) or ""), str(row.get("received_at") or ""))
+
+
+def update_spot(tick):
+    parsed = _parsed_spot(tick)
     with data_lock:
-        spots[(tick["provider"], tick["symbol"])] = parsed
+        key = (tick["provider"], tick["symbol"])
+        current = spots.get(key)
+        if current is not None and _revision(parsed, "provider_timestamp") \
+                <= _revision(current, "provider_timestamp"):
+            return False
+        spots[key] = parsed
+        return True
 
 
 def update_curve(tick):
     with data_lock:
-        curves[tick["curve_name"]] = tick
+        key = tick["curve_name"]
+        current = curves.get(key)
+        if current is not None and _revision(tick, "as_of_date") \
+                <= _revision(current, "as_of_date"):
+            return False
+        curves[key] = tick
+        return True
+
+
+def replace_market_state(snapshot_spots, snapshot_curves):
+    """Atomically reconcile the live market cache to one server snapshot.
+
+    Building the replacement maps before taking the lock means a malformed snapshot
+    cannot leave the process with a half-replaced market state.
+    """
+    replacement_spots = {}
+    for row in (snapshot_spots or {}).values():
+        parsed = _parsed_spot(row)
+        key = (row["provider"], row["symbol"])
+        current = replacement_spots.get(key)
+        if current is None or _revision(parsed, "provider_timestamp") \
+                > _revision(current, "provider_timestamp"):
+            replacement_spots[key] = parsed
+
+    replacement_curves = {}
+    for row in (snapshot_curves or {}).values():
+        key = row["curve_name"]
+        current = replacement_curves.get(key)
+        if current is None or _revision(row, "as_of_date") \
+                > _revision(current, "as_of_date"):
+            replacement_curves[key] = row
+
+    global spots, curves
+    with data_lock:
+        spots = replacement_spots
+        curves = replacement_curves
 
 
 def get_spot(provider, symbol):
@@ -61,47 +108,124 @@ def drop_spots(rows):
             spots.pop((row.get("provider"), row.get("symbol")), None)
 
 
-def has_spots():
-    with data_lock:
-        return len(spots) > 0
-
-
 def get_curve(name):
     with data_lock:
         return curves.get(name)
+
+
+def record_market_event(event_time):
+    global ticks_received, last_event_timestamp
+    with data_lock:
+        ticks_received += 1
+        last_event_timestamp = event_time
+
+
+def set_market_data_connection(state):
+    global market_data_connection
+    with data_lock:
+        changed = market_data_connection != state
+        market_data_connection = state
+    return changed
+
+
+def health_snapshot():
+    with data_lock:
+        return {
+            "market_data_connection": market_data_connection,
+            "received_events": ticks_received,
+            "active_trades": len(active_trades),
+            "last_market_event_time": last_event_timestamp,
+        }
+
+
+# Active trade state and market-data routing
 
 
 def trade_provider(trade):
     provider = trade.get("market_data_provider")
     if provider:
         return provider
-    log.warning("trade_provider_defaulted", trade_id=trade.get("trade_id"),
-                symbol=trade.get("symbol"), provider=DEFAULT_QUOTE_PROVIDER)
+    log.warning(
+        "trade_provider_defaulted",
+        trade_id=trade.get("trade_id"),
+        symbol=trade.get("symbol"),
+        provider=DEFAULT_QUOTE_PROVIDER,
+    )
     return DEFAULT_QUOTE_PROVIDER
+
+
+def needs_spot(trade):
+    return (
+        trade["asset_class"] in SPOT_ASSET_CLASSES
+        or trade["asset_class"] == "EUROPEAN_OPTION"
+    )
 
 
 def trades_for_quote(provider, symbol):
     with data_lock:
         return [
-            t for t in active_trades.values()
-            if trade_provider(t) == provider
+            trade
+            for trade in active_trades.values()
+            if needs_spot(trade)
+            and trade_provider(trade) == provider
             and (
-                t["symbol"] == symbol
-                or (t.get("metadata") or {}).get("underlying_symbol") == symbol
+                trade["symbol"] == symbol
+                or (trade.get("metadata") or {}).get("underlying_symbol") == symbol
             )
         ]
 
 
-def _trade_curve(trade):
-    curve = (trade.get("metadata") or {}).get("curve")
-    if curve is None and trade["asset_class"] in CURVE_PRICED_ASSET_CLASSES:
-        return DEFAULT_CURVE
-    return curve
+def _trade_curves(trade):
+    metadata = trade.get("metadata") or {}
+    return {
+        name
+        for name in (
+            metadata.get("discount_curve"),
+            metadata.get("projection_curve"),
+            metadata.get("curve"),
+        )
+        if name
+    }
 
 
 def trades_for_curve(curve_name):
     with data_lock:
-        return [t for t in active_trades.values() if _trade_curve(t) == curve_name]
+        return [
+            trade
+            for trade in active_trades.values()
+            if curve_name in _trade_curves(trade)
+        ]
+
+
+def replace_active_trades(fresh):
+    """Replace the active set and return (new or materially changed trades, first load)."""
+    global active_trades, _active_set_seeded
+    with data_lock:
+        entered_ids = fresh.keys() - active_trades.keys()
+        changed_ids = {
+            trade_id
+            for trade_id in fresh.keys() & active_trades.keys()
+            if fresh[trade_id] != active_trades[trade_id]
+        }
+        first_load = not _active_set_seeded
+        active_trades = fresh
+        _active_set_seeded = True
+    dirty_ids = entered_ids | changed_ids
+    return [fresh[trade_id] for trade_id in dirty_ids], first_load
+
+
+def active_trades_snapshot():
+    with data_lock:
+        return list(active_trades.values())
+
+
+def remove_active_trades(trade_ids):
+    with data_lock:
+        for trade_id in trade_ids:
+            active_trades.pop(trade_id, None)
+
+
+# Latest valuation and book-risk state
 
 
 def book_pnl_snapshot():
@@ -114,7 +238,11 @@ def book_pnl_snapshot():
                 continue
             entry = totals.setdefault(
                 book_id,
-                {"book_id": book_id, "book_name": valuation.get("book_name"), "pnl": Decimal("0")},
+                {
+                    "book_id": book_id,
+                    "book_name": valuation.get("book_name"),
+                    "pnl": Decimal("0"),
+                },
             )
             entry["pnl"] += Decimal(str(valuation.get("total_pnl") or 0))
     return totals
@@ -134,15 +262,35 @@ def _is_final(valuation):
     return bool((valuation.get("valuation_payload") or {}).get("final"))
 
 
+def _valuation_time(valuation):
+    try:
+        return datetime.datetime.fromisoformat(str(valuation.get("valuation_time")))
+    except (TypeError, ValueError):
+        return None
+
+
 def record_valuation(valuation):
-    """Returns False when the valuation is rejected: a trade keeps its final valuation, so
-    anything non-final that lands afterwards is a stale batch and must not be published."""
+    """Keep a final close valuation from being overwritten by a stale live batch."""
     with data_lock:
         existing = latest_valuations.get(valuation["trade_id"])
         if existing is not None and _is_final(existing) and not _is_final(valuation):
             return False
+        if existing is not None and _is_final(existing) == _is_final(valuation):
+            existing_at = _valuation_time(existing)
+            incoming_at = _valuation_time(valuation)
+            if (
+                existing_at is not None
+                and incoming_at is not None
+                and incoming_at < existing_at
+            ):
+                return False
         latest_valuations[valuation["trade_id"]] = valuation
         return True
+
+
+def is_current_valuation(valuation):
+    with data_lock:
+        return latest_valuations.get(valuation["trade_id"]) is valuation
 
 
 def all_valuations():
@@ -153,166 +301,3 @@ def all_valuations():
 def get_valuation(trade_id):
     with data_lock:
         return latest_valuations.get(trade_id)
-
-
-def _trades_with_book(session):
-    return session.query(Trade, Book.name).join(Book, Book.book_id == Trade.book_id)
-
-
-def refresh_active_trades():
-    """Returns the trades that just entered the active set."""
-    global _active_set_seeded
-    fresh = {}
-    with session_scope() as session:
-        rows = _trades_with_book(session).filter(Trade.status == "ACTIVE").all()
-        for t, book_name in rows:
-            fresh[str(t.trade_id)] = {
-                "trade_id": str(t.trade_id),
-                "book_id": str(t.book_id),
-                "book_name": book_name,
-                "asset_class": t.asset_class,
-                "symbol": t.symbol,
-                "side": t.side,
-                "quantity": t.quantity,
-                "trade_price": t.trade_price,
-                "currency": t.trade_currency,
-                "market_data_provider": t.market_data_provider,
-                "metadata": t.trade_metadata or {},
-            }
-    global active_trades
-    with data_lock:
-        entered = fresh.keys() - active_trades.keys()
-        active_trades = fresh
-    if not _active_set_seeded:
-        _active_set_seeded = True
-        log.info("active_set_bootstrapped", trades=len(fresh))
-    else:
-        for trade_id in entered:
-            trade = fresh[trade_id]
-            log.info("trade_entered_active_set", trade_id=trade_id,
-                     symbol=trade["symbol"], book_id=trade["book_id"])
-    return [fresh[trade_id] for trade_id in entered]
-
-
-def _parse_timestamp(value):
-    if not value:
-        return None
-    try:
-        return datetime.datetime.fromisoformat(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def save_valuation(valuation):
-    try:
-        with session_scope() as session:
-            session.add(Valuation(
-                valuation_id=uuid.uuid4(),
-                trade_id=uuid.UUID(valuation["trade_id"]),
-                book_id=uuid.UUID(valuation["book_id"]),
-                asset_class=valuation["asset_class"],
-                valuation_time=utcnow(),
-                fair_value=valuation["fair_value"],
-                market_value=valuation.get("market_value"),
-                unrealized_pnl=valuation["unrealized_pnl"],
-                realized_pnl=valuation["realized_pnl"],
-                total_pnl=valuation["total_pnl"],
-                currency=valuation["currency"],
-                market_data_provider=valuation.get("market_data_provider"),
-                market_data_timestamp=_parse_timestamp(valuation.get("market_data_timestamp")),
-                valuation_payload=valuation.get("valuation_payload"),
-                created_at=utcnow(),
-            ))
-    except Exception:
-        log.exception("valuation_persist_failed", trade_id=valuation.get("trade_id"))
-
-
-def finalize_closed_trades():
-    """For CLOSED trades not yet finalized: compute realized PnL once, write a final
-    valuation (unrealized=0, total=realized), and flip valuation_finalized."""
-    finals = []
-    with session_scope() as session:
-        rows = (
-            _trades_with_book(session)
-            .filter(Trade.status == "CLOSED", Trade.valuation_finalized.is_(False))
-            .all()
-        )
-        for t, book_name in rows:
-            qty = t.quantity
-            trade_price = t.trade_price
-            multiplier = int((t.trade_metadata or {}).get("multiplier", 1))
-
-            if t.close_price is not None:
-                close_price = t.close_price
-                if t.side == "SELL":
-                    realized = (trade_price - close_price) * qty * multiplier
-                else:
-                    realized = (close_price - trade_price) * qty * multiplier
-                fair_value = close_price * qty * multiplier
-                payload = {"close_price": str(close_price), "multiplier": multiplier, "final": True}
-            else:
-                # close all - (presentation only purpose) no close price
-                last = (
-                    session.query(Valuation)
-                    .filter(Valuation.trade_id == t.trade_id)
-                    .order_by(Valuation.valuation_time.desc())
-                    .first()
-                )
-                if last is not None:
-                    realized = last.unrealized_pnl
-                    fair_value = last.fair_value
-                else:
-                    realized = Decimal("0")
-                    fair_value = trade_price * qty * multiplier
-                payload = {"close_price": None, "multiplier": multiplier, "final": True, "marked_at_market": True}
-
-            valuation = {
-                "trade_id": str(t.trade_id),
-                "book_id": str(t.book_id),
-                "book_name": book_name,
-                "asset_class": t.asset_class,
-                "symbol": t.symbol,
-                "currency": t.trade_currency,
-                "quantity": signed_quantity(t.side, qty),
-                "trade_price": trade_price,
-                "fair_value": fair_value,
-                "market_value": fair_value,
-                "unrealized_pnl": Decimal("0"),
-                "realized_pnl": realized,
-                "total_pnl": realized,
-                "market_data_provider": t.market_data_provider,
-                "market_data_timestamp": (
-                    t.close_price_timestamp.isoformat()
-                    if t.close_price_timestamp is not None else None
-                ),
-                "valuation_time": get_iso_timestamp(),
-                "valuation_payload": payload,
-            }
-            session.add(Valuation(
-                valuation_id=uuid.uuid4(),
-                trade_id=t.trade_id,
-                book_id=t.book_id,
-                asset_class=t.asset_class,
-                valuation_time=utcnow(),
-                fair_value=fair_value,
-                market_value=fair_value,
-                unrealized_pnl=Decimal("0"),
-                realized_pnl=realized,
-                total_pnl=realized,
-                currency=t.trade_currency,
-                market_data_provider=t.market_data_provider,
-                market_data_timestamp=t.close_price_timestamp,
-                valuation_payload=valuation["valuation_payload"],
-                created_at=utcnow(),
-            ))
-            t.valuation_finalized = True
-            log.info("trade_finalized", trade_id=str(t.trade_id), symbol=t.symbol,
-                     realized_pnl=str(realized),
-                     close_price=str(t.close_price) if t.close_price is not None else None)
-            finals.append(valuation)
-
-    with data_lock:
-        for valuation in finals:
-            active_trades.pop(valuation["trade_id"], None)
-
-    return finals

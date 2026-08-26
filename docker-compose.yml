@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:18
@@ -15,6 +21,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging: *default-logging
 
   db-migrations:
     build:
@@ -30,6 +37,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *default-logging
 
   market-data-service:
     build:
@@ -47,6 +55,7 @@ services:
     depends_on:
       db-migrations:
         condition: service_completed_successfully
+    logging: *default-logging
 
   pricing-service:
     build:
@@ -66,6 +75,7 @@ services:
         condition: service_completed_successfully
       market-data-service:
         condition: service_started
+    logging: *default-logging
 
   monitoring-service:
     build:
@@ -83,6 +93,7 @@ services:
     depends_on:
       db-migrations:
         condition: service_completed_successfully
+    logging: *default-logging
 
   books-service:
     build:
@@ -100,6 +111,7 @@ services:
     depends_on:
       db-migrations:
         condition: service_completed_successfully
+    logging: *default-logging
 
   trade-action-service:
     build:
@@ -117,6 +129,7 @@ services:
     depends_on:
       db-migrations:
         condition: service_completed_successfully
+    logging: *default-logging
 
   blotter-service:
     build:
@@ -136,6 +149,7 @@ services:
         condition: service_completed_successfully
       pricing-service:
         condition: service_started
+    logging: *default-logging
 
   frontend:
     build:
@@ -146,13 +160,15 @@ services:
       - "3000:5173"
     volumes:
       - ./frontend:/app
-      - /app/node_modules
+      - frontend_node_modules:/app/node_modules
     restart: unless-stopped
     depends_on:
       - market-data-service
       - pricing-service
       - books-service
       - blotter-service
+    logging: *default-logging
 
 volumes:
   postgres_data:
+  frontend_node_modules:

@@ -1,4 +1,5 @@
 import { directionOf, formatPercent, formatSignedAmount } from '../../domain/formatting.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
 
 function Metric({ label, value, className, title }) {
   return (
@@ -11,11 +12,13 @@ function Metric({ label, value, className, title }) {
 
 function formatCapital(value) {
   if (!Number.isFinite(value)) return null
-  return value >= 1e6 ? `$${(value / 1e6).toFixed(value % 1e6 ? 1 : 0)}M` : `$${value}`
+  return value >= 1e6
+    ? `USD ${(value / 1e6).toFixed(value % 1e6 ? 1 : 0)}m`
+    : `USD ${value}`
 }
 
 export default function BookRiskCard({ book }) {
-  const tone = directionOf(book.unrealized)
+  const tone = directionOf(book.unrealizedReported)
   const ready = book.riskStatus === 'READY'
   const windowed = ready && Number.isFinite(book.alphaWindowReturn)
   const bookReturn = Number.isFinite(book.bookWindowReturn)
@@ -65,7 +68,7 @@ export default function BookRiskCard({ book }) {
     <article className={`book-card stat-card stat-card--${tone}`}>
       <header className="book-card__head">
         <span className="book-card__name" title={book.name}>{book.name}</span>
-        <span className="book-card__class" title={book.assetClass}>{book.assetClass}</span>
+        <span className="book-card__class">{assetClassLabel(book.assetClass)}</span>
       </header>
 
       <div className="book-card__metrics">
@@ -88,8 +91,13 @@ export default function BookRiskCard({ book }) {
           className={ready ? '' : 'book-card__value--missing'}
         />
         <Metric
-          label="UNREAL."
-          value={formatSignedAmount(book.unrealized)}
+          label={`UNREAL. · ${book.unrealizedCurrency}`}
+          value={
+            book.unrealizedReported == null
+              ? '—'
+              : formatSignedAmount(book.unrealizedReported)
+          }
+          title={book.unrealizedNote}
           className={`book-card__value--total delta--${tone}`}
         />
       </div>
@@ -129,7 +137,7 @@ export default function BookRiskCard({ book }) {
           {Number.isFinite(book.dollarBeta) && (
             <p className="book-card__breakdown-meta">
               each +1% index move ≈ {formatSignedAmount(book.dollarBeta / 100)} PnL
-              {capital ? ` · % assume ${capital} capital` : ''}
+              {capital ? ` · assumes ${capital} capital` : ''}
             </p>
           )}
         </details>

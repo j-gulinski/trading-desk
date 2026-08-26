@@ -7,8 +7,12 @@
   .market-benchmark {
     margin-bottom: 0;
   }
+
+  > * {
+    min-width: 0;
+  }
 }
-@media (min-width: 1500px) {
+@container page (min-width: 1290px) {
   .market-context {
     grid-template-columns: minmax(0, 3fr) minmax(430px, 2fr);
     align-items: stretch;
@@ -106,4 +110,39 @@
   color: var(--text-secondary);
   font-size: 10px;
   white-space: nowrap;
+}
+
+@container page (max-width: 620px) {
+  .official-rates__head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .official-rates__row {
+    grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+    gap: var(--sp-1) var(--sp-2);
+
+    > .pill {
+      grid-column: 1 / -1;
+      grid-row: 3;
+      justify-self: start;
+    }
+  }
+
+  .official-rates__source {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .official-rates__value {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .official-rates__unit {
+    overflow: visible;
+    max-width: 100%;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
 }

@@ -26,6 +26,7 @@
   background: rgba(var(--neg-rgb), 0.06);
 }
 .intent-feed__time {
+  flex-shrink: 0;
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

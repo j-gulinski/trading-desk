@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMarketFeedContext, useValuationFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
 import { STORAGE_KEYS } from '../../config/storage.js'
@@ -34,10 +34,12 @@ import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
 import ColumnPicker from '../../components/tables/ColumnPicker.jsx'
 import SortCaptureStatus from '../../components/tables/SortCaptureStatus.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
+import LoadingSkeleton from '../../components/LoadingSkeleton.jsx'
 import TradeStatusTabs from '../../components/trades/TradeStatusTabs.jsx'
 import TradeTable from '../../components/trades/TradeTable.jsx'
 import TradeDetail from './TradeDetail.jsx'
 import { PANEL_ID, usePanelCoordinator } from '../../layout/panelContext.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
 
 const INITIAL_FILTERS = { lifecycle: 'BOTH', book: null, assetClass: null, query: '' }
 
@@ -48,7 +50,6 @@ const CLEARED_BY = {
 }
 
 function emptyTableMessage({ snapshot, rows, lifecycleRows, lifecycle }) {
-  if (snapshot.loading && snapshot.data == null) return 'Loading the operational blotter…'
   if (snapshot.error && snapshot.data == null) return 'Blotter service unavailable — retrying.'
   if (rows.length === 0) return 'No trades have been recorded yet.'
   if (lifecycle === 'BOTH') return `No open or closed trades.`
@@ -58,15 +59,28 @@ function emptyTableMessage({ snapshot, rows, lifecycleRows, lifecycle }) {
 
 export default function Trades() {
   const { valuations, status, seedStatus } = useValuationFeedContext()
-  const { instruments } = useMarketFeedContext()
+  const { instruments, curves } = useMarketFeedContext()
   const { activePanel, openPanel, closePanel } = usePanelCoordinator()
   const { now } = useElapsedTime()
+  const [historyLimit, setHistoryLimit] = useState(TRADE_HISTORY_FETCH_LIMIT)
   const snapshot = usePolling(
     async ({ signal }) => {
-      return apiGet(
-        endpoints.blotter.tradesOverview({ limit: TRADE_HISTORY_FETCH_LIMIT }),
-        { signal },
-      )
+      const trades = []
+      let books = []
+      let offset = 0
+      while (offset < historyLimit) {
+        const limit = Math.min(TRADE_HISTORY_FETCH_LIMIT, historyLimit - offset)
+        const page = await apiGet(
+          endpoints.blotter.tradesOverview({ limit, offset }),
+          { signal },
+        )
+        const pageTrades = Array.isArray(page?.trades) ? page.trades : []
+        trades.push(...pageTrades)
+        books = Array.isArray(page?.books) ? page.books : books
+        if (pageTrades.length < limit) break
+        offset += pageTrades.length
+      }
+      return { trades, books }
     },
     { intervalMs: BLOTTER_POLL_INTERVAL_MS },
   )
@@ -75,6 +89,16 @@ export default function Trades() {
   const [selectedTradeId, setSelectedTradeId] = useState(null)
   const [page, setPage] = useState(0)
   const { lifecycle, query } = filters
+  const historyLimitMounted = useRef(false)
+  const refetchSnapshot = snapshot.refetch
+
+  useEffect(() => {
+    if (!historyLimitMounted.current) {
+      historyLimitMounted.current = true
+      return
+    }
+    refetchSnapshot()
+  }, [historyLimit, refetchSnapshot])
 
   useEffect(() => {
     if (selectedTradeId != null && activePanel !== PANEL_ID.tradeDetail) setSelectedTradeId(null)
@@ -105,7 +129,7 @@ export default function Trades() {
     () => tradesFromSnapshot(snapshot.data?.trades, bookNames),
     [snapshot.data?.trades, bookNames],
   )
-  const rows = tradeRowsOf(trades, valuations, now, instruments)
+  const rows = tradeRowsOf(trades, valuations, now, instruments, curves)
   const summary = summarizeTradeRows(rows)
   const isBothLifecycles = lifecycle === 'BOTH'
   const lifecycleRows = isBothLifecycles ? rows : rows.filter((row) => row.lifecycle === lifecycle)
@@ -134,14 +158,20 @@ export default function Trades() {
   const visibleRows = matchingRows.slice(pageStart, pageStart + TRADE_PAGE_SIZE)
   const selectedRow = rows.find((row) => row.trade.id === selectedTradeId) ?? null
   const bookOptions = tradeBookOptionsOf(lifecycleRows)
-  const classOptions = countOptions(lifecycleRows, (row) => row.trade.assetClass)
+  const classOptions = countOptions(lifecycleRows, (row) => row.trade.assetClass, assetClassLabel)
   const closedTotal = Math.max(closedTradeCountOf(books), summary.closed)
-  const closedWindowed = summary.closed < closedTotal
+  const totalTradeCount = books.reduce(
+    (total, book) => total + book.activeTrades + book.closedTrades,
+    0,
+  )
+  const moreTradesAvailable = trades.length < totalTradeCount
 
   const bothCount = formatNumber(summary.open + closedTotal)
 
   const tableContent =
-    visibleRows.length > 0 ? (
+    snapshot.loading && snapshot.data == null ? (
+      <LoadingSkeleton variant="table" rows={8} label="Loading the operational blotter" />
+    ) : visibleRows.length > 0 ? (
       <TradeTable
         table={table}
         rows={visibleRows}
@@ -155,7 +185,7 @@ export default function Trades() {
 
   const streamNote =
     snapshot.lastUpdated == null
-      ? 'loading blotter snapshot'
+      ? '—'
       : `${formatNumber(summary.open)} open · ${formatNumber(closedTotal)} closed · snapshot ${formatClockTime(snapshot.lastUpdated)}`
 
   return (
@@ -218,7 +248,7 @@ export default function Trades() {
             className="filter-bar__search blotter-toolbar__search"
             type="search"
             aria-label="Search trades"
-            placeholder="Search trade, book or symbol…"
+            placeholder="Search trade, book or instrument…"
             value={query}
             onChange={(event) => updateFilters({ query: event.target.value })}
           />
@@ -228,11 +258,23 @@ export default function Trades() {
       <div className="blotter-meta">
         <span>
           {formatNumber(matchingRows.length)} {matchingRows.length === 1 ? 'trade' : 'trades'}
-          {lifecycle === 'CLOSED' && closedWindowed && (
-            <> · newest {formatNumber(summary.closed)} of {formatNumber(closedTotal)} loaded</>
+          {moreTradesAvailable && (
+            <> · {formatNumber(trades.length)} of {formatNumber(totalTradeCount)} loaded; filters use loaded rows</>
           )}
         </span>
-        <span>select a row for valuation history &amp; audit</span>
+        <span>
+          {moreTradesAvailable && (
+            <button
+              type="button"
+              className="blotter-pager__button"
+              onClick={() => setHistoryLimit((current) => current + TRADE_HISTORY_FETCH_LIMIT)}
+              disabled={snapshot.loading}
+            >
+              Load older
+            </button>
+          )}
+          {' '}select a row for valuation history &amp; audit
+        </span>
       </div>
 
         <section className="blotter-table-panel" aria-labelledby="blotter-table-title">
@@ -282,6 +324,7 @@ export default function Trades() {
           key={selectedRow.trade.id}
           row={selectedRow}
           bookNames={bookNames}
+          instruments={instruments}
           onClose={closeTradeDetail}
         />
       )}

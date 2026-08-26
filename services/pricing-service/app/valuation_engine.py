@@ -1,84 +1,29 @@
-import time
-from decimal import Decimal
+"""Pricing, revaluation routing, and the active-trade polling loop."""
 
-from app import cache
+import time
+
+from app import cache, repository
 from app.pnl import compute_pnl, signed_quantity
+from app.pricers.registry import market_inputs, price_from_inputs
 from app.valuation_publisher import publish_valuation
 from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
-from shared.config import DEFAULT_QUOTE_PROVIDER
-from shared.term_schemas import DEFAULT_CURVE, DEFAULT_VOLATILITY
-from shared.functions import first_present, get_iso_timestamp
-from shared.pricing_math import bond_pv, european_option_pv, irs_pv
-from shared.symbols import SPOT_ASSET_CLASSES
+from shared.functions import get_iso_timestamp
 from shared.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
 
 
-def market_inputs(asset_class, symbol, meta, provider=None):
-    provider = provider or DEFAULT_QUOTE_PROVIDER
-    inputs = {}
-    if asset_class in SPOT_ASSET_CLASSES:
-        inputs["spot"] = cache.get_spot(provider, symbol)
-    elif asset_class == "EUROPEAN_OPTION":
-        inputs["spot"] = cache.get_spot(provider, meta["underlying_symbol"])
-        inputs["curve"] = cache.get_curve(meta.get("curve", DEFAULT_CURVE))
-    elif asset_class in ("BOND", "IRS"):
-        inputs["curve"] = cache.get_curve(meta.get("curve", DEFAULT_CURVE))
-    return inputs
-
-
-def price_from_inputs(asset_class, meta, inputs):
-    spot = inputs.get("spot")
-    curve = inputs.get("curve")
-
-    if asset_class in SPOT_ASSET_CLASSES:
-        if not spot:
-            return None
-        price = first_present(spot, ("mid", "last"))
-        if price is None:
-            return None
-        return Decimal(str(price)), 1
-
-    if asset_class == "BOND":
-        if not curve:
-            return None
-        return Decimal(str(bond_pv(meta, curve))), 1
-
-    if asset_class == "EUROPEAN_OPTION":
-        if not spot or not curve:
-            return None
-        underlying = first_present(spot, ("mid", "last"))
-        if underlying is None:
-            return None
-        volatility = meta.get("volatility", DEFAULT_VOLATILITY)
-        price = european_option_pv(meta, underlying, curve, volatility)
-        return Decimal(str(price)), int(meta.get("multiplier", 1))
-
-    if asset_class == "IRS":
-        if not curve:
-            return None
-        return Decimal(str(irs_pv(meta, curve))), 1
-
-    return None
-
-
-def price_instrument(asset_class, symbol, meta, provider=None):
-    return price_from_inputs(
-        asset_class, meta, market_inputs(asset_class, symbol, meta, provider)
-    )
-
-
 def value_trade(trade):
     meta = trade.get("metadata") or {}
-    inputs = market_inputs(
-        trade["asset_class"], trade["symbol"], meta, cache.trade_provider(trade)
-    )
+    provider = cache.trade_provider(trade) if cache.needs_spot(trade) else None
+    inputs = market_inputs(trade["asset_class"], trade["symbol"], meta, provider)
     priced = price_from_inputs(trade["asset_class"], meta, inputs)
     if priced is None:
         return None
     price, multiplier = priced
     spot = inputs.get("spot") or {}
+    curve = inputs.get("curve") or {}
+    projection = inputs.get("projection_curve") or {}
     quantity = trade["quantity"]
     fair_value = price * quantity * multiplier
     unrealized, realized, total = compute_pnl(
@@ -98,10 +43,24 @@ def value_trade(trade):
         "unrealized_pnl": unrealized,
         "realized_pnl": realized,
         "total_pnl": total,
-        "market_data_provider": spot.get("provider"),
-        "market_data_timestamp": spot.get("provider_timestamp"),
+        "market_data_provider": spot.get("provider") or curve.get("provider"),
+        "market_data_timestamp": spot.get("provider_timestamp") or (
+            f"{curve['as_of_date']}T00:00:00+00:00" if curve.get("as_of_date") else None
+        ),
         "valuation_time": get_iso_timestamp(),
-        "valuation_payload": {"current_price": str(price), "multiplier": multiplier},
+        "valuation_payload": {
+            "current_price": str(price),
+            "multiplier": multiplier,
+            **({"discount_curve": curve.get("curve_name"),
+                "curve_as_of": curve.get("as_of_date"),
+                "curve_received_at": curve.get("received_at")} if curve else {}),
+            **({"projection_curve": meta["projection_curve"],
+                "projection_curve_as_of": projection.get("as_of_date"),
+                "projection_curve_received_at": projection.get("received_at")}
+               if meta.get("projection_curve") else {}),
+            **({"underlying_symbol": meta["underlying_symbol"]}
+               if meta.get("underlying_symbol") else {}),
+        },
     }
 
 
@@ -111,12 +70,13 @@ def _value_and_store(trades):
         valuation = value_trade(trade)
         if valuation is None:
             continue
+        if not repository.save_valuation(valuation):
+            continue
         if not cache.record_valuation(valuation):
             log.debug("valuation_after_final_dropped", trade_id=valuation["trade_id"])
             continue
         log.debug("valuation_computed", trade_id=valuation["trade_id"],
                   symbol=valuation["symbol"])
-        cache.save_valuation(valuation)
         events.append(valuation)
     return events
 
@@ -129,14 +89,43 @@ def value_curve(curve_name):
     return _value_and_store(cache.trades_for_curve(curve_name))
 
 
+def value_all_active():
+    """Revalue the full active set after a complete market-state reconciliation."""
+    return _value_and_store(cache.active_trades_snapshot())
+
+
+def refresh_active_trades():
+    active = repository.load_active_trades()
+    dirty, first_load = cache.replace_active_trades(active)
+    if first_load:
+        log.info("active_set_bootstrapped", trades=len(active))
+    else:
+        for trade in dirty:
+            log.info(
+                "trade_entered_or_changed_active_set",
+                trade_id=trade["trade_id"],
+                symbol=trade["symbol"],
+                book_id=trade["book_id"],
+            )
+    return dirty
+
+
+def restore_terminal_valuations():
+    """Populate the seed cache before the HTTP server accepts subscribers."""
+    terminals = repository.load_terminal_valuations()
+    for valuation in terminals:
+        cache.record_valuation(valuation)
+    log.info("terminal_valuations_restored", valuations=len(terminals))
 
 
 def trade_refresh_loop():
     while True:
         try:
-            for event in _value_and_store(cache.refresh_active_trades()):
+            for event in _value_and_store(refresh_active_trades()):
                 publish_valuation(event)
-            for valuation in cache.finalize_closed_trades():
+            finals = repository.finalize_closed_trades()
+            cache.remove_active_trades(valuation["trade_id"] for valuation in finals)
+            for valuation in finals:
                 cache.record_valuation(valuation)
                 publish_valuation(valuation)
         except Exception:

@@ -1,7 +1,7 @@
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.config import REFERENCE_PUBLICATION_GRACE_SECONDS
+from app.config import OFFICIAL_FIXING_FEED_PUBLICATION_GRACE_SECONDS
 
 BUSINESS_WEEKDAYS = range(5)
 
@@ -32,7 +32,8 @@ class PublicationCalendar:
         as_of = datetime.combine(as_of_date, time(0, 0), tzinfo=timezone.utc)
         deadline = self._next_publication_end(as_of_date).astimezone(timezone.utc)
         return round(
-            (deadline - as_of).total_seconds() + REFERENCE_PUBLICATION_GRACE_SECONDS
+            (deadline - as_of).total_seconds()
+            + OFFICIAL_FIXING_FEED_PUBLICATION_GRACE_SECONDS
         )
 
     def next_window_seconds(self, now):
@@ -48,4 +49,5 @@ class PublicationCalendar:
     def describe_window(self):
         start = self.window_start.strftime("%H:%M")
         end = self.window_end.strftime("%H:%M")
-        return f"{start}–{end} {self.tz.key.split('/')[-1]} time, business days"
+        city = self.tz.key.split("/")[-1].replace("_", " ")
+        return f"{start}–{end} {city} time, business days"

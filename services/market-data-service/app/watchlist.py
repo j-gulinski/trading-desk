@@ -1,4 +1,7 @@
 import re
+import threading
+
+from sqlalchemy.exc import IntegrityError
 
 from shared.audit import write_audit
 from shared.db import session_scope
@@ -14,13 +17,19 @@ from shared.symbols import (
 from app.config import MAX_ACTIVE_SYMBOLS, SERVICE_NAME
 
 CURRENCY_PATTERN = re.compile(r"^[A-Z]{3}$")
+MAX_NAME_LENGTH = 160
+MAX_MARKET_LENGTH = 40
+COUNTRY_MARKETS = {"US", "USA", "UNITED STATES"}
+_mutation_lock = threading.Lock()
 
 
-def _describe(symbol, asset_class, currency, chosen, quote_providers):
+def _describe(symbol, name, asset_class, currency, market, chosen, quote_providers):
     return {
         "symbol": symbol,
+        "name": name,
         "asset_class": asset_class,
         "currency": currency,
+        "market": market,
         "providers": {provider: provider in chosen for provider in quote_providers},
         "capabilities": {
             provider: supports_quotes(provider, asset_class)
@@ -32,14 +41,14 @@ def _describe(symbol, asset_class, currency, chosen, quote_providers):
 def list_items(quote_providers):
     with session_scope() as session:
         rows = [
-            (item.symbol, item.asset_class, item.currency,
+            (item.symbol, item.name, item.asset_class, item.currency, item.market,
              watched_providers(item.asset_class, item.providers), item.created_at)
             for item in watchlist_items(session)
         ]
     return [
-        {**_describe(symbol, asset_class, currency, chosen, quote_providers),
+        {**_describe(symbol, name, asset_class, currency, market, chosen, quote_providers),
          "created_at": created_at}
-        for symbol, asset_class, currency, chosen, created_at in rows
+        for symbol, name, asset_class, currency, market, chosen, created_at in rows
     ]
 
 
@@ -59,16 +68,45 @@ def _requested_providers(requested, asset_class, quote_providers):
     return chosen, None
 
 
-def add_item(symbol, asset_class, currency, quote_providers, requested_providers=None):
-    symbol = (symbol or "").strip().upper()
-    asset_class = (asset_class or "").strip().upper()
-    currency = (currency or "").strip().upper()
+def _optional_identity(value, field, max_length):
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, f"{field} must be text"
+    normalized = value.strip()
+    if not normalized:
+        return None, None
+    if len(normalized) > max_length:
+        return None, f"{field} must be at most {max_length} characters"
+    return normalized, None
+
+
+def _add_item(symbol, asset_class, currency, quote_providers, requested_providers=None,
+              name=None, market=None):
+    if not all(isinstance(value, str) for value in (symbol, asset_class, currency)):
+        return None, "symbol, asset_class and currency must be text", 400
+    symbol = symbol.strip().upper()
+    asset_class = asset_class.strip().upper()
+    currency = currency.strip().upper()
     if not is_valid_symbol(symbol):
-        return None, "symbol must be 2-32 characters: A-Z 0-9 . _ -", 400
+        return None, "symbol must be 2-32 characters: A-Z 0-9 . _ : -", 400
     if asset_class not in SPOT_ASSET_CLASSES:
         return None, f"asset_class must be one of {', '.join(SPOT_ASSET_CLASSES)}", 400
     if not CURRENCY_PATTERN.match(currency):
         return None, "currency must be a 3-letter ISO code", 400
+    name, error = _optional_identity(name, "name", MAX_NAME_LENGTH)
+    if error is not None:
+        return None, error, 400
+    market, error = _optional_identity(market, "market", MAX_MARKET_LENGTH)
+    if error is not None:
+        return None, error, 400
+    market = market.upper() if market else None
+    if market in COUNTRY_MARKETS:
+        market = None
+    if asset_class in ("FX", "COMMODITY"):
+        market = "OTC"
+    elif market is None and ":" in symbol:
+        market = symbol.rpartition(":")[2]
     chosen, error = _requested_providers(requested_providers, asset_class, quote_providers)
     if error is not None:
         return None, error, 400
@@ -90,6 +128,12 @@ def add_item(symbol, asset_class, currency, quote_providers, requested_providers
                 return None, f"{symbol} is already watched on {', '.join(sorted(chosen))}", 409
             merged = current | added
             row.providers = {provider: True for provider in sorted(merged)}
+            if name is not None:
+                row.name = name
+            if market is not None:
+                row.market = market
+            name = row.name
+            market = row.market
             event, message = "WATCHLIST_PROVIDER_ADDED", (
                 f"{symbol} watched on {', '.join(sorted(added))}"
             )
@@ -103,8 +147,10 @@ def add_item(symbol, asset_class, currency, quote_providers, requested_providers
             merged = chosen
             session.add(WatchlistItem(
                 symbol=symbol,
+                name=name,
                 asset_class=asset_class,
                 currency=currency,
+                market=market,
                 providers={provider: True for provider in sorted(merged)},
                 created_at=utcnow(),
             ))
@@ -116,15 +162,33 @@ def add_item(symbol, asset_class, currency, quote_providers, requested_providers
             SERVICE_NAME, event, message,
             entity_type="SYMBOL", entity_id=symbol,
             payload={"asset_class": asset_class, "currency": currency,
+                     "name": name, "market": market,
                      "providers": sorted(merged)},
             session=session,
         )
-    item = _describe(symbol, asset_class, currency, merged, quote_providers)
+    item = _describe(symbol, name, asset_class, currency, market, merged, quote_providers)
     item["added_providers"] = sorted(added)
     return item, None, 201
 
 
-def remove_item(symbol, provider=None):
+def add_item(symbol, asset_class, currency, quote_providers, requested_providers=None,
+             name=None, market=None):
+    with _mutation_lock:
+        try:
+            return _add_item(
+                symbol,
+                asset_class,
+                currency,
+                quote_providers,
+                requested_providers,
+                name,
+                market,
+            )
+        except IntegrityError:
+            return None, "the watchlist changed concurrently; retry the request", 409
+
+
+def _remove_item(symbol, provider=None):
     symbol = (symbol or "").strip().upper()
     provider = (provider or "").strip().upper() or None
     with session_scope() as session:
@@ -155,3 +219,11 @@ def remove_item(symbol, provider=None):
         )
         dropped = sorted(current - remaining)
     return {"remaining": sorted(remaining), "dropped": dropped}, None, 200
+
+
+def remove_item(symbol, provider=None):
+    with _mutation_lock:
+        try:
+            return _remove_item(symbol, provider)
+        except IntegrityError:
+            return None, "the watchlist changed concurrently; retry the request", 409

@@ -1,5 +1,6 @@
 import threading
 from collections import defaultdict
+from datetime import datetime
 from decimal import Decimal
 
 
@@ -9,7 +10,7 @@ class Trade:
                  close_price=None, close_reason=None, market_data_provider=None,
                  entry_price_timestamp=None, entry_snapshot_id=None,
                  close_price_timestamp=None, close_snapshot_id=None,
-                 client_seen_price=None):
+                 client_seen_price=None, terms=None):
         self.trade_id = trade_id
         self.book_id = book_id
         self.asset_class = asset_class
@@ -29,6 +30,7 @@ class Trade:
         self.close_price_timestamp = close_price_timestamp
         self.close_snapshot_id = close_snapshot_id
         self.client_seen_price = client_seen_price
+        self.terms = terms
 
 
 class IndexedStore:
@@ -42,8 +44,10 @@ class IndexedStore:
         with self._lock:
             self._add(obj)
 
-    def add_many(self, objs):
+    def replace_all(self, objs):
         with self._lock:
+            self._by_id = {}
+            self._indexes = {f: defaultdict(set) for f in self._indexed_fields}
             for obj in objs:
                 self._add(obj)
 
@@ -106,22 +110,53 @@ class IndexedStore:
 
 trades = IndexedStore(["book_id", "asset_class", "status", "symbol"])
 
+reconciliation_lock = threading.RLock()
 _val_lock = threading.Lock()
 valuations = {}
 
 _NUMERIC_FIELDS = ("fair_value", "market_value", "unrealized_pnl", "realized_pnl", "total_pnl")
 
 
+def _parsed_valuation(valuation):
+    parsed = dict(valuation)
+    for field in _NUMERIC_FIELDS:
+        if parsed.get(field) is not None:
+            parsed[field] = Decimal(str(parsed[field]))
+    return parsed
+
+
+def _valued_at(valuation):
+    try:
+        return datetime.fromisoformat(str(valuation.get("valuation_time")))
+    except (TypeError, ValueError):
+        return None
+
+
 def record_valuation(valuation):
     trade_id = valuation.get("trade_id")
     if trade_id is None:
-        return
-    parsed = dict(valuation)
-    for f in _NUMERIC_FIELDS:
-        if parsed.get(f) is not None:
-            parsed[f] = Decimal(str(parsed[f]))
+        return False
+    parsed = _parsed_valuation(valuation)
     with _val_lock:
+        current = valuations.get(trade_id)
+        current_at = _valued_at(current or {})
+        incoming_at = _valued_at(parsed)
+        if current_at is not None and incoming_at is not None and incoming_at < current_at:
+            return False
         valuations[trade_id] = parsed
+    return True
+
+
+def replace_valuations(rows, active_trade_ids):
+    replacement = {
+        row["trade_id"]: _parsed_valuation(row)
+        for row in rows
+        if row.get("trade_id") in active_trade_ids
+        and not bool((row.get("valuation_payload") or {}).get("final"))
+    }
+    global valuations
+    with _val_lock:
+        valuations = replacement
 
 
 def get_valuation(trade_id):

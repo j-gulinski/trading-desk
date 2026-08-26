@@ -1,13 +1,8 @@
 import { directionOf } from './formatting.js'
+import { toNum } from './values.js'
 
-const MARKET_STATE_STORAGE_VERSION = 10
+const MARKET_STATE_STORAGE_VERSION = 14
 const MAX_STORED_INSTRUMENTS = 100
-
-function toNum(value) {
-  if (value == null || value === '') return null
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
-}
 
 function eventIdOf(tick) {
   if (tick?.event_id == null) return null
@@ -34,9 +29,11 @@ function spotInstrument(tick, snapshotStreamId = null) {
   return {
     id: provider ? instrumentId(provider, tick.symbol) : tick.symbol,
     symbol: tick.symbol,
+    name: typeof tick.name === 'string' ? tick.name : null,
     provider,
     assetClass: tick.asset_class ?? 'UNKNOWN',
     currency: tick.currency ?? null,
+    market: typeof tick.market === 'string' ? tick.market : null,
     value: toNum(tick.mid ?? tick.last),
     bid: toNum(tick.bid),
     ask: toNum(tick.ask),
@@ -44,6 +41,10 @@ function spotInstrument(tick, snapshotStreamId = null) {
     previousClose: toNum(tick.previous_close),
     priceBasis: typeof tick.price_basis === 'string' ? tick.price_basis : null,
     grade: tick.quote_grade ?? null,
+    providerTimestamp: typeof tick.provider_timestamp === 'string'
+      ? tick.provider_timestamp
+      : null,
+    receivedAt: typeof tick.received_at === 'string' ? tick.received_at : null,
     providerTimestampMs: Number.isFinite(providerTimestampMs) ? providerTimestampMs : null,
     polledAtMs: Number.isFinite(polledAtMs) ? polledAtMs : null,
     staleAfterMs: staleAfterSeconds != null ? staleAfterSeconds * 1000 : null,
@@ -76,6 +77,21 @@ function mergeInstrument(prev, update) {
   let sourceRestarted = false
 
   if (prev) {
+    const providerTimesKnown = Number.isFinite(prev.providerTimestampMs) &&
+      Number.isFinite(update.providerTimestampMs)
+    if (providerTimesKnown && update.providerTimestampMs < prev.providerTimestampMs) {
+      return prev
+    }
+    const sameProviderTime = providerTimesKnown &&
+      update.providerTimestampMs === prev.providerTimestampMs
+    if (
+      sameProviderTime &&
+      Number.isFinite(prev.polledAtMs) &&
+      Number.isFinite(update.polledAtMs) &&
+      update.polledAtMs < prev.polledAtMs
+    ) {
+      return prev
+    }
     const previousStream = prev.sourceStreamId
     const nextStream = update.sourceStreamId
     const streamsKnown = previousStream != null && nextStream != null
@@ -185,9 +201,11 @@ function restoreInstrument(candidate) {
   return {
     id: candidate.id,
     symbol: candidate.symbol,
+    name: typeof candidate.name === 'string' ? candidate.name : null,
     provider: typeof candidate.provider === 'string' ? candidate.provider : null,
     assetClass: candidate.assetClass,
     currency: typeof candidate.currency === 'string' ? candidate.currency : null,
+    market: typeof candidate.market === 'string' ? candidate.market : null,
     value: toNum(candidate.value),
     bid: toNum(candidate.bid),
     ask: toNum(candidate.ask),
@@ -195,6 +213,10 @@ function restoreInstrument(candidate) {
     previousClose: toNum(candidate.previousClose),
     priceBasis: typeof candidate.priceBasis === 'string' ? candidate.priceBasis : null,
     grade: typeof candidate.grade === 'string' ? candidate.grade : null,
+    providerTimestamp: typeof candidate.providerTimestamp === 'string'
+      ? candidate.providerTimestamp
+      : null,
+    receivedAt: typeof candidate.receivedAt === 'string' ? candidate.receivedAt : null,
     providerTimestampMs: Number.isFinite(candidate.providerTimestampMs)
       ? candidate.providerTimestampMs
       : null,
@@ -339,9 +361,11 @@ function placeholderInstrument(id, provider, item) {
   return {
     id,
     symbol: item.symbol,
+    name: item.name ?? null,
     provider,
     assetClass: item.asset_class ?? 'UNKNOWN',
     currency: item.currency ?? null,
+    market: item.market ?? null,
     value: null,
     bid: null,
     ask: null,
@@ -363,11 +387,23 @@ function placeholderInstrument(id, provider, item) {
 
 export function boardInstruments(instruments, watchlistItems, watchlistReady = true) {
   const watchedIds = watchedIdsOf(watchlistItems)
+  const itemBySymbol = new Map(watchlistItems.map((item) => [item.symbol, item]))
   const isWatchlisted = (instrument) =>
     watchlistReady ? watchedIds.has(instrument.id) : watchedIds.has(instrument.id) || instrument.watched
-  const annotated = instruments.map((instrument) =>
-    isWatchlisted(instrument) ? { ...instrument, watchlisted: true } : instrument,
-  )
+  const annotated = instruments.map((instrument) => {
+    const item = itemBySymbol.get(instrument.symbol)
+    const identity = item
+      ? {
+          name: item.name ?? instrument.name,
+          market: item.market ?? instrument.market,
+        }
+      : null
+    return isWatchlisted(instrument)
+      ? { ...instrument, ...identity, watchlisted: true }
+      : identity
+        ? { ...instrument, ...identity }
+        : instrument
+  })
   const presentIds = new Set(annotated.map((instrument) => instrument.id))
   for (const item of watchlistItems) {
     for (const [provider, chosen] of Object.entries(item.providers ?? {})) {
@@ -379,8 +415,18 @@ export function boardInstruments(instruments, watchlistItems, watchlistReady = t
   return annotated
 }
 
-export function providerScheduleText(provider) {
-  return provider?.runtime?.strategy?.description ?? '—'
+export function providerScheduleText(provider, elapsedMs = 0) {
+  const strategy = provider?.runtime?.strategy
+  const description = strategy?.description ?? '—'
+  const snapshotSeconds = Number(strategy?.next_batch_seconds)
+  if (!Number.isFinite(snapshotSeconds)) return description
+
+  const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000))
+  const nextBatchSeconds = Math.max(0, snapshotSeconds - elapsedSeconds)
+  return description.replace(
+    /next batch in \d+s/,
+    `next batch in ${nextBatchSeconds}s`,
+  )
 }
 
 export function providerStrategiesOf(providers) {

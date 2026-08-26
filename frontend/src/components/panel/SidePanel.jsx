@@ -11,6 +11,8 @@ export default function SidePanel({
   tabs,
   footer,
   wide = false,
+  roomy = false,
+  compact = false,
   bodyClassName = '',
   dismissOnOutsideClick = true,
   onClose,
@@ -26,6 +28,10 @@ export default function SidePanel({
     <aside
       ref={panelRef}
       className={`side-panel${wide ? ' side-panel--wide' : ''}${
+        roomy ? ' side-panel--roomy' : ''
+      }${
+        compact ? ' side-panel--compact' : ''
+      }${
         suppressEntryAnimation.current ? ' side-panel--no-enter' : ''
       }`}
     >

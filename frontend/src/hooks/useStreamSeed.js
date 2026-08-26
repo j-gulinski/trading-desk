@@ -1,34 +1,47 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { STREAM_STATUS } from '../config/stream.js'
 
-export function useStreamSeed(status, load) {
+export function useStreamSeed(status, load, { initial = true } = {}) {
   const [seedStatus, setSeedStatus] = useState('loading')
 
   const loadRef = useRef(load)
   loadRef.current = load
   const previousStatusRef = useRef(status)
+  const controllerRef = useRef(null)
 
   const runSeed = useCallback(() => {
+    controllerRef.current?.abort()
     const controller = new AbortController()
+    controllerRef.current = controller
+    setSeedStatus('loading')
 
     loadRef.current(controller.signal).then(
       () => {
-        if (!controller.signal.aborted) setSeedStatus('ready')
+        if (!controller.signal.aborted && controllerRef.current === controller) {
+          setSeedStatus('ready')
+        }
       },
       () => {
-        if (!controller.signal.aborted) setSeedStatus('error')
+        if (!controller.signal.aborted && controllerRef.current === controller) {
+          setSeedStatus('error')
+        }
       },
     )
 
-    return () => controller.abort()
+    return () => {
+      if (controllerRef.current === controller) controllerRef.current = null
+      controller.abort()
+    }
   }, [])
 
-  useEffect(runSeed, [runSeed])
+  useEffect(() => (initial ? runSeed() : undefined), [initial, runSeed])
 
   useEffect(() => {
-    const wasInterrupted = previousStatusRef.current === STREAM_STATUS.reconnecting
+    const previousStatus = previousStatusRef.current
     previousStatusRef.current = status
-    return wasInterrupted && status === STREAM_STATUS.connected ? runSeed() : undefined
+    const becameConnected =
+      previousStatus !== STREAM_STATUS.connected && status === STREAM_STATUS.connected
+    return becameConnected ? runSeed() : undefined
   }, [status, runSeed])
 
   return seedStatus

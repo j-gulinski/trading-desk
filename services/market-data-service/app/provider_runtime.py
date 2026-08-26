@@ -1,14 +1,26 @@
 import threading
 import time
 
+from shared.active_set import load_active_set
 from shared.audit import write_audit
 from shared.functions import get_iso_timestamp
 from shared.logging_config import get_logger
-from app.budget import DailyLedger, TokenBucket
+from app.budget import DailyLedger, RollingMinuteBudget
+from app.quote_cleanup import cleanup_active_drops
+from app.providers.base import (
+    ProviderAuthError,
+    ProviderDataError,
+    ProviderError,
+    ProviderRateLimited,
+)
 from app.config import (
+    ACTIVE_SET_REFRESH_SECONDS,
+    AUTH_FAILURE_COOLDOWN_SECONDS,
     PROVIDER_ACTIVE_WINDOW_HOURS,
     PROVIDER_BUDGET_USAGE_PERCENT,
+    RATE_LIMIT_DEFAULT_COOLDOWN_SECONDS,
     SERVICE_NAME,
+    TRANSIENT_ERROR_BACKOFF_SECONDS,
 )
 
 log = get_logger(SERVICE_NAME)
@@ -30,7 +42,7 @@ class ProviderRuntime:
         self.provider = provider
         self.keyless = keyless
         self.bucket = (
-            TokenBucket(budget_per_minute, budget_per_minute / 60)
+            RollingMinuteBudget(budget_per_minute)
             if budget_per_minute is not None else None
         )
         self.ledger = DailyLedger(daily_budget, provider_daily_limit)
@@ -46,9 +58,13 @@ class ProviderRuntime:
         self._market_open = None
         self._market_session = None
         self._active = {}
+        self._active_loaded_at = None
 
     def try_take(self, cost=1):
         return True if self.bucket is None else self.bucket.try_take(cost)
+
+    def budget_wait_seconds(self, cost=1):
+        return 0 if self.bucket is None else self.bucket.seconds_until_available(cost)
 
     def record_request(self, credits=1):
         self.ledger.record(credits)
@@ -77,6 +93,82 @@ class ProviderRuntime:
 
     def pollable_entries(self):
         return [entry for entry in self.active_entries() if entry.serves(self.provider)]
+
+    def reload_active(self):
+        fresh = load_active_set()
+        with self._lock:
+            previous = self._active
+            self._active = fresh
+            self._active_loaded_at = time.monotonic()
+        cleanup_active_drops(self.provider, previous, fresh)
+
+    def reload_active_if_stale(self):
+        """False when the reload failed — the caller should back off and retry."""
+        with self._lock:
+            loaded_at = self._active_loaded_at
+        if loaded_at is not None and time.monotonic() - loaded_at < ACTIVE_SET_REFRESH_SECONDS:
+            return True
+        try:
+            self.reload_active()
+        except Exception:
+            log.exception("active_set_load_failed", provider=self.provider)
+            return False
+        return True
+
+    def resolve(self, symbol):
+        """The active entry this provider serves, reloading the set once if it is missing.
+        Returns (entry, error, http_status)."""
+        entry = self.active_entry(symbol)
+        if entry is None:
+            self.reload_active()
+            entry = self.active_entry(symbol)
+        if entry is None:
+            return None, "symbol is not in the active set", 404
+        if not entry.serves(self.provider):
+            return None, f"{self.provider} is not watching {symbol}", 422
+        return entry, None, 200
+
+    def unavailable(self):
+        """The reason this provider cannot be polled right now, or None."""
+        cooldown_left = self.cooldown_seconds_left()
+        if cooldown_left > 0:
+            return f"{self.provider} is {self.status()}: retry in {round(cooldown_left)}s"
+        return None
+
+    def guarded(self, work, unavailable_event, log_level="info", **context):
+        """Runs one provider call, mapping every provider error onto this runtime's
+        state. Returns (result, error message)."""
+        try:
+            return work(), None
+        except ProviderRateLimited as error:
+            self.enter_cooldown(
+                "RATE_LIMITED", "rate limited", error.detail,
+                error.retry_after_seconds or RATE_LIMIT_DEFAULT_COOLDOWN_SECONDS,
+                "PROVIDER_RATE_LIMITED", "WARNING",
+            )
+            return None, f"{self.provider} is rate limited"
+        except ProviderAuthError as error:
+            self.enter_cooldown(
+                "AUTH_FAILED", "authentication failed", error.detail,
+                AUTH_FAILURE_COOLDOWN_SECONDS, "PROVIDER_AUTH_FAILED", "ERROR",
+            )
+            return None, f"{self.provider} rejected the API key"
+        except ProviderDataError as error:
+            getattr(log, log_level)(unavailable_event, provider=self.provider,
+                                    detail=error.detail, **context)
+            return None, error.detail
+        except ProviderError as error:
+            self.transient_error(error.detail, TRANSIENT_ERROR_BACKOFF_SECONDS)
+            return None, error.detail
+        except Exception as error:
+            detail = f"unexpected {type(error).__name__} while processing provider data"
+            log.exception(
+                "provider_processing_failed",
+                provider=self.provider,
+                **context,
+            )
+            self.transient_error(detail, TRANSIENT_ERROR_BACKOFF_SECONDS)
+            return None, detail
 
     def set_market_status(self, is_open, session_name):
         with self._lock:
@@ -166,11 +258,13 @@ class ProviderRuntime:
             budget = {
                 **self.bucket.state(),
                 "budget_per_minute": self._budget_per_minute,
-                "provider_minute_limit": self._provider_minute_limit,
-                "usage_percent": PROVIDER_BUDGET_USAGE_PERCENT,
-                "active_window_hours": PROVIDER_ACTIVE_WINDOW_HOURS,
                 **self.ledger.state(),
             }
+            if self._provider_minute_limit is not None:
+                budget["provider_minute_limit"] = self._provider_minute_limit
+                budget["usage_percent"] = PROVIDER_BUDGET_USAGE_PERCENT
+            if "daily_budget" in budget:
+                budget["active_window_hours"] = PROVIDER_ACTIVE_WINDOW_HOURS
         return {
             **state,
             "keyless": self.keyless,

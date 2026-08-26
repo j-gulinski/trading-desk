@@ -9,7 +9,7 @@ export default function AuditEventList({ events, onCorrelationClick }) {
           <details className="audit-row">
             <summary className="audit-row__summary">
               <span className="audit-row__caret" aria-hidden="true" />
-              <span className="audit-row__time">{formatClockTime(event.createdAtMs)}</span>
+              <span className="audit-row__time">{formatClockTime(event.createdAtMs, { day: true })}</span>
               <StatusPill level={event.tone} label={event.severity} />
               <span className="audit-row__service">{event.serviceLabel}</span>
               <span className="audit-row__message">{event.message}</span>

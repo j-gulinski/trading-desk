@@ -160,6 +160,23 @@
   }
 }
 
+.quote-history__more {
+  width: 100%;
+  margin-top: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+  }
+}
+
 .quote-history__tick {
   position: relative;
   margin-left: 5px;

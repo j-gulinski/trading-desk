@@ -21,8 +21,9 @@ phase re-derives its decisions and ends by adding its report to `phase-reports/`
 4. [configuration.md](configuration.md) — every runtime knob: default, reader, one-line
    why.
 5. [validation-runbook.md](validation-runbook.md) with
-   [provider-trading.http](../scenarios/provider-trading.http) and
-   [reference-fx.http](../scenarios/reference-fx.http) — the review procedure and the
+   [provider-trading.http](../scenarios/provider-trading.http),
+   [reference-fx.http](../scenarios/reference-fx.http) and
+   [curves.http](../scenarios/curves.http) — the review procedure and the
    executable API paths.
 
 ## Phase reports — the detailed record
@@ -33,11 +34,18 @@ phase re-derives its decisions and ends by adding its report to `phase-reports/`
 - [phase-3a](phase-reports/phase-3a.md) — the two-provider workflow, review record
 - [phase-3b](phase-reports/phase-3b.md) — review closure
 - [phase-4](phase-reports/phase-4.md) — NBP/ECB reference FX and the reporting currency
-  (the latest evidence and the exact boundary handed to Phase 5)
+- [phase-5](phase-reports/phase-5.md) — rate curves, model-priced execution, and a
+  catalog a rates desk would recognise: a risk-free curve per currency, curve roles
+  stated in the interface, derived instrument identifiers, and the ticket built around
+  the economics (the latest evidence and the exact boundary handed to Phase 6)
+  - [phase-5-krzywe-i-kod](phase-reports/phase-5-krzywe-i-kod.md) — its companion, in
+    Polish: Part I teaches the domain (what each curve is, how it is built, what the two
+    curve roles mean, every number worked through), Part II walks the code process by
+    process for a review
 
 ## The plan
 
 [implementation-roadmap.md](implementation-roadmap.md) — the working plan: the standing
-phase template, task-level phases 5–7, and the post-acceptance sequence. Forward-looking
+phase template, the single remaining Phase 6, and optional post-acceptance extensions. Forward-looking
 by design; for implemented behavior the phase reports and reference sheets above are
 authoritative.

@@ -2,10 +2,10 @@ from shared.freshness import QuoteGrade
 
 FINNHUB = "FINNHUB"
 TWELVE_DATA = "TWELVE_DATA"
-ALPHA_VANTAGE = "ALPHA_VANTAGE"
 NBP = "NBP"
 ECB = "ECB"
 FRED = "FRED"
+EIOPA = "EIOPA"
 
 GROUP_QUOTE = "QUOTE"
 GROUP_OFFICIAL = "OFFICIAL"
@@ -25,11 +25,6 @@ PROVIDERS = {
         },
         "serves_curves": False,
     },
-    ALPHA_VANTAGE: {
-        "group": GROUP_QUOTE,
-        "quotes": {"EQUITY": QuoteGrade.EOD, "FX": QuoteGrade.REALTIME},
-        "serves_curves": False,
-    },
     NBP: {
         "group": GROUP_OFFICIAL,
         "quotes": {"FX": QuoteGrade.REFERENCE, "COMMODITY": QuoteGrade.REFERENCE},
@@ -45,11 +40,22 @@ PROVIDERS = {
         "quotes": {},
         "serves_curves": True,
     },
+    EIOPA: {
+        "group": GROUP_OFFICIAL,
+        "quotes": {},
+        "serves_curves": True,
+    },
 }
 
 
 QUOTE_PROVIDERS = tuple(
     name for name, spec in PROVIDERS.items() if spec["group"] == GROUP_QUOTE
+)
+
+OFFICIAL_FIXING_PROVIDERS = tuple(
+    name
+    for name, spec in PROVIDERS.items()
+    if spec["quotes"].get("FX") == QuoteGrade.REFERENCE
 )
 
 

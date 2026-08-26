@@ -45,8 +45,35 @@
 }
 .market-section__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--sp-2);
+  min-width: 0;
+  max-width: 100%;
+
+  > span {
+    min-width: 0;
+    white-space: normal;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+}
+
+.market-section__head .market-section__actions > span {
+  white-space: normal;
+}
+
+@media (max-width: 620px) {
+  .market-section__actions {
+    width: 100%;
+    justify-content: flex-start;
+
+    > span {
+      flex-basis: 100%;
+      text-align: left;
+    }
+  }
 }
 
 @keyframes market-price-tick-pos {
@@ -92,19 +119,156 @@
   text-transform: uppercase;
 }
 
+.market-mark__compact-provider {
+  display: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .data-table td.market-symbol-cell {
   min-width: 110px;
   border-right: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.012);
-  vertical-align: top;
+  vertical-align: middle;
+}
+
+.market-symbol-stack {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.market-symbol-compact-meta {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+// This board is read continuously, so it uses a denser rhythm than detail/audit tables.
+.market-quotes-table {
+  font-size: 12px;
+
+  th,
+  td {
+    padding: 10px;
+  }
+
+  th {
+    font-size: 10px;
+  }
+
+  .data-table__sort {
+    min-height: 46px;
+    padding: 10px;
+  }
+
+  .data-table__head-note,
+  .delta__percent {
+    font-size: 9px;
+  }
+
+  .delta__percent {
+    margin-left: 4px;
+  }
+
+  td[data-column='todayChange'] {
+    overflow: hidden;
+  }
+
+  td[data-column='provider'] {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .market-instrument-name,
+  .class-tag {
+    font-size: 11px;
+  }
+}
+
+.market-compact-mode {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 34px;
+  display: none;
+  align-items: center;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.data-table td.market-identity-cell {
+  vertical-align: middle;
+}
+
+.market-identity-value {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.data-table td.market-name-cell {
+  min-width: 170px;
+  max-width: 260px;
+}
+
+.market-instrument-name {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .market-provider-row--first:not(:first-child) td {
   border-top: 1px solid var(--border-strong);
 }
 
-.market-provider-row:not(.market-provider-row--last) td:not(.market-symbol-cell) {
+.market-provider-row:not(.market-provider-row--last) td:not(.market-group-cell) {
   border-bottom-color: rgba(57, 68, 85, 0.55);
+}
+
+// Identity cells span every provider observation for one instrument. Hover and selection
+// are applied to every row in the group so the merged cell and provider rows stay coherent.
+.data-table .market-provider-row:hover,
+.data-table .market-provider-row.data-table__row--selected {
+  background: transparent;
+  box-shadow: none;
+}
+
+.data-table .market-provider-row--group-hover > td {
+  background: var(--bg-panel-hover);
+}
+
+.data-table .market-provider-row--group-selected > td {
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+.data-table .market-provider-row.data-table__row--selected > td:not(.market-group-cell) {
+  background: var(--accent-bg);
+}
+
+.data-table .market-provider-row--group-selected.market-provider-row--first >
+  td.market-group-cell:first-child {
+  box-shadow: inset 2px 0 var(--accent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -113,10 +277,185 @@
   }
 }
 
+// The page container shrinks when a side panel opens. Keep the board useful for trading
+// instead of preserving desktop metadata and forcing a horizontal scroll.
+@container page (max-width: 1240px) {
+  .market-quotes-table {
+    min-width: 760px !important;
+    table-layout: fixed;
+
+    [data-column='symbol'] {
+      width: 10%;
+    }
+
+    [data-column='name'] {
+      width: 17%;
+    }
+
+    [data-column='assetClass'] {
+      width: 11%;
+    }
+
+    [data-column='market'] {
+      width: 10%;
+    }
+
+    [data-column='provider'] {
+      width: 10%;
+    }
+
+    [data-column='last'] {
+      width: 12%;
+    }
+
+    [data-column='todayChange'] {
+      width: 16%;
+    }
+
+    [data-column='feed'] {
+      width: 8%;
+    }
+
+    [data-column='watch'] {
+      width: 6%;
+    }
+
+    [data-column='tickChange'],
+    [data-column='age'],
+    [data-column='updated'] {
+      display: none;
+    }
+
+    td.market-symbol-cell,
+    td.market-name-cell {
+      min-width: 0;
+    }
+  }
+}
+
+@container page (max-width: 900px) {
+  .market-column-picker {
+    display: none;
+  }
+
+  .market-compact-mode {
+    display: inline-flex;
+  }
+
+  .market-quotes-table {
+    min-width: 560px !important;
+    table-layout: fixed;
+
+    [data-column='symbol'] {
+      width: 18%;
+    }
+
+    [data-column='provider'] {
+      width: 18%;
+    }
+
+    [data-column='last'] {
+      width: 18%;
+    }
+
+    [data-column='todayChange'] {
+      width: 27%;
+    }
+
+    [data-column='feed'] {
+      width: 10%;
+    }
+
+    [data-column='watch'] {
+      width: 9%;
+    }
+
+    [data-column='name'],
+    [data-column='assetClass'],
+    [data-column='market'],
+    [data-column='tickChange'],
+    [data-column='age'],
+    [data-column='updated'] {
+      display: none;
+    }
+  }
+}
+
+@container page (max-width: 760px) {
+  .market-quotes-table {
+    .data-table__head-note,
+    [data-column='todayChange'] .delta__percent {
+      display: none;
+    }
+  }
+}
+
+@container page (max-width: 620px) {
+  .market-compact-mode {
+    width: 100%;
+  }
+
+  .market-quotes-table-wrap {
+    overflow-x: hidden;
+  }
+
+  .market-quotes-table {
+    min-width: 0 !important;
+
+    [data-column='provider'] {
+      display: none;
+    }
+
+    [data-column='symbol'] {
+      width: 28%;
+    }
+
+    [data-column='last'] {
+      width: 22%;
+    }
+
+    [data-column='todayChange'] {
+      width: 27%;
+    }
+
+    [data-column='feed'] {
+      width: 12%;
+    }
+
+    [data-column='watch'] {
+      width: 11%;
+    }
+
+    th,
+    td,
+    .data-table__sort {
+      padding-inline: var(--sp-2);
+    }
+
+    .data-table__head-note,
+    [data-column='todayChange'] .delta__percent {
+      display: none;
+    }
+
+    td.market-symbol-cell {
+      min-width: 0;
+    }
+
+    .market-symbol-compact-meta {
+      display: inline-flex;
+    }
+
+    .market-mark__compact-provider {
+      display: inline;
+    }
+  }
+}
+
 .market-benchmark {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  justify-content: space-between;
+  gap: var(--sp-3);
   margin-bottom: var(--sp-4);
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--border);
@@ -129,12 +468,10 @@
   justify-content: space-between;
   gap: var(--sp-3);
 }
-.market-benchmark__body {
+.market-benchmark__hero {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-3) var(--sp-5);
-  margin: auto 0;
+  flex-direction: column;
+  gap: 2px;
 }
 .market-benchmark__identity {
   display: flex;
@@ -145,7 +482,7 @@
     margin: 0;
     color: var(--text-primary);
     font-family: var(--font-mono);
-    font-size: 18px;
+    font-size: 15px;
   }
   > span:last-child {
     color: var(--text-muted);
@@ -157,13 +494,35 @@
   font-size: 9px;
   letter-spacing: 0.14em;
 }
-.market-benchmark__stats {
+.market-benchmark__quote {
   display: flex;
-  flex: 1;
   flex-wrap: wrap;
-  justify-content: space-between;
-  gap: var(--sp-3) var(--sp-4);
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+.market-benchmark__last {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.market-benchmark__today {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.market-benchmark__today-label {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+.market-benchmark__facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-4);
   margin: 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
 
   > div {
     min-width: 0;
@@ -181,17 +540,28 @@
     font-size: 12px;
     white-space: nowrap;
   }
-  .market-benchmark__last {
-    font-size: 15px;
-    font-weight: 600;
+}
+
+@media (max-width: 620px) {
+  .market-benchmark__facts {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+
+    dt {
+      white-space: normal;
+    }
   }
 }
 
 .market-cell--watch {
-  width: 36px;
+  width: 64px;
   text-align: center;
 }
-.watchlist-remove {
+.watchlist-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.watchlist-action {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
@@ -201,14 +571,28 @@
   padding: 4px 6px;
   cursor: pointer;
 
-  &:hover:not(:disabled) {
+  &--refresh:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    background: rgba(var(--accent-rgb), 0.08);
+  }
+  &--remove:hover:not(:disabled) {
     color: var(--neg);
     border-color: rgba(var(--neg-rgb), 0.35);
     background: rgba(var(--neg-rgb), 0.08);
   }
+  &--refresh.is-refreshing span {
+    display: inline-block;
+    animation: watchlist-refresh-spin 0.8s linear infinite;
+  }
   &:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+}
+@keyframes watchlist-refresh-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 .board-origin-tag {
@@ -413,9 +797,8 @@
 }
 
 @container page (max-width: 620px) {
-  .market-benchmark__stats {
-    justify-content: flex-start;
-    column-gap: var(--sp-5);
+  .market-benchmark__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .market-summary > .stat-card {
     padding: var(--sp-3) var(--sp-2);

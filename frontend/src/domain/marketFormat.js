@@ -24,6 +24,19 @@ export function formatMarketSymbol(instrument) {
   return instrument.symbol
 }
 
+export function marketLabelOf(instrument) {
+  if (instrument.assetClass === 'FX' || instrument.assetClass === 'COMMODITY') return 'OTC'
+  if (instrument.assetClass !== 'EQUITY') return '—'
+  if (typeof instrument.market === 'string' && instrument.market.length > 0) {
+    return instrument.market
+  }
+  const separator = instrument.symbol?.lastIndexOf(':') ?? -1
+  if (separator > 0 && separator < instrument.symbol.length - 1) {
+    return instrument.symbol.slice(separator + 1)
+  }
+  return '—'
+}
+
 export function unitLabelOf(instrument) {
   if (instrument.symbol === 'XAUPLN_G') return 'PLN per gram'
   const pair = currencyPair(instrument.symbol)

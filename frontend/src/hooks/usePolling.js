@@ -19,11 +19,15 @@ export function usePolling(
   useEffect(() => {
     let cancelled = false
     let inFlight = false
+    let rerunRequested = false
     let timer
     let requestController
 
     async function tick() {
-      if (inFlight) return
+      if (inFlight) {
+        rerunRequested = true
+        return
+      }
       inFlight = true
       clearTimeout(timer)
       const startedAt = Date.now()
@@ -47,9 +51,14 @@ export function usePolling(
         inFlight = false
         if (!cancelled) {
           setLoading(false)
-          const elapsedMs = Date.now() - startedAt
-          const delayMs = Math.max(MIN_RETRY_DELAY_MS, intervalMs - elapsedMs)
-          timer = setTimeout(tick, delayMs)
+          if (rerunRequested) {
+            rerunRequested = false
+            timer = setTimeout(tick, 0)
+          } else {
+            const elapsedMs = Date.now() - startedAt
+            const delayMs = Math.max(MIN_RETRY_DELAY_MS, intervalMs - elapsedMs)
+            timer = setTimeout(tick, delayMs)
+          }
         }
       }
     }

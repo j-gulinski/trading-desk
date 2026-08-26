@@ -156,6 +156,16 @@ export function useTableState({
   }
 
   function reorderColumn(column, targetColumn, position = 'before') {
+    const source = columnById.get(column)
+    const target = columnById.get(targetColumn)
+    if (!source || !target || source.reorderLocked) return
+    if (
+      source.reorderGroup != null &&
+      target.reorderGroup != null &&
+      source.reorderGroup !== target.reorderGroup
+    ) {
+      return
+    }
     setVisibleColumns((current) => moveColumn(current, column, targetColumn, position))
   }
 

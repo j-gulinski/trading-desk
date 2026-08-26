@@ -46,7 +46,12 @@ export default function FxReport({
   fx,
 }) {
   if (subtotals.length === 0) return null
-  const options = reportingCurrencyOptions(subtotals).map((currency) => ({
+  const currencies = reportingCurrencyOptions(subtotals)
+  if (reportingCurrency && !currencies.includes(reportingCurrency)) {
+    currencies.push(reportingCurrency)
+    currencies.sort()
+  }
+  const options = currencies.map((currency) => ({
     value: currency,
     label: currency,
   }))

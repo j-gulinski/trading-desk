@@ -1,4 +1,6 @@
 import StatusPill from '../status/StatusPill.jsx'
+import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
+import { providerLabel } from '../../config/providers.js'
 import {
   directionOf,
   formatNumber,
@@ -7,12 +9,12 @@ import {
   formatUnitPrice,
 } from '../../domain/formatting.js'
 
-function PnlMetric({ label, value }) {
+function PnlMetric({ label, value, title }) {
   return (
-    <div className="book-tile__metric">
+    <div className="book-tile__metric" title={title}>
       <span className="book-tile__metric-label">{label}</span>
       <strong className={`book-tile__metric-value delta--${directionOf(value)}`}>
-        {formatSignedAmount(value)}
+        {value == null ? '—' : formatSignedAmount(value)}
       </strong>
     </div>
   )
@@ -35,10 +37,13 @@ function PositionList({ positions }) {
       {positions.map((position) => (
         <li key={position.id} className="book-position">
           <div className="book-position__head">
-            <span className="book-position__symbol">{position.symbol}</span>
+            <span className="book-position__symbol">
+              {position.symbol}
+              {position.provider != null && ` · ${providerLabel(position.provider)}`}
+            </span>
             <StatusPill
-              level={position.status === 'LIVE' ? 'info' : 'stale'}
-              label={position.status}
+              level={VALUATION_STATUS_LEVEL[position.status]}
+              label={VALUATION_STATUS_LABEL[position.status] ?? position.status}
               compact
             />
           </div>
@@ -49,15 +54,15 @@ function PositionList({ positions }) {
             />
             <PositionStat
               label="AVG ENTRY"
-              value={formatUnitPrice(position.averageEntry, position.assetClass)}
+              value={`${formatUnitPrice(position.averageEntry, position.assetClass)} ${position.currency ?? '—'}`}
             />
             <PositionStat
               label="MARK"
-              value={formatUnitPrice(position.price, position.assetClass)}
+              value={`${formatUnitPrice(position.price, position.assetClass)} ${position.currency ?? '—'}`}
             />
             <PositionStat
               label="UNREALIZED"
-              value={formatSignedAmount(position.unrealizedPnl)}
+              value={`${formatSignedAmount(position.unrealizedPnl)} ${position.currency ?? '—'}`}
               tone={directionOf(position.unrealizedPnl)}
             />
           </div>
@@ -69,6 +74,7 @@ function PositionList({ positions }) {
 
 export default function BookCard({
   book,
+  reported,
   expanded,
   positions,
   onToggleExpand,
@@ -94,8 +100,16 @@ export default function BookCard({
       </header>
 
       <div className="book-tile__pnl">
-        <PnlMetric label={`Unrealized · ${book.currency ?? '—'}`} value={book.unrealizedPnl} />
-        <PnlMetric label="Realized" value={book.realizedPnl} />
+        <PnlMetric
+          label={`Unrealized · ${reported.currency}`}
+          value={reported.values?.unrealized ?? null}
+          title={reported.title}
+        />
+        <PnlMetric
+          label={`Realized · ${reported.currency}`}
+          value={reported.values?.realized ?? null}
+          title={reported.title}
+        />
       </div>
 
       <footer className="book-tile__foot">

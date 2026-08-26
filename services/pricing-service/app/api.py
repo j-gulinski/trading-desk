@@ -4,12 +4,19 @@ from bottle import request, response
 
 from app import cache
 from app.config import SERVICE_NAME, VALUATION_STREAM_QUEUE_SIZE
+from app.pricers.registry import market_inputs, price_details, price_from_inputs
 from shared.config import DEFAULT_QUOTE_PROVIDER
 from app.schemas import ScenarioRequest
-from app.valuation_engine import price_instrument
+from app.valuation_publisher import STREAM_OVERFLOW
+from shared.curve_registry import latest_curve_sets
 from shared.db import session_scope
 from shared.active_set import load_active_set
-from shared.symbols import SPOT_ASSET_CLASSES, watchlist_spot_symbols
+from shared.symbols import (
+    CURVE_PRICED_ASSET_CLASSES,
+    SPOT_ASSET_CLASSES,
+    watchlist_option_underlying_symbols,
+    watchlist_spot_currencies,
+)
 from shared.term_schemas import validate_terms
 from app.scenario import run_scenario
 from shared.serialization import to_json
@@ -17,6 +24,53 @@ from shared.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
 app = bottle.Bottle()
+
+
+def _preview_revisions(terms, inputs):
+    spot = inputs.get("spot") or {}
+
+    def spot_revision():
+        if not spot:
+            return None
+        return {
+            "provider": spot.get("provider"),
+            "symbol": spot.get("symbol"),
+            "provider_timestamp": spot.get("provider_timestamp"),
+            "received_at": spot.get("received_at"),
+        }
+
+    def curve_revision(field, input_name):
+        curve = inputs.get(input_name) or {}
+        if not curve:
+            return None
+        return {
+            "curve_name": terms.get(field),
+            "as_of_date": curve.get("as_of_date"),
+            "received_at": curve.get("received_at"),
+        }
+
+    return {
+        "spot": spot_revision(),
+        "discount_curve": curve_revision("discount_curve", "curve"),
+        "projection_curve": curve_revision("projection_curve", "projection_curve"),
+    }
+
+
+def _revisions_match(expected, actual):
+    if expected is None:
+        return True
+    if not isinstance(expected, dict):
+        return False
+    for role, wanted in expected.items():
+        if wanted is None:
+            continue
+        used = actual.get(role)
+        if not isinstance(wanted, dict) or not isinstance(used, dict):
+            return False
+        for field, value in wanted.items():
+            if value is not None and str(used.get(field)) != str(value):
+                return False
+    return True
 
 
 @app.route("/valuations")
@@ -34,13 +88,22 @@ def get_book_risk():
 @app.route("/price", method="POST")
 def price_preview():
     response.content_type = "application/json"
-    body = request.json or {}
+    body = request.json
+    if not isinstance(body, dict):
+        response.status = 400
+        return to_json({"error": "request body must be an object"})
     symbol = body.get("symbol")
+    if symbol is not None and not isinstance(symbol, str):
+        response.status = 400
+        return to_json({"error": "symbol must be text"})
     if body.get("terms") is not None:
         with session_scope() as session:
-            underlying_choices = watchlist_spot_symbols(session)
+            underlying_choices = watchlist_option_underlying_symbols(session)
+            underlying_currencies = watchlist_spot_currencies(session)
+            curves = latest_curve_sets(session)
         terms, error = validate_terms(body.get("asset_class"), body["terms"],
-                                      underlying_choices)
+                                      underlying_choices, curves,
+                                      underlying_currencies)
         if terms is None:
             log.warning("price_preview_rejected", symbol=symbol,
                         asset_class=body.get("asset_class"), reason=error)
@@ -57,8 +120,13 @@ def price_preview():
             log.warning("price_preview_rejected", symbol=symbol, reason="instrument not found")
             response.status = 404
             return to_json({"error": "instrument not found", "symbol": symbol})
-    provider = (body.get("market_data_provider") or "").strip().upper() or None
-    priced = price_instrument(terms["asset_class"], symbol, terms, provider)
+    raw_provider = body.get("market_data_provider")
+    if raw_provider is not None and not isinstance(raw_provider, str):
+        response.status = 400
+        return to_json({"error": "market_data_provider must be text"})
+    provider = (raw_provider or "").strip().upper() or None
+    inputs = market_inputs(terms["asset_class"], symbol, terms, provider)
+    priced = price_from_inputs(terms["asset_class"], terms, inputs)
     if priced is None:
         log.warning("price_preview_unavailable", symbol=symbol,
                     asset_class=terms["asset_class"], provider=provider)
@@ -66,19 +134,36 @@ def price_preview():
         return to_json({
             "error": f"{provider or DEFAULT_QUOTE_PROVIDER} has no current quote for {symbol}"
             if terms["asset_class"] in SPOT_ASSET_CLASSES
-            else f"no curve source is wired for {terms['asset_class']}",
+            else "the selected curve (or the underlying quote) is not available yet",
             "symbol": symbol,
         })
     price, multiplier = priced
+    revisions = _preview_revisions(terms, inputs)
+    if not _revisions_match(body.get("expected_market_revisions"), revisions):
+        response.status = 409
+        return to_json({
+            "error": "pricing market data is catching up; retry the preview",
+            "market_revisions": revisions,
+        })
+    needs_spot = (
+        terms["asset_class"] in SPOT_ASSET_CLASSES
+        or terms["asset_class"] == "EUROPEAN_OPTION"
+    )
     log.info("price_preview", symbol=symbol, asset_class=terms["asset_class"],
              provider=provider, price=str(price))
     return to_json({
         "symbol": symbol,
         "asset_class": terms["asset_class"],
         "currency": terms.get("currency", "USD"),
-        "market_data_provider": provider or DEFAULT_QUOTE_PROVIDER,
+        "market_data_provider": (provider or DEFAULT_QUOTE_PROVIDER) if needs_spot else None,
         "price": price,
         "multiplier": multiplier,
+        "market_revisions": revisions,
+        **price_details(terms["asset_class"], terms, inputs),
+        **(
+            {"projection_curve_tracks_index": terms["projection_curve_tracks_index"]}
+            if "projection_curve_tracks_index" in terms else {}
+        ),
     })
 
 
@@ -106,6 +191,9 @@ def valuation_stream():
         try:
             while True:
                 message = client_q.get()
+                if message is STREAM_OVERFLOW:
+                    log.warning("stream_client_disconnected_after_overflow")
+                    return
                 yield f"event: {message['event']}\ndata: {to_json(message['data'])}\n\n"
         except Exception as exc:
             log.debug("stream_client_error", error=type(exc).__name__)
@@ -131,6 +219,23 @@ def post_scenario():
         response.status = 400
         return to_json({"error": str(e)})
 
+    if req.position.instrument.asset_class in CURVE_PRICED_ASSET_CLASSES:
+        with session_scope() as session:
+            underlying_choices = watchlist_option_underlying_symbols(session)
+            underlying_currencies = watchlist_spot_currencies(session)
+            curves = latest_curve_sets(session)
+        terms, error = validate_terms(
+            req.position.instrument.asset_class,
+            req.position.instrument.meta,
+            underlying_choices,
+            curves,
+            underlying_currencies,
+        )
+        if terms is None:
+            response.status = 400
+            return to_json({"error": error})
+        req.position.instrument.meta = terms
+
     result = run_scenario(req)
     if result is None:
         response.status = 404
@@ -141,12 +246,8 @@ def post_scenario():
 
 @app.route("/health")
 def health():
-    with cache.data_lock:
-        return {
-            "service": SERVICE_NAME,
-            "status": "UP",
-            "market_data_connection": cache.market_data_connection,
-            "received_events": cache.ticks_received,
-            "active_trades": len(cache.active_trades),
-            "last_market_event_time": cache.last_event_timestamp,
-        }
+    return {
+        "service": SERVICE_NAME,
+        "status": "UP",
+        **cache.health_snapshot(),
+    }

@@ -1,22 +1,18 @@
 import queue
-import threading
 
 import bottle
 from bottle import request, response
 
-from app import persistence, reference_set, scheduler, symbol_search, watchlist
+from app import curve_service, quote_service, scheduler, symbol_search, watchlist
 from app.publisher import (
     client_event_queues,
     clients_lock,
     last_event_id,
-    publish_removal,
+    STREAM_OVERFLOW,
     stream_id,
 )
 from app.config import SERVICE_NAME
 from shared import fx
-from shared.active_set import load_active_set
-from shared.freshness import classify
-from shared.functions import utcnow
 from shared.serialization import to_json
 from shared.logging_config import get_logger
 
@@ -56,6 +52,9 @@ def _serve_stream(provider=None):
         try:
             while True:
                 message = client_q.get()
+                if message is STREAM_OVERFLOW:
+                    log.warning("stream_client_disconnected_after_overflow", provider=provider)
+                    return
                 selected = _provider_event(message, provider)
                 if selected is not None:
                     yield (
@@ -84,59 +83,54 @@ def provider_stream(provider):
     return _serve_stream(provider.strip().upper())
 
 
-def _board_payload():
-    active = load_active_set()
-    reference = reference_set.reference_board_symbols()
-    rows = []
-    for row in persistence.board_rows():
-        provider, symbol = row["provider"], row["symbol"]
-        if provider in reference:
-            if symbol not in reference[provider]:
-                continue
-            origin = {"watched": False, "held": False, "benchmark": False,
-                      "reference": True}
-        else:
-            entry = active.get(symbol)
-            if entry is None or not entry.serves(provider):
-                continue
-            origin = {**entry.origin(provider), "reference": False}
-        row["event_time"] = row["received_at"]
-        row.update(origin)
-        rows.append(row)
-    return rows
-
-
-def _classify_row(row, now):
-    return classify(
-        True,
-        row["provider_timestamp"],
-        row["received_at"],
-        now,
-        row["stale_after_seconds"],
-        market_open=row["market_open"],
-        closed_stale_after_seconds=row["closed_stale_after_seconds"],
-    )
-
-
-def _quote_rows():
-    now = utcnow()
-    rows = _board_payload()
-    for row in rows:
-        row["freshness"] = _classify_row(row, now)
-    return rows
-
-
 @app.route("/snapshot")
 @app.route("/market-data/snapshot")
 def get_snapshot():
     response.content_type = "application/json"
-    rows = _board_payload()
+    # Every event at or below this watermark was persisted before it was published.
+    checkpoint = last_event_id()
+    rows = quote_service.board_rows()
     return to_json({
         "stream_id": stream_id,
-        "event_id": last_event_id() or None,
+        "event_id": checkpoint or None,
         "spots": {f"{row['provider']}:{row['symbol']}": row for row in rows},
-        "curves": {},
+        "curves": curve_service.snapshot_curves(),
     })
+
+
+@app.route("/curves")
+@app.route("/market-data/curves")
+def get_curves():
+    response.content_type = "application/json"
+    include_raw = (request.query.raw or "").strip() in ("1", "true")
+    curves, _, _ = curve_service.list_curves(include_raw=include_raw)
+    return to_json(curves)
+
+
+@app.route("/curves/<provider>")
+@app.route("/market-data/curves/<provider>")
+def get_provider_curves(provider):
+    response.content_type = "application/json"
+    normalized = provider.strip().upper()
+    include_raw = (request.query.raw or "").strip() in ("1", "true")
+    curves, error, status = curve_service.list_curves(normalized, include_raw)
+    if error is not None:
+        response.status = status
+        return to_json({"error": error})
+    return to_json(curves)
+
+
+@app.route("/curves/refresh", method="POST")
+@app.route("/market-data/curves/refresh", method="POST")
+def refresh_curves():
+    response.content_type = "application/json"
+    curve = (request.query.curve or "").strip().upper() or None
+    provider = (request.query.provider or "").strip().upper() or None
+    result, error, status = curve_service.refresh(curve, provider)
+    if error is not None:
+        response.status = status
+        return to_json({"error": error, "curve": curve})
+    return to_json(result)
 
 
 @app.route("/quotes")
@@ -146,13 +140,7 @@ def get_quotes():
     symbol = (request.query.symbol or "").strip().upper() or None
     asset_class = (request.query.asset_class or "").strip().upper() or None
     provider = (request.query.provider or "").strip().upper() or None
-    rows = [
-        row for row in _quote_rows()
-        if (symbol is None or row["symbol"] == symbol)
-        and (asset_class is None or row["asset_class"] == asset_class)
-        and (provider is None or row["provider"] == provider)
-    ]
-    return to_json(rows)
+    return to_json(quote_service.list_quotes(symbol, asset_class, provider))
 
 
 @app.route("/quotes/<provider>/<symbol>")
@@ -161,24 +149,12 @@ def get_quote(provider, symbol):
     response.content_type = "application/json"
     normalized_provider = provider.strip().upper()
     normalized_symbol = symbol.strip().upper()
-    if normalized_provider not in scheduler.wired_providers():
-        response.status = 404
-        return to_json({
-            "error": f"unknown or unwired provider: {normalized_provider}"
-        })
-    row = next(
-        (
-            item for item in _quote_rows()
-            if item["provider"] == normalized_provider
-            and item["symbol"] == normalized_symbol
-        ),
-        None,
+    row, error, status = quote_service.get_quote(
+        normalized_provider, normalized_symbol
     )
-    if row is None:
-        response.status = 404
-        return to_json({
-            "error": f"no active quote for {normalized_provider}:{normalized_symbol}"
-        })
+    if error is not None:
+        response.status = status
+        return to_json({"error": error})
     return to_json(row)
 
 
@@ -196,48 +172,34 @@ def get_quote_history(provider, symbol):
     if not 1 <= limit <= 200:
         response.status = 400
         return to_json({"error": "limit must be between 1 and 200"})
-    if normalized_provider not in scheduler.wired_providers():
-        response.status = 404
-        return to_json({"error": f"unknown or unwired provider: {normalized_provider}"})
     include_raw = (request.query.raw or "").strip() in ("1", "true")
-    return to_json(persistence.quote_history(
+    history, error, status = quote_service.get_quote_history(
         normalized_provider, normalized_symbol, limit, include_raw
-    ))
+    )
+    if error is not None:
+        response.status = status
+        return to_json({"error": error})
+    return to_json(history)
 
 
 @app.route("/watchlist")
 def get_watchlist():
     response.content_type = "application/json"
-    return to_json(watchlist.list_items(scheduler.wired_quote_providers()))
-
-
-def _refresh_added_feeds(symbol, providers):
-    for provider in providers:
-        _, error, _ = scheduler.refresh_symbol(symbol, provider)
-        log.info("watchlist_add_refresh", symbol=symbol, provider=provider,
-                 outcome="ok" if error is None else error)
+    return to_json(quote_service.list_watchlist())
 
 
 @app.route("/watchlist", method="POST")
 def post_watchlist():
     response.content_type = "application/json"
-    body = dict(request.json or {})
-    item, error, status = watchlist.add_item(
-        body.get("symbol"), body.get("asset_class"), body.get("currency"),
-        scheduler.wired_quote_providers(), body.get("providers"),
-    )
+    raw_body = request.json
+    if not isinstance(raw_body, dict):
+        response.status = 400
+        return to_json({"error": "request body must be an object"})
+    body = dict(raw_body)
+    item, error, status = quote_service.add_watchlist_item(body)
     if error is not None:
         response.status = status
         return to_json({"error": error})
-    scheduler.reload_active_set()
-    threading.Thread(
-        target=_refresh_added_feeds,
-        args=(item["symbol"], item["added_providers"]),
-        daemon=True,
-    ).start()
-    log.info("watchlist_symbol_added", symbol=item["symbol"],
-             asset_class=item["asset_class"],
-             providers=[p for p, on in item["providers"].items() if on])
     response.status = status
     return to_json(item)
 
@@ -246,28 +208,11 @@ def post_watchlist():
 def delete_watchlist(symbol):
     response.content_type = "application/json"
     provider = (request.query.provider or "").strip().upper() or None
-    result, error, status = watchlist.remove_item(symbol, provider)
+    result, error, status = quote_service.remove_watchlist_item(symbol, provider)
     if error is not None:
         response.status = status
         return to_json({"error": error})
-    scheduler.reload_active_set()
-    normalized = symbol.strip().upper()
-    active = load_active_set().get(normalized)
-    released = [
-        name for name in result["dropped"]
-        if active is None or not active.serves(name)
-    ]
-    if released:
-        persistence.delete_board_rows(normalized, released)
-        publish_removal([{"provider": name, "symbol": normalized} for name in released])
-    log.info("watchlist_symbol_removed", symbol=normalized, provider=provider,
-             released=released, remaining=result["remaining"])
-    return to_json({
-        "symbol": normalized,
-        "removed_providers": result["dropped"],
-        "remaining_providers": result["remaining"],
-        "still_polled": [name for name in result["dropped"] if name not in released],
-    })
+    return to_json(result)
 
 
 @app.route("/fx/rates")
@@ -287,7 +232,18 @@ def search_symbols():
     if len(query) < 2:
         response.status = 400
         return to_json({"error": "q must be at least 2 characters"})
-    return to_json({"query": query.upper(), "results": symbol_search.search(query)})
+    results, provider_errors = symbol_search.search(query)
+    if len(provider_errors) == len(scheduler.wired_quote_providers()):
+        response.status = 503
+        return to_json({
+            "error": "symbol search is unavailable from every wired provider",
+            "provider_errors": provider_errors,
+        })
+    return to_json({
+        "query": query.upper(),
+        "results": results,
+        "provider_errors": provider_errors,
+    })
 
 
 @app.route("/providers")
@@ -312,16 +268,8 @@ def refresh():
     response.content_type = "application/json"
     symbol = (request.query.symbol or "").strip().upper()
     provider = (request.query.provider or "").strip().upper() or None
-    if not symbol:
-        refreshed, skipped = scheduler.refresh_all(provider)
-        log.info("manual_refresh_all", provider=provider, refreshed=len(refreshed),
-                 skipped=skipped)
-        return to_json({"refreshed": refreshed, "skipped": skipped})
-    tick, error, status = scheduler.refresh_symbol(symbol, provider)
+    tick, error, status = quote_service.refresh(symbol or None, provider)
     if error is not None:
         response.status = status
-        log.warning("manual_refresh_rejected", symbol=symbol, provider=provider,
-                    reason=error)
-        return to_json({"error": error, "symbol": symbol})
-    log.info("manual_refresh", symbol=symbol, provider=provider)
+        return to_json({"error": error, "symbol": symbol, "provider": provider})
     return to_json(tick)
