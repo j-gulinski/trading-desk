@@ -3,7 +3,6 @@ import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/val
 import { providerLabel } from '../../config/providers.js'
 import { assetClassLabel } from '../../config/tradeActions.js'
 import {
-  formatAmount,
   formatClockTime,
   formatDateTime,
   formatNumber,
@@ -11,9 +10,34 @@ import {
   formatSignedAmount,
   formatUnitPrice,
 } from '../../domain/formatting.js'
-import { tradePositionLabel, tradePriceForDisplay, tradeSize } from '../../domain/trades.js'
+import {
+  tradePositionLabel,
+  tradePriceForDisplay,
+  tradeSize,
+} from '../../domain/trades.js'
+import { instrumentLabelOf } from '../../domain/contracts.js'
+import { priceUnitLabelOf, quantityUnitLabelOf } from '../../domain/marketFormat.js'
+import MoneyCell from '../tables/MoneyCell.jsx'
 
-export default function TradeCell({ column, row, onSelect }) {
+function withUnit(value, unit) {
+  return value === '—' || !unit ? value : `${value} ${unit}`
+}
+
+function tradeValueText(trade, value) {
+  const display = tradePriceForDisplay(trade, value)
+  const amount = trade.assetClass === 'IRS'
+    ? formatSignedAmount(display)
+    : formatUnitPrice(display, trade.assetClass)
+  return withUnit(amount, priceUnitLabelOf(trade))
+}
+
+export default function TradeCell({
+  column,
+  row,
+  onSelect,
+  comparisonValue,
+  comparisonCurrency,
+}) {
   const { trade, valuation, valuationStatus } = row
 
   switch (column.id) {
@@ -40,7 +64,7 @@ export default function TradeCell({ column, row, onSelect }) {
         </span>
       )
     case 'symbol':
-      return trade.symbol ?? '—'
+      return instrumentLabelOf(trade)
     case 'side':
       return (
         <span className={`trade-side trade-side--${trade.side.toLowerCase()}`}>
@@ -48,20 +72,34 @@ export default function TradeCell({ column, row, onSelect }) {
         </span>
       )
     case 'quantity':
-      return formatNumber(tradeSize(trade))
+      return withUnit(formatNumber(tradeSize(trade)), quantityUnitLabelOf(trade))
     case 'entry':
-      return formatUnitPrice(tradePriceForDisplay(trade, trade.entryPrice), trade.assetClass)
+      return tradeValueText(trade, trade.entryPrice)
     case 'provider':
-      return trade.provider ? providerLabel(trade.provider) : '—'
+      return trade.provider || valuation?.marketDataProvider
+        ? providerLabel(trade.provider ?? valuation.marketDataProvider)
+        : '—'
     case 'price':
-      return formatUnitPrice(
-        tradePriceForDisplay(trade, valuation?.price),
-        trade.assetClass,
-      )
+      return tradeValueText(trade, valuation?.price)
     case 'fairValue':
-      return formatAmount(valuation?.fairValue)
+      return (
+        <MoneyCell
+          value={valuation?.fairValue}
+          currency={valuation?.currency ?? trade.currency}
+          comparisonValue={comparisonValue}
+          comparisonCurrency={comparisonCurrency}
+        />
+      )
     case 'pnl':
-      return formatSignedAmount(row.pnl)
+      return (
+        <MoneyCell
+          value={row.pnl}
+          currency={valuation?.currency ?? trade.currency}
+          signed
+          comparisonValue={comparisonValue}
+          comparisonCurrency={comparisonCurrency}
+        />
+      )
     case 'return':
       return valuation?.closed ? '—' : formatPercent(valuation?.returnPercent)
     case 'opened':

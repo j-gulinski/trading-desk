@@ -6,7 +6,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--border);
-  margin-bottom: var(--sp-5);
+  margin-bottom: var(--sp-4);
 }
 .market-summary > .stat-card {
   border: 0;
@@ -156,11 +156,11 @@
 
 // This board is read continuously, so it uses a denser rhythm than detail/audit tables.
 .market-quotes-table {
-  font-size: 12px;
+  font-size: 11px;
 
   th,
   td {
-    padding: 10px;
+    padding: 8px;
   }
 
   th {
@@ -168,8 +168,8 @@
   }
 
   .data-table__sort {
-    min-height: 46px;
-    padding: 10px;
+    min-height: 42px;
+    padding: 8px;
   }
 
   .data-table__head-note,
@@ -193,7 +193,7 @@
 
   .market-instrument-name,
   .class-tag {
-    font-size: 11px;
+    font-size: 10px;
   }
 }
 
@@ -279,7 +279,7 @@
 
 // The page container shrinks when a side panel opens. Keep the board useful for trading
 // instead of preserving desktop metadata and forcing a horizontal scroll.
-@container page (max-width: 1240px) {
+@container page (max-width: 900px) {
   .market-quotes-table {
     min-width: 760px !important;
     table-layout: fixed;

@@ -22,22 +22,10 @@ export function fxConversionOf(rateInfo, currency, toCurrency) {
   }
 }
 
-export function currencySubtotalsOf(items, currencyOf, valuesOf) {
-  const buckets = new Map()
-  for (const item of items) {
-    const currency = currencyOf(item)
-    if (!currency) continue
-    const values = valuesOf(item)
-    const bucket = buckets.get(currency) ?? {}
-    for (const [key, value] of Object.entries(values)) {
-      if (!Number.isFinite(value)) continue
-      bucket[key] = (bucket[key] ?? 0) + value
-    }
-    buckets.set(currency, bucket)
-  }
-  return [...buckets.entries()]
-    .map(([currency, values]) => ({ currency, values }))
-    .sort((a, b) => a.currency.localeCompare(b.currency))
+export function convertedValueOf(value, currency, rates, toCurrency) {
+  if (!Number.isFinite(value) || !currency || !toCurrency) return null
+  const conversion = fxConversionOf(rates?.[currency], currency, toCurrency)
+  return conversion.rate == null ? null : value * conversion.rate
 }
 
 export function convertedTotalsOf(subtotals, rates, toCurrency, metricIds) {

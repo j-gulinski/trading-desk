@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 
 from app import cache, repository
@@ -70,6 +71,8 @@ def _trade_to_dict(trade) -> dict:
         "close_price_timestamp": trade.close_price_timestamp,
         "close_snapshot_id": trade.close_snapshot_id,
         "client_seen_price": trade.client_seen_price,
+        "source": trade.source,
+        "created_by_service": trade.created_by_service,
         "terms": trade.terms,
     }
 
@@ -143,10 +146,12 @@ def trade_detail(trade_id: str) -> dict | None:
     }
 
 
-def _net_positions(active) -> tuple[Decimal, dict, list[dict]]:
+def _net_positions(active) -> tuple[Decimal, dict, Decimal, dict, list[dict]]:
     unrealized = Decimal("0")
     unrealized_by_currency: dict[str, Decimal] = {}
-    by_position: dict[tuple[str, str, str | None], dict] = {}
+    gross_entry = Decimal("0")
+    gross_entry_by_currency: dict[str, Decimal] = {}
+    by_position: dict[tuple[str, str, str | None, str], dict] = {}
 
     for trade in active:
         valuation = cache.get_valuation(trade.trade_id)
@@ -157,12 +162,15 @@ def _net_positions(active) -> tuple[Decimal, dict, list[dict]]:
             provider = DEFAULT_QUOTE_PROVIDER
         if provider is None and valuation is not None:
             provider = valuation.get("market_data_provider")
-        position_key = (trade.symbol, trade.currency, provider)
+        contract_key = json.dumps(trade.terms or {}, sort_keys=True, default=str)
+        position_key = (trade.symbol, trade.currency, provider, contract_key)
         position = by_position.setdefault(position_key, {
+            "contract_key": contract_key,
             "symbol": trade.symbol,
             "currency": trade.currency,
             "asset_class": trade.asset_class,
             "market_data_provider": provider,
+            "terms": dict(trade.terms or {}),
             "trades": 0,
             "net_quantity": Decimal("0"),
             "gross_quantity": Decimal("0"),
@@ -177,6 +185,12 @@ def _net_positions(active) -> tuple[Decimal, dict, list[dict]]:
             "unvalued": 0,
         })
         quantity = trade.quantity or Decimal("0")
+        multiplier = int((trade.terms or {}).get("multiplier", 1))
+        trade_gross_entry = abs(quantity * (trade.trade_price or Decimal("0")) * multiplier)
+        gross_entry += trade_gross_entry
+        gross_entry_by_currency[trade.currency] = (
+            gross_entry_by_currency.get(trade.currency) or Decimal("0")
+        ) + trade_gross_entry
         position["trades"] += 1
         position["net_quantity"] += -quantity if trade.side == "SELL" else quantity
         position["gross_quantity"] += abs(quantity)
@@ -224,19 +238,30 @@ def _net_positions(active) -> tuple[Decimal, dict, list[dict]]:
         entry_cost = position.pop("entry_cost")
         position["average_entry"] = entry_cost / gross if gross else None
         positions.append(position)
-    return unrealized, unrealized_by_currency, positions
+    return (
+        gross_entry,
+        gross_entry_by_currency,
+        unrealized,
+        unrealized_by_currency,
+        positions,
+    )
 
 
-def _currency_subtotals(unrealized, realized) -> list[dict]:
+def _currency_subtotals(gross_entry, unrealized, realized) -> list[dict]:
     return [
         {
             "currency": currency,
             "values": {
+                "gross_entry": gross_entry.get(currency) or Decimal("0"),
                 "unrealized": unrealized.get(currency) or Decimal("0"),
                 "realized": realized.get(currency) or Decimal("0"),
+                "total": (
+                    (unrealized.get(currency) or Decimal("0"))
+                    + (realized.get(currency) or Decimal("0"))
+                ),
             },
         }
-        for currency in sorted(set(unrealized) | set(realized))
+        for currency in sorted(set(gross_entry) | set(unrealized) | set(realized))
     ]
 
 
@@ -249,7 +274,13 @@ def books_summary() -> list[dict]:
     for book in books:
         book_id = book["book_id"]
         active = cache.trades.query(book_id=book_id, status="ACTIVE")
-        unrealized, unrealized_by_currency, positions = _net_positions(active)
+        (
+            gross_entry,
+            gross_entry_by_currency,
+            unrealized,
+            unrealized_by_currency,
+            positions,
+        ) = _net_positions(active)
         realized_by_currency = realized_by_book.get(book_id) or {}
         realized = sum(realized_by_currency.values(), Decimal("0"))
         currencies = currencies_by_book.get(book_id) or set()
@@ -261,11 +292,16 @@ def books_summary() -> list[dict]:
             "is_active": book["is_active"],
             "active_trades": len(active),
             "closed_trades": closed_by_book.get(book_id, 0),
+            "gross_entry_value": gross_entry if one_currency else None,
             "realized_pnl": realized if one_currency else None,
             "unrealized_pnl": unrealized if one_currency else None,
             "total_pnl": realized + unrealized if one_currency else None,
             "currency": next(iter(currencies)) if len(currencies) == 1 else None,
-            "subtotals": _currency_subtotals(unrealized_by_currency, realized_by_currency),
+            "subtotals": _currency_subtotals(
+                gross_entry_by_currency,
+                unrealized_by_currency,
+                realized_by_currency,
+            ),
             "positions": positions,
         })
     return summaries

@@ -3,15 +3,39 @@ import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/val
 import { providerLabel } from '../../config/providers.js'
 import { assetClassLabel } from '../../config/tradeActions.js'
 import {
-  formatAmount,
   formatClockTime,
   formatPercent,
   formatShortId,
   formatSignedAmount,
   formatUnitPrice,
 } from '../../domain/formatting.js'
+import { priceUnitLabelOf } from '../../domain/marketFormat.js'
+import { instrumentLabelOf } from '../../domain/contracts.js'
+import MoneyCell from '../tables/MoneyCell.jsx'
 
-export default function ValuationCell({ column, row }) {
+function currentValueText(valuation) {
+  let value = valuation.price
+  if (
+    valuation.assetClass === 'BOND' &&
+    Number.isFinite(value) &&
+    Number.isFinite(valuation.faceValue) &&
+    valuation.faceValue > 0
+  ) {
+    value = value / valuation.faceValue * 100
+  }
+  const amount = valuation.assetClass === 'IRS'
+    ? formatSignedAmount(value)
+    : formatUnitPrice(value, valuation.assetClass)
+  const unit = priceUnitLabelOf(valuation)
+  return amount === '—' || !unit ? amount : `${amount} ${unit}`
+}
+
+export default function ValuationCell({
+  column,
+  row,
+  comparisonValue,
+  comparisonCurrency,
+}) {
   const { valuation, status } = row
 
   switch (column.id) {
@@ -27,17 +51,41 @@ export default function ValuationCell({ column, row }) {
         </span>
       )
     case 'symbol':
-      return valuation.symbol ?? '—'
+      return instrumentLabelOf(valuation)
     case 'provider':
       return valuation.marketDataProvider ? providerLabel(valuation.marketDataProvider) : '—'
     case 'price':
-      return formatUnitPrice(valuation.price, valuation.assetClass)
+      return currentValueText(valuation)
     case 'fairValue':
-      return formatAmount(valuation.fairValue)
+      return (
+        <MoneyCell
+          value={valuation.fairValue}
+          currency={valuation.currency}
+          comparisonValue={comparisonValue}
+          comparisonCurrency={comparisonCurrency}
+        />
+      )
     case 'notional':
-      return formatAmount(valuation.notional)
+      return (
+        <MoneyCell
+          value={valuation.notional}
+          currency={valuation.currency}
+          comparisonValue={comparisonValue}
+          comparisonCurrency={comparisonCurrency}
+        />
+      )
     case 'unrealized':
-      return valuation.closed ? '—' : formatSignedAmount(valuation.unrealizedPnl)
+      return valuation.closed
+        ? '—'
+        : (
+            <MoneyCell
+              value={valuation.unrealizedPnl}
+              currency={valuation.currency}
+              signed
+              comparisonValue={comparisonValue}
+              comparisonCurrency={comparisonCurrency}
+            />
+          )
     case 'return':
       return valuation.closed ? '—' : formatPercent(valuation.returnPercent)
     case 'updated':

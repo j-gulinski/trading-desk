@@ -1,4 +1,6 @@
 import { groupOptions } from './filters.js'
+import { instrumentLabelOf } from './contracts.js'
+import { convertedValueOf } from './fx.js'
 import { formatShortId } from './formatting.js'
 import { sortRows } from './tableSort.js'
 import { statusOf as liveValuationStatusOf, valuationOf } from './valuations.js'
@@ -111,6 +113,8 @@ function tradeOf(data, bookNames = new Map()) {
     entryPriceAtMs: toTime(data.entry_price_timestamp),
     closePriceAtMs: toTime(data.close_price_timestamp),
     clientSeenPrice: toNum(data.client_seen_price),
+    source: data.source ?? null,
+    createdByService: data.created_by_service ?? null,
     currency: data.currency ?? null,
     status,
     openedAtMs: toTime(data.opened_at),
@@ -218,28 +222,44 @@ function structuralValueOf(row, column) {
   if (column === 'trade') return trade.tradeRef
   if (column === 'book') return trade.bookName
   if (column === 'assetClass') return trade.assetClass
-  if (column === 'symbol') return trade.symbol
+  if (column === 'symbol') return instrumentLabelOf(trade)
   if (column === 'side') return tradePositionLabel(trade)
   if (column === 'quantity') return tradeSize(trade)
   if (column === 'entry') return tradePriceForDisplay(trade, trade.entryPrice)
-  if (column === 'provider') return trade.provider
+  if (column === 'provider') return trade.provider ?? row.valuation?.marketDataProvider
   if (column === 'opened') return trade.openedAtMs
   return undefined
 }
 
-function snapshotValueOf(row, column) {
+function snapshotValueOf(row, column, rates = null, comparisonCurrency = null) {
+  let value = null
   if (column === 'price') return tradePriceForDisplay(row.trade, row.valuation?.price)
-  if (column === 'fairValue') return row.valuation?.fairValue ?? null
-  if (column === 'pnl') return row.pnl
+  if (column === 'fairValue') value = row.valuation?.fairValue ?? null
+  else if (column === 'pnl') value = row.pnl
   if (column === 'return') return row.valuation?.closed ? null : row.valuation?.returnPercent ?? null
   if (column === 'updated') return row.valuation?.valuationTimeMs ?? null
   if (column === 'valuation') return VALUATION_STATUS_RANK[row.valuationStatus] ?? null
-  return null
+  if (value == null) return null
+  return comparisonCurrency
+    ? convertedValueOf(
+        value,
+        row.valuation?.currency ?? row.trade.currency,
+        rates,
+        comparisonCurrency,
+      )
+    : value
 }
 
-export function captureTradeSnapshot(rows, column) {
+export function captureTradeSnapshot(
+  rows,
+  column,
+  rates = null,
+  comparisonCurrency = null,
+) {
   const values = {}
-  for (const row of rows) values[row.trade.id] = snapshotValueOf(row, column)
+  for (const row of rows) {
+    values[row.trade.id] = snapshotValueOf(row, column, rates, comparisonCurrency)
+  }
   return values
 }
 

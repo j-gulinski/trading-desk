@@ -3,7 +3,9 @@ import threading
 import time
 from collections import deque
 
+from shared.db import session_scope
 from shared.functions import utcnow
+from shared.models import ProviderRequestLedger
 
 
 class RollingMinuteBudget:
@@ -63,9 +65,11 @@ class RollingMinuteBudget:
 
 
 class DailyLedger:
-    def __init__(self, daily_budget=None, provider_limit=None):
+    def __init__(self, daily_budget=None, provider_limit=None, provider=None, persisted=False):
         self._daily_budget = daily_budget
         self._provider_limit = provider_limit
+        self._provider = provider
+        self._persisted = persisted
         self._day = utcnow().date()
         self._requests = 0
         self._credits = 0
@@ -79,17 +83,51 @@ class DailyLedger:
             self._credits = 0
 
     def record(self, credits=1):
+        if self._persisted:
+            now = utcnow()
+            with session_scope() as session:
+                row = (
+                    session.query(ProviderRequestLedger)
+                    .filter_by(provider=self._provider, usage_date=now.date())
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if row is None:
+                    row = ProviderRequestLedger(
+                        provider=self._provider,
+                        usage_date=now.date(),
+                        requests=0,
+                        credits=0,
+                        updated_at=now,
+                    )
+                    session.add(row)
+                row.requests += 1
+                row.credits += credits
+                row.updated_at = now
+            return
         with self._lock:
             self._roll_day()
             self._requests += 1
             self._credits += credits
 
     def credits_today(self):
+        if self._persisted:
+            return self._persisted_state()[1]
         with self._lock:
             self._roll_day()
             return self._credits
 
     def state(self):
+        if self._persisted:
+            requests, credits = self._persisted_state()
+            state = {"requests_today": requests, "persisted": True}
+            if self._daily_budget is not None:
+                state.update({
+                    "credits_today": credits,
+                    "daily_budget": self._daily_budget,
+                    "provider_daily_limit": self._provider_limit,
+                })
+            return state
         with self._lock:
             self._roll_day()
             state = {"requests_today": self._requests}
@@ -98,3 +136,11 @@ class DailyLedger:
                 state["daily_budget"] = self._daily_budget
                 state["provider_daily_limit"] = self._provider_limit
             return state
+
+    def _persisted_state(self):
+        with session_scope() as session:
+            row = session.get(
+                ProviderRequestLedger,
+                {"provider": self._provider, "usage_date": utcnow().date()},
+            )
+            return (row.requests, row.credits) if row is not None else (0, 0)

@@ -4,22 +4,22 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--sp-3);
-  margin-bottom: var(--sp-4);
+  margin-bottom: var(--sp-3);
 }
 .books-header__meta {
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
 }
 .books-button {
-  min-height: 32px;
-  padding: 0 var(--sp-4);
+  min-height: var(--control-height);
+  padding: 0 var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
   color: var(--text-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 
@@ -50,17 +50,17 @@
 
 .books-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 1fr));
   align-items: start;
-  gap: var(--sp-4);
+  gap: var(--sp-3);
 }
 
 .book-tile {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
-  padding: var(--sp-4);
+  gap: var(--sp-2);
+  padding: var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-panel);
@@ -82,7 +82,7 @@
 }
 .book-tile__name {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 .book-tile__code {
@@ -106,8 +106,9 @@
   background: var(--text-muted);
 }
 .book-tile__pnl {
-  display: flex;
-  gap: var(--sp-5);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-4);
 }
 .book-tile__metric {
   display: flex;
@@ -116,11 +117,11 @@
 }
 .book-tile__metric-label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 .book-tile__metric-value {
   font-family: var(--font-mono);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 .book-tile__foot {
@@ -157,8 +158,8 @@
   gap: var(--sp-2);
 }
 .book-tile__action {
-  min-height: 32px;
-  padding: 0 var(--sp-3);
+  min-height: 28px;
+  padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
@@ -199,7 +200,7 @@
 }
 .book-position {
   min-width: 0;
-  padding: var(--sp-3);
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-app);

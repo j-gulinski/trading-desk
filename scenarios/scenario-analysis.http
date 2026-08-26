@@ -142,7 +142,7 @@ Content-Type: application/json
   "shock": -25
 }
 
-### IRS - +25 bp parallel shock to discount and projection curves
+### IRS - +25 bp parallel shock to the curve used for both roles
 POST {{pricing}}/scenario
 Content-Type: application/json
 
@@ -162,8 +162,7 @@ Content-Type: application/json
         "maturity_years": 5,
         "payments_per_year": 4,
         "floating_rate_index_tenor": "3M",
-        "discount_curve": "PLN_RISK_FREE",
-        "projection_curve": "PLN_REFERENCE_PROJECTION_3M"
+        "discount_curve": "PLN_RISK_FREE"
       }
     }
   },

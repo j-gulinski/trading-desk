@@ -1,6 +1,6 @@
 export const STORAGE_KEYS = {
   sidebarCollapsed: 'layout.sidebar-collapsed',
-  tradeColumns: 'trades.visible-columns.v3',
+  tradeColumns: 'trades.visible-columns.v6',
   valuationColumns: 'valuations.visible-columns.v2',
   marketColumns: 'market-data.visible-columns.v7',
   marketTickCount: 'market-data.tick-count',

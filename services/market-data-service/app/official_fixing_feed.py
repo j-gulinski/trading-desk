@@ -12,7 +12,7 @@ from app.config import (
     SERVICE_NAME,
 )
 from app.publisher import publish_quote
-from app.quote_audit import audit_first_quote
+from app.quote_audit import audit_quote_write
 from shared.quotes import wire_tick
 
 log = get_logger(SERVICE_NAME)
@@ -64,7 +64,7 @@ class OfficialFixingFeed:
                     )
                     continue
                 classifier = self._classifier(quote.provider_timestamp.date())
-                _, created, accepted = quote_store.store_quote(quote, classifier)
+                changed, created, accepted = quote_store.store_quote(quote, classifier)
                 if not accepted:
                     log.info(
                         "older_reference_observation_ignored",
@@ -72,8 +72,8 @@ class OfficialFixingFeed:
                         symbol=quote.symbol,
                     )
                     continue
-                if created:
-                    audit_first_quote(self.provider, quote)
+                if changed:
+                    audit_quote_write(self.provider, quote, created)
                 tick = wire_tick(quote, classifier, reference=True)
                 publish_quote(tick)
             ticks[quote.symbol] = tick

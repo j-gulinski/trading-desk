@@ -3,11 +3,11 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-4);
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
 }
 .filter-bar__label {
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -25,16 +25,17 @@
 .filter-bar__search-field {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 .filter-bar__search {
-  width: 220px;
+  width: 210px;
+  min-height: var(--control-height);
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: var(--sp-2) var(--sp-3);
+  padding: 5px 10px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   font-family: var(--font-sans);
 
   &::placeholder {
@@ -50,7 +51,7 @@
   align-items: center;
   gap: var(--sp-2);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
   cursor: pointer;
 
@@ -62,15 +63,16 @@
 .filter-bar__select-field {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 .filter-bar__select {
+  min-height: var(--control-height);
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: var(--sp-2) var(--sp-3);
+  padding: 5px 10px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   font-family: var(--font-sans);
 
   &:focus {
@@ -112,5 +114,10 @@
   .table-columns__menu {
     right: auto;
     left: 0;
+  }
+
+  .filter-bar__search,
+  .filter-bar__select {
+    min-height: 36px;
   }
 }

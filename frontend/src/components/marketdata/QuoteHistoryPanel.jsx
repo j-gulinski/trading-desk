@@ -19,7 +19,7 @@ import {
 } from '../../domain/formatting.js'
 import { providerLabel } from '../../config/providers.js'
 import {
-  FRESHNESS_PILL_LEVELS,
+  freshnessPillLevelOf,
   freshnessHintOf,
   freshnessLabelOf,
 } from '../../config/marketData.js'
@@ -146,8 +146,8 @@ export default function QuoteHistoryPanel({ row, onClose }) {
       onClose={onClose}
       headActions={
         <StatusPill
-          level={FRESHNESS_PILL_LEVELS[state] ?? 'unknown'}
-          label={freshnessLabelOf(state, instrument.grade)}
+          level={freshnessPillLevelOf(state, instrument.grade)}
+          label={freshnessLabelOf(state, instrument.grade, instrument.providerTimestamp)}
           title={freshnessHintOf(state, instrument.grade)}
         />
       }

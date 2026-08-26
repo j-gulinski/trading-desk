@@ -1,5 +1,6 @@
 """HTTP transport and typed failures shared by all provider packages."""
 
+from abc import ABC, abstractmethod
 import json
 import time
 import urllib.error
@@ -7,6 +8,7 @@ import urllib.parse
 import urllib.request
 from app.config import REQUEST_TIMEOUT_SECONDS, SERVICE_NAME
 from shared.logging_config import get_logger
+from shared.audit import write_audit
 
 
 log = get_logger(SERVICE_NAME)
@@ -56,9 +58,15 @@ def _retry_after_seconds(headers):
         return None
 
 
-class ProviderClient:
-    provider = None
-    base_url = None
+class ProviderClient(ABC):
+    @property
+    @abstractmethod
+    def provider(self): ...
+
+    @property
+    @abstractmethod
+    def base_url(self): ...
+
     timeout_seconds = REQUEST_TIMEOUT_SECONDS
 
     def __init__(self, api_key=None):
@@ -87,12 +95,10 @@ class ProviderClient:
             self.classify_body(payload)
         except ValueError as error:
             provider_error = ProviderDataError(self.provider, "response body failed to decode")
-            raw_response = body.decode("utf-8", errors="replace") if body else None
             self._log_response(
                 request_fields,
                 started,
                 status,
-                response_payload=raw_response,
                 error=provider_error,
             )
             raise provider_error from error
@@ -102,7 +108,6 @@ class ProviderClient:
                 request_fields,
                 started,
                 status,
-                response_payload=error.response if error.response is not None else payload,
                 error=error,
             )
             raise
@@ -111,7 +116,6 @@ class ProviderClient:
             started,
             status,
             result_count=self._result_count(path, public_params, payload),
-            response_payload=payload,
         )
         return payload
 
@@ -139,6 +143,13 @@ class ProviderClient:
                 isinstance(payload.get(symbol), dict)
                 for symbol in requested
             ) if isinstance(payload, dict) else 0
+        if path == "/query" and isinstance(payload, dict):
+            result_key = {
+                "GLOBAL_QUOTE": "Global Quote",
+                "CURRENCY_EXCHANGE_RATE": "Realtime Currency Exchange Rate",
+            }.get(params.get("function"))
+            result = payload.get(result_key) if result_key else None
+            return 1 if isinstance(result, dict) and result else 0
         return None
 
     @staticmethod
@@ -147,7 +158,6 @@ class ProviderClient:
         started,
         status,
         result_count=None,
-        response_payload=None,
         error=None,
     ):
         fields = {
@@ -156,20 +166,40 @@ class ProviderClient:
             "duration_ms": round((time.monotonic() - started) * 1000),
             "outcome": "error" if error else "ok",
         }
-        if response_payload is not None:
-            fields["response_json"] = (
-                response_payload
-                if isinstance(response_payload, str)
-                else json.dumps(response_payload, separators=(",", ":"), default=str)
-            )
         if result_count is not None:
             fields["result_count"] = result_count
         if error is not None:
             fields["error_type"] = type(error).__name__
-            fields["error"] = error.detail
             log.warning("provider_http_response", **fields)
         else:
             log.info("provider_http_response", **fields)
+        event_type = (
+            "PROVIDER_FETCH_RATE_LIMITED"
+            if isinstance(error, ProviderRateLimited)
+            else "PROVIDER_FETCH_FAILED" if error else "PROVIDER_FETCH_SUCCEEDED"
+        )
+        write_audit(
+            SERVICE_NAME,
+            event_type,
+            f"{request_fields['provider']} GET {request_fields['endpoint']} "
+            f"{'failed' if error else 'succeeded'}",
+            entity_type="PROVIDER",
+            entity_id=request_fields["provider"],
+            severity="WARNING" if error else "INFO",
+            payload={
+                "provider": request_fields["provider"],
+                "method": request_fields["method"],
+                "endpoint": request_fields["endpoint"],
+                "http_status": status,
+                "duration_ms": fields["duration_ms"],
+                "outcome": fields["outcome"],
+                **(
+                    {"result_count": result_count}
+                    if result_count is not None else {}
+                ),
+                **({"error_type": type(error).__name__} if error else {}),
+            },
+        )
 
     def _fetch(self, url, retries=0):
         for attempt in range(retries + 1):

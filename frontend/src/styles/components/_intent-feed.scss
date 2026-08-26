@@ -9,10 +9,10 @@
 .intent-feed__row {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  padding: 7px var(--sp-2);
+  gap: var(--sp-2);
+  padding: 6px var(--sp-2);
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 11px;
 
   &:last-child {
     border-bottom: 0;

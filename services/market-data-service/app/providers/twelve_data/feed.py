@@ -25,7 +25,7 @@ from app.config import (
 from app.poll_schedule import PollSchedule
 from app.provider_runtime import ProviderRuntime
 from app.publisher import publish_quote
-from app.quote_audit import audit_first_quote
+from app.quote_audit import audit_quote_write
 
 log = get_logger(SERVICE_NAME)
 
@@ -99,14 +99,14 @@ def _store_and_publish(entry, payload):
             current.symbol, current.asset_class, current.currency, payload, utcnow()
         )
         classifier = _classifier(current.symbol)
-        _, created, accepted = quote_store.store_quote(quote, classifier)
+        changed, created, accepted = quote_store.store_quote(quote, classifier)
         if not accepted:
             raise ProviderDataError(
                 TWELVE_DATA,
                 f"older observation for {current.symbol} ignored; current row retained",
             )
-        if created:
-            audit_first_quote(TWELVE_DATA, quote)
+        if changed:
+            audit_quote_write(TWELVE_DATA, quote, created)
         tick = wire_tick(quote, classifier, current.origin(TWELVE_DATA))
         publish_quote(tick)
         return tick

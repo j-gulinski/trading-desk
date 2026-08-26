@@ -91,6 +91,7 @@ export function useTableState({
   const [visibleColumns, setVisibleColumns] = useState(() =>
     readVisibleColumns(storageKey, columns, initialVisibleColumns),
   )
+  const activeStorageKeyRef = useRef(null)
   const [sort, setSort] = useState(() => ({
     ...(visibleColumns.includes(defaultSort.column) ? defaultSort : fallbackSort),
     snapshot: null,
@@ -98,8 +99,13 @@ export function useTableState({
   }))
 
   useEffect(() => {
+    if (activeStorageKeyRef.current !== storageKey) {
+      activeStorageKeyRef.current = storageKey
+      setVisibleColumns(readVisibleColumns(storageKey, columns, initialVisibleColumns))
+      return
+    }
     storeVisibleColumns(storageKey, visibleColumns, allColumnIds)
-  }, [storageKey, visibleColumns, allColumnIds])
+  }, [storageKey, columns, initialVisibleColumns, visibleColumns, allColumnIds])
 
   const captureSnapshotRef = useRef(captureSnapshot)
   useEffect(() => {

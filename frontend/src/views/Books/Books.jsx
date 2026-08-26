@@ -8,8 +8,8 @@ import {
   bookPositionsOf,
   bookSummariesOf,
   moveTargetsOf,
-  summarizeBooks,
 } from '../../domain/books.js'
+import { portfolioSummaryOf, PORTFOLIO_METRICS } from '../../domain/portfolio.js'
 import { describeApiError } from '../../domain/apiErrors.js'
 import { assetClassLabel } from '../../config/tradeActions.js'
 import { countOptions } from '../../domain/filters.js'
@@ -24,15 +24,17 @@ import MoveTradesPanel from '../../components/books/MoveTradesPanel.jsx'
 import FxReport from '../../components/fx/FxReport.jsx'
 import { useFxRates } from '../../hooks/useFxRates.js'
 import { useReportingCurrency } from '../../hooks/useReportingCurrency.js'
-import { currencySubtotalsOf, reportedTotalsOf } from '../../domain/fx.js'
+import { reportedTotalsOf } from '../../domain/fx.js'
 import { useMarketFeedContext } from '../../providers/feedContext.js'
 
 const FX_COLUMNS = [
-  { id: 'unrealized', label: 'UNREALIZED', signed: true },
-  { id: 'realized', label: 'REALIZED', signed: true },
+  { id: 'grossEntry', label: 'GROSS ENTRY', signed: false },
+  { id: 'unrealized', label: 'UNREALIZED PNL', signed: true },
+  { id: 'realized', label: 'REALIZED PNL', signed: true },
+  { id: 'total', label: 'TOTAL PNL', signed: true },
 ]
 
-const FX_METRICS = FX_COLUMNS.map((column) => column.id)
+const FX_METRICS = PORTFOLIO_METRICS
 import { PANEL_ID, usePanelCoordinator } from '../../layout/panelContext.js'
 
 function describeDeleteError(error) {
@@ -71,14 +73,10 @@ export default function Books() {
 
   const allBooks = bookSummariesOf(summary.data)
   const roster = allBooks.filter((book) => book.isActive || includeDeactivated)
-  const totals = summarizeBooks(roster)
+  const totals = portfolioSummaryOf(roster)
   const [reportingCurrency, setReportingCurrency] = useReportingCurrency()
   const fx = useFxRates(reportingCurrency)
-  const currencySubtotals = currencySubtotalsOf(
-    roster.flatMap((book) => book.subtotals),
-    (row) => row.currency,
-    (row) => row.values,
-  )
+  const currencySubtotals = totals.subtotals
   const deactivatedCount = allBooks.filter((book) => !book.isActive).length
   const search = query.trim().toLowerCase()
   const books = roster.filter(
@@ -135,7 +133,14 @@ export default function Books() {
               {
                 subtotals: book.subtotals,
                 currency: book.currency,
-                values: { unrealized: book.unrealizedPnl, realized: book.realizedPnl },
+                values: {
+                  grossEntry: book.grossEntryValue,
+                  unrealized: book.unrealizedPnl,
+                  realized: book.realizedPnl,
+                  total: Number.isFinite(book.unrealizedPnl) && Number.isFinite(book.realizedPnl)
+                    ? book.unrealizedPnl + book.realizedPnl
+                    : null,
+                },
               },
               fx.rates,
               reportingCurrency,
@@ -163,11 +168,11 @@ export default function Books() {
     <section className="page">
       <div className="books-header">
         <span className="books-header__meta">
-          {formatNumber(totals.books)} {totals.books === 1 ? 'book' : 'books'}
+          {formatNumber(totals.bookCount)} {totals.bookCount === 1 ? 'book' : 'books'}
           {deactivatedCount > 0 && !includeDeactivated
             ? ` · ${formatNumber(deactivatedCount)} deactivated hidden`
-            : ''} · {formatNumber(totals.openPositions)} open{' '}
-          {totals.openPositions === 1 ? 'position' : 'positions'}
+          : ''} · {formatNumber(totals.openCount)} open ·{' '}
+          {formatNumber(totals.closedCount)} closed
         </span>
         <button
           type="button"

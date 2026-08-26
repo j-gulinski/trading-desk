@@ -13,7 +13,6 @@ export const CURVE_BASIS_TEXT = {
   GOVERNMENT_BONDS: 'Government bonds',
   INTEREST_RATE_SWAPS: 'Interest-rate swaps',
   OVERNIGHT_INDEX: 'Overnight index swaps',
-  INTERBANK_COMPOSITE: 'Interbank + government reference rates',
 }
 
 export const CURVE_TEXT = {
@@ -53,12 +52,6 @@ export const CURVE_TEXT = {
     cadence: 'daily',
     hint: 'United States Treasury constant maturity yields from one month to thirty years. The desk reads these par yields as zero rates',
   },
-  PLN_REFERENCE_PROJECTION_3M: {
-    title: 'Reference projection · 3M',
-    tradeUse: '3M PLN IRS projection',
-    cadence: 'monthly',
-    hint: 'Two monthly reference rates with the maturities between them interpolated. Published about two months behind, and the only curve here that follows a floating leg’s own index',
-  },
 }
 
 export const CURVE_ROLE_HINTS = {
@@ -73,8 +66,7 @@ export const TRADE_CURVE_ROLE_TEXT = {
     discount_curve: 'Discounts coupons and principal',
   },
   IRS: {
-    discount_curve: 'Discounts both swap legs',
-    projection_curve: 'Projects the floating leg',
+    discount_curve: 'Discounts both legs and implies the floating payments',
   },
   EUROPEAN_OPTION: {
     discount_curve: 'Discounts the strike payment',
@@ -95,6 +87,8 @@ export const FX_RATES_REFRESH_MS = 60000
 
 export const REPORTING_CURRENCY_BASE_OPTIONS = ['EUR', 'PLN', 'USD']
 
+export const DEFAULT_SORT_CURRENCY = 'USD'
+
 export const FRESHNESS_PILL_LEVELS = {
   LIVE: 'info',
   STALE: 'stale',
@@ -103,10 +97,15 @@ export const FRESHNESS_PILL_LEVELS = {
   UNSUPPORTED: 'unknown',
 }
 
-export const FRESHNESS_LABELS = {
+export function freshnessPillLevelOf(state, grade) {
+  if (grade === 'EOD' && state === 'LIVE') return 'closed'
+  return FRESHNESS_PILL_LEVELS[state] ?? 'unknown'
+}
+
+const FRESHNESS_LABELS = {
   LIVE: 'LIVE',
   STALE: 'STALE',
-  CLOSED: 'CLOSED',
+  CLOSED: 'EOD',
   MISSING: 'NO DATA',
   UNSUPPORTED: 'N/A',
 }
@@ -114,17 +113,30 @@ export const FRESHNESS_LABELS = {
 export const FRESHNESS_HINTS = {
   LIVE: 'Provider timestamp is inside this feed’s freshness budget',
   STALE: 'Older than the freshness budget — the provider has not moved this price',
-  CLOSED: 'Market is closed; the last session close is the current price',
+  CLOSED: 'Latest accepted end-of-day close; the market is closed',
   MISSING: 'Watched, but this provider has not returned a quote yet',
   UNSUPPORTED: 'This provider does not quote this asset class',
 }
 
-export function freshnessLabelOf(state, grade) {
+export function freshnessLabelOf(state, grade, providerTimestamp = null) {
+  if (state === 'CLOSED' || (grade === 'EOD' && state === 'LIVE')) {
+    const date = typeof providerTimestamp === 'string'
+      ? providerTimestamp.slice(0, 10)
+      : null
+    return date ? `EOD (${date})` : 'EOD'
+  }
   if (grade === 'REFERENCE' && state === 'LIVE') return 'CURRENT'
   return FRESHNESS_LABELS[state] ?? state
 }
 
 export function freshnessHintOf(state, grade) {
+  if (state === 'CLOSED') {
+    return 'Latest accepted end-of-day close; the market is closed'
+  }
+  if (grade === 'EOD') {
+    if (state === 'LIVE') return 'Latest accepted end-of-day close from the provider'
+    if (state === 'STALE') return 'The provider’s end-of-day close is overdue'
+  }
   if (grade === 'REFERENCE') {
     if (state === 'LIVE') {
       return 'Official fixing — current until the source’s next expected publication'
@@ -174,7 +186,7 @@ export const MARKET_COLUMNS = [
   },
   {
     id: 'provider',
-    label: 'Provider',
+    label: 'Quote source',
     cellClass: 'market-provider-cell',
     reorderGroup: 'observation',
   },
@@ -182,7 +194,7 @@ export const MARKET_COLUMNS = [
     id: 'last',
     label: 'Mark',
     numeric: true,
-    headerNote: 'quote currency',
+    headerNote: 'native quote unit',
     reorderGroup: 'observation',
   },
   {
@@ -202,7 +214,7 @@ export const MARKET_COLUMNS = [
   },
   {
     id: 'feed',
-    label: 'Status',
+    label: 'Quote status',
     reorderGroup: 'observation',
   },
   {
@@ -214,7 +226,7 @@ export const MARKET_COLUMNS = [
   },
   {
     id: 'updated',
-    label: 'Received',
+    label: 'Received at',
     numeric: true,
     headerClass: 'data-table__cell--time',
     cellClass: 'data-table__cell--time',
@@ -222,7 +234,7 @@ export const MARKET_COLUMNS = [
   },
   {
     id: 'watch',
-    label: '',
+    label: 'Actions',
     sortable: false,
     headerClass: 'market-cell--watch',
     cellClass: 'market-cell--watch',

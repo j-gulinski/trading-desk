@@ -1,7 +1,7 @@
 import threading
 import time
 
-from shared.curves import curve_metadata, curve_roles, curve_trade_uses
+from shared.curves import curve_metadata, curve_trade_roles, curve_trade_uses
 from shared.logging_config import get_logger
 from app import curve_store
 from app.config import (
@@ -39,7 +39,7 @@ def wire_curve(entry):
         "curve_name": entry["curve_name"],
         **curve_metadata(entry["curve_name"]),
         "curve_basis": entry["curve_basis"],
-        "roles": list(curve_roles(entry["curve_basis"])),
+        "roles": list(curve_trade_roles(entry["curve_name"])),
         "uses": list(curve_trade_uses(entry["curve_name"])),
         "currency": entry["currency"],
         "index_tenor": entry["index_tenor"],

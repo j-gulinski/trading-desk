@@ -41,7 +41,7 @@
 
 .fx-report__row {
   display: grid;
-  grid-template-columns: 56px repeat(2, minmax(120px, max-content)) minmax(0, auto);
+  grid-template-columns: 56px repeat(4, minmax(108px, max-content)) minmax(0, 1fr);
   align-items: baseline;
   gap: var(--sp-1) var(--sp-4);
   padding: 5px 2px;
@@ -90,10 +90,17 @@
 
 @container page (max-width: 900px) {
   .fx-report__row {
-    grid-template-columns: 56px repeat(2, minmax(0, 1fr));
+    grid-template-columns: 48px repeat(2, minmax(0, 1fr));
+    gap: 6px var(--sp-2);
+  }
+  .fx-report__currency {
+    grid-row: 1 / span 2;
   }
   .fx-report__value {
+    flex-direction: column;
+    align-items: flex-start;
     justify-content: flex-start;
+    gap: 1px;
   }
   .fx-report__conversion {
     grid-column: 1 / -1;

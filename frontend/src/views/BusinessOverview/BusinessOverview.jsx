@@ -4,16 +4,22 @@ import { usePolling } from '../../hooks/usePolling.js'
 import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { BOOK_SUMMARY_POLL_INTERVAL_MS } from '../../config/books.js'
-import { bookSummariesOf, summarizeBooks } from '../../domain/books.js'
+import { bookSummariesOf } from '../../domain/books.js'
 import {
   bookRisksOf,
   summarizeValuations,
   valuationRowsOf,
 } from '../../domain/valuations.js'
-import { currencySubtotalsOf, reportedTotalsOf } from '../../domain/fx.js'
+import { reportedTotalsOf } from '../../domain/fx.js'
+import { reportedPortfolioSummaryOf } from '../../domain/portfolio.js'
 import { useFxRates } from '../../hooks/useFxRates.js'
 import { useReportingCurrency } from '../../hooks/useReportingCurrency.js'
-import { directionOf, formatClockTime, formatSignedAmount } from '../../domain/formatting.js'
+import {
+  directionOf,
+  formatAmount,
+  formatClockTime,
+  formatSignedAmount,
+} from '../../domain/formatting.js'
 import StatCard from '../../components/cards/StatCard.jsx'
 import StreamHeader from '../../components/status/StreamHeader.jsx'
 import StatusPill from '../../components/status/StatusPill.jsx'
@@ -48,12 +54,12 @@ export default function BusinessOverview() {
 
   const summary = summarizeValuations(rows)
   const bookRoster = bookSummariesOf(booksRequest.data)
-  const bookTotals = summarizeBooks(bookRoster)
-  const actualOpen = booksRequest.data == null ? summary.open : bookTotals.openPositions
-  const actualBooks = booksRequest.data == null ? summary.books : bookTotals.books
-  const unvaluedOpen = Math.max(0, actualOpen - summary.open)
   const [reportingCurrency] = useReportingCurrency()
   const fx = useFxRates(reportingCurrency)
+  const portfolio = reportedPortfolioSummaryOf(bookRoster, fx.rates, reportingCurrency)
+  const actualOpen = booksRequest.data == null ? summary.open : portfolio.openCount
+  const actualBooks = booksRequest.data == null ? summary.books : portfolio.bookCount
+  const unvaluedOpen = Math.max(0, actualOpen - summary.open)
 
   function reported(subtotals, ownCurrency, values) {
     return reportedTotalsOf(
@@ -65,18 +71,7 @@ export default function BusinessOverview() {
     ...book,
     reported: reported(book.subtotals, book.currency, book),
   }))
-  const headline = reported(
-    currencySubtotalsOf(
-      rows,
-      (row) => row.valuation.currency,
-      (row) => ({
-        unrealized: row.valuation.closed ? 0 : row.valuation.unrealizedPnl ?? 0,
-        realized: row.valuation.realizedPnl ?? 0,
-      }),
-    ),
-    summary.currency,
-    summary,
-  )
+  const headline = portfolio.reported
   const currency = headline.currency
   const fresh = summary.live + summary.marketClosed
   const livePercent = actualOpen > 0 ? (fresh / actualOpen) * 100 : 0
@@ -100,6 +95,14 @@ export default function BusinessOverview() {
 
       <div className="business-summary">
         <StatCard
+          label={`OPEN GROSS ENTRY VALUE · ${currency}`}
+          value={
+            headline.values == null ? '—' : formatAmount(headline.values.grossEntry)
+          }
+          sub={`${actualOpen} open positions`}
+          title={headline.title}
+        />
+        <StatCard
           label={`UNREALIZED PNL · ALL BOOKS · ${currency}`}
           value={
             headline.values == null ? '—' : formatSignedAmount(headline.values.unrealized)
@@ -115,11 +118,22 @@ export default function BusinessOverview() {
         <StatCard
           label={`REALIZED PNL · ALL BOOKS · ${currency}`}
           value={headline.values == null ? '—' : formatSignedAmount(headline.values.realized)}
-          sub={`${summary.closed} closed positions`}
+          sub={`${portfolio.closedCount} closed positions`}
           tone={
             headline.values == null
               ? 'default'
               : headline.values.realized >= 0 ? 'pos' : 'neg'
+          }
+          title={headline.title}
+        />
+        <StatCard
+          label={`TOTAL PNL · ALL BOOKS · ${currency}`}
+          value={headline.values == null ? '—' : formatSignedAmount(headline.values.total)}
+          sub="realized + unrealized"
+          tone={
+            headline.values == null
+              ? 'default'
+              : headline.values.total >= 0 ? 'pos' : 'neg'
           }
           title={headline.title}
         />
@@ -130,7 +144,11 @@ export default function BusinessOverview() {
           tone={unvaluedOpen > 0 ? 'warn' : 'default'}
           href="#/valuations"
         />
-        <StatCard label="BOOKS" value={actualBooks} sub={`${summary.books} with a valuation`} />
+        <StatCard
+          label="CLOSED TRADES"
+          value={portfolio.closedCount}
+          sub={`${actualBooks} books · ${summary.books} with a valuation`}
+        />
       </div>
 
       <div className="business-panels">
@@ -190,7 +208,7 @@ export default function BusinessOverview() {
                 <span className="freshness__fill" style={{ transform: `scaleX(${livePercent / 100})` }} />
               </div>
               <p className="freshness__note">
-                Excludes {summary.closed} closed valuations.
+                Excludes {portfolio.closedCount} closed positions.
               </p>
             </div>
           ) : (

@@ -12,8 +12,9 @@ import { providerLabel } from '../../config/providers.js'
 import { assetClassLabel } from '../../config/tradeActions.js'
 import {
   FRESHNESS_HINTS,
-  FRESHNESS_LABELS,
-  FRESHNESS_PILL_LEVELS,
+  freshnessPillLevelOf,
+  freshnessHintOf,
+  freshnessLabelOf,
 } from '../../config/marketData.js'
 
 function ChangeValue({ instrument, change }) {
@@ -74,7 +75,7 @@ function feedTitle(state, instrument, strategy) {
       instrument.provider,
     )} batch in ≤ ${minutes} min`
   }
-  return FRESHNESS_HINTS[state]
+  return freshnessHintOf(state, instrument.grade) ?? FRESHNESS_HINTS[state]
 }
 
 export default function MarketCell({
@@ -139,8 +140,12 @@ export default function MarketCell({
     case 'feed':
       return (
         <StatusPill
-          level={FRESHNESS_PILL_LEVELS[row.state] ?? 'unknown'}
-          label={FRESHNESS_LABELS[row.state] ?? row.state}
+          level={freshnessPillLevelOf(row.state, instrument.grade)}
+          label={freshnessLabelOf(
+            row.state,
+            instrument.grade,
+            instrument.providerTimestamp,
+          )}
           title={feedTitle(row.state, instrument, strategy)}
           compact
         />

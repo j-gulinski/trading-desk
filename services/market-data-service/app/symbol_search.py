@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.providers import REGISTRATIONS
 from app.providers.base import ProviderError
+from app import watchlist
 from shared.logging_config import get_logger
 from app.config import (
     SERVICE_NAME,
@@ -62,6 +63,21 @@ def _collect(query):
         (result for part, _, _ in parts for result in part),
         key=_rank(query),
     )
+    attached = []
+    seen = {(result["provider"], result["symbol"]) for result in results}
+    for provider in REGISTRATIONS:
+        if provider.attach_search is None:
+            continue
+        for result in (*results, *watchlist.matching_identities(query)):
+            candidate = provider.attach_search(result)
+            if candidate is None:
+                continue
+            key = (candidate["provider"], candidate["symbol"])
+            if key in seen:
+                continue
+            seen.add(key)
+            attached.append(candidate)
+    results = sorted((*results, *attached), key=_rank(query))
     errors = {provider: error for _, provider, error in parts if error is not None}
     return results, errors
 

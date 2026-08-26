@@ -160,10 +160,6 @@ def price_preview():
         "multiplier": multiplier,
         "market_revisions": revisions,
         **price_details(terms["asset_class"], terms, inputs),
-        **(
-            {"projection_curve_tracks_index": terms["projection_curve_tracks_index"]}
-            if "projection_curve_tracks_index" in terms else {}
-        ),
     })
 
 

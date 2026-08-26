@@ -67,4 +67,8 @@ def runtime_snapshot():
         **_feed.runtime_snapshot(),
         "curves": _curve_feed.curve_names(),
         "curve_strategy": _curve_feed.strategy(),
+        "feeds": {
+            "fixings": _feed.runtime_snapshot(),
+            "curves": _curve_feed.runtime_snapshot(),
+        },
     }

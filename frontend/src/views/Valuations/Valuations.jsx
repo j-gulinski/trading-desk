@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { useMarketFeedContext, useValuationFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
+import { usePolling } from '../../hooks/usePolling.js'
 import { useTableState } from '../../hooks/useTableState.js'
 import { STORAGE_KEYS } from '../../config/storage.js'
 import {
   DEFAULT_VALUATION_SORT,
   MAX_RENDERED_ROWS,
   VALUATION_COLUMNS,
+  VALUATION_CURRENCY_SORT_COLUMNS,
   VALUATION_FALLBACK_SORT,
 } from '../../config/valuations.js'
+import { DEFAULT_SORT_CURRENCY } from '../../config/marketData.js'
 import {
   benchmarkDayChangeOf,
   benchmarkOf,
@@ -20,6 +23,13 @@ import {
   valuationRowsOf,
 } from '../../domain/valuations.js'
 import { assetClassLabel } from '../../config/tradeActions.js'
+import { BOOK_SUMMARY_POLL_INTERVAL_MS } from '../../config/books.js'
+import { apiGet } from '../../services/apiClient.js'
+import { endpoints } from '../../services/endpoints.js'
+import { bookSummariesOf } from '../../domain/books.js'
+import {
+  reportedPortfolioSummaryOf,
+} from '../../domain/portfolio.js'
 import { countOptions } from '../../domain/filters.js'
 import {
   formatAmount,
@@ -40,14 +50,14 @@ import BookRiskCard from '../../components/valuations/BookRiskCard.jsx'
 import FxReport from '../../components/fx/FxReport.jsx'
 import { useFxRates } from '../../hooks/useFxRates.js'
 import { useReportingCurrency } from '../../hooks/useReportingCurrency.js'
-import { currencySubtotalsOf, reportedTotalsOf } from '../../domain/fx.js'
+import { reportedTotalsOf } from '../../domain/fx.js'
 
 const FX_COLUMNS = [
-  { id: 'notional', label: 'CAPITAL', signed: false },
-  { id: 'unrealized', label: 'UNREALIZED', signed: true },
+  { id: 'grossEntry', label: 'GROSS ENTRY', signed: false },
+  { id: 'unrealized', label: 'UNREALIZED PNL', signed: true },
+  { id: 'realized', label: 'REALIZED PNL', signed: true },
+  { id: 'total', label: 'TOTAL PNL', signed: true },
 ]
-
-const FX_METRICS = FX_COLUMNS.map((column) => column.id)
 
 function matchesSearch(row, search) {
   if (!search) return true
@@ -61,6 +71,10 @@ export default function Valuations() {
   const { valuations, bookRisk, status, seedStatus } = useValuationFeedContext()
   const { instruments, curves } = useMarketFeedContext()
   const { now } = useElapsedTime()
+  const booksRequest = usePolling(
+    ({ signal }) => apiGet(endpoints.blotter.booksSummary, { signal }),
+    { intervalMs: BOOK_SUMMARY_POLL_INTERVAL_MS },
+  )
 
   const [activeClass, setActiveClass] = useState(null)
   const [activeBook, setActiveBook] = useState(null)
@@ -72,28 +86,30 @@ export default function Valuations() {
   const summary = summarizeValuations(openRows)
   const [reportingCurrency, setReportingCurrency] = useReportingCurrency()
   const fx = useFxRates(reportingCurrency)
-  const currencySubtotals = currencySubtotalsOf(
-    openRows,
-    (row) => row.valuation.currency,
-    (row) => ({
-      notional: row.valuation.notional ?? 0,
-      unrealized: row.valuation.unrealizedPnl ?? 0,
-    }),
+  const separateSortFx = useFxRates(
+    reportingCurrency === DEFAULT_SORT_CURRENCY ? null : DEFAULT_SORT_CURRENCY,
   )
+  const sortRates = reportingCurrency === DEFAULT_SORT_CURRENCY
+    ? fx.rates
+    : separateSortFx.rates
+  const portfolio = reportedPortfolioSummaryOf(
+    bookSummariesOf(booksRequest.data),
+    fx.rates,
+    reportingCurrency,
+  )
+  const currencySubtotals = portfolio.subtotals
 
   function reportedTotals(source) {
-    return reportedTotalsOf(source, fx.rates, reportingCurrency, FX_METRICS)
+    return reportedTotalsOf(source, fx.rates, reportingCurrency, ['unrealized'])
   }
 
-  const headline = reportedTotals({
-    subtotals: currencySubtotals,
-    currency: summary.currency,
-    values: summary,
-  })
+  const headline = portfolio.reported
   const currency = headline.currency
   const headlineTitle = headline.title
-  const capitalHeadline = headline.values?.notional ?? null
+  const capitalHeadline = headline.values?.grossEntry ?? null
   const unrealizedHeadline = headline.values?.unrealized ?? null
+  const realizedHeadline = headline.values?.realized ?? null
+  const totalHeadline = headline.values?.total ?? null
 
   const portfolioMetric = bookRisk.PORTFOLIO
   const portfolioBook = portfolioMetric
@@ -103,7 +119,7 @@ export default function Valuations() {
         unrealizedReported: unrealizedHeadline,
         unrealizedCurrency: currency,
         unrealizedNote: headlineTitle,
-        open: summary.open,
+        open: booksRequest.data == null ? summary.open : portfolio.openCount,
         live: summary.live,
         alpha: portfolioMetric.alpha,
         alphaWindowReturn: portfolioMetric.alphaWindowReturn,
@@ -150,9 +166,21 @@ export default function Valuations() {
     storageKey: STORAGE_KEYS.valuationColumns,
     defaultSort: DEFAULT_VALUATION_SORT,
     fallbackSort: VALUATION_FALLBACK_SORT,
-    captureSnapshot: (column) => captureValuationSnapshot(openRows, column),
-    hasRows: openRows.length > 0,
+    captureSnapshot: (column) => captureValuationSnapshot(
+      openRows,
+      column,
+      sortRates,
+      VALUATION_CURRENCY_SORT_COLUMNS.has(column) ? DEFAULT_SORT_CURRENCY : null,
+    ),
+    hasRows: openRows.length > 0 && sortRates != null,
+    isSortable: (column) => Boolean(column?.sortable) && (
+      !VALUATION_CURRENCY_SORT_COLUMNS.has(column.id) || sortRates != null
+    ),
   })
+  const approximateSortCurrency = (
+    VALUATION_CURRENCY_SORT_COLUMNS.has(table.sort.column) &&
+    openRows.some((row) => row.valuation.currency !== DEFAULT_SORT_CURRENCY)
+  ) ? DEFAULT_SORT_CURRENCY : null
 
   function selectClass(value) {
     setActiveClass(value)
@@ -196,7 +224,13 @@ export default function Valuations() {
       <ValuationTable
         table={table}
         rows={visibleRows}
-        caption="Valued open positions ranked by return and unrealized PnL, capped at the top 100"
+        caption="Open valuations sorted by the selected column, capped at 100 rows"
+        comparisonCurrency={approximateSortCurrency}
+        sortDisabledReason={(column) => (
+          VALUATION_CURRENCY_SORT_COLUMNS.has(column.id) && sortRates == null
+            ? 'USD comparison rates are loading'
+            : null
+        )}
       />
     )
   } else if (openRows.length > 0) {
@@ -224,9 +258,31 @@ export default function Valuations() {
 
       <div className="valuation-summary">
         <StatCard
-          label={`CAPITAL INVESTED · ${currency}`}
+          label={`OPEN GROSS ENTRY VALUE · ${currency}`}
           value={capitalHeadline == null ? '—' : formatAmount(capitalHeadline)}
-          sub="gross entry value"
+          sub={`${portfolio.openCount} open positions`}
+          title={headlineTitle}
+        />
+        <StatCard
+          label={`REALIZED PNL · ${currency}`}
+          value={realizedHeadline == null ? '—' : formatSignedAmount(realizedHeadline)}
+          sub={`${portfolio.closedCount} closed positions`}
+          tone={
+            realizedHeadline == null
+              ? 'default'
+              : realizedHeadline >= 0 ? 'pos' : 'neg'
+          }
+          title={headlineTitle}
+        />
+        <StatCard
+          label={`TOTAL PNL · ${currency}`}
+          value={totalHeadline == null ? '—' : formatSignedAmount(totalHeadline)}
+          sub="realized + unrealized"
+          tone={
+            totalHeadline == null
+              ? 'default'
+              : totalHeadline >= 0 ? 'pos' : 'neg'
+          }
           title={headlineTitle}
         />
         <StatCard
@@ -297,7 +353,7 @@ export default function Valuations() {
         <div className="valuation-section__head">
           <div hidden={matchingRows.length === 0}>
             <h2 id="valuation-table-title">Top 100 valued open positions</h2>
-            <p>Ranked by return or unrealized PnL</p>
+            <p>Sorted by the selected column; monetary columns compare in approximate USD</p>
           </div>
           <span>
             {hiddenRowCount > 0 ? `${visibleRows.length} of ${matchingRows.length}` : visibleRows.length} rows
@@ -344,7 +400,10 @@ export default function Valuations() {
           />
         </FilterBar>
 
-        <SortCaptureStatus sort={table.sort} />
+        <SortCaptureStatus
+          sort={table.sort}
+          approximateCurrency={approximateSortCurrency}
+        />
         {hiddenRowCount > 0 && (
           <div className="table-sort-status" role="status">
             Showing the top {MAX_RENDERED_ROWS} by this sort · {hiddenRowCount} more match — filter

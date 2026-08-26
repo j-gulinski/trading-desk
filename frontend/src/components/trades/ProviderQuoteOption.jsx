@@ -2,8 +2,9 @@ import StatusPill from '../status/StatusPill.jsx'
 import { providerLabel } from '../../config/providers.js'
 import {
   FRESHNESS_HINTS,
-  FRESHNESS_LABELS,
-  FRESHNESS_PILL_LEVELS,
+  freshnessPillLevelOf,
+  freshnessHintOf,
+  freshnessLabelOf,
 } from '../../config/marketData.js'
 import { formatClockTime, formatUnitPrice } from '../../domain/formatting.js'
 import { formatAge } from '../../domain/marketFormat.js'
@@ -31,13 +32,17 @@ export default function ProviderQuoteOption({
         className="quote-option__button"
         aria-pressed={selected}
         disabled={!quote.tradeable}
-        title={quote.reason ?? FRESHNESS_HINTS[quote.state]}
+        title={quote.reason ?? freshnessHintOf(quote.state, quote.grade) ?? FRESHNESS_HINTS[quote.state]}
         onClick={() => onSelect(quote.provider)}
       >
         <span className="quote-option__provider">{providerLabel(quote.provider)}</span>
         <StatusPill
-          level={unavailable ? 'unknown' : (FRESHNESS_PILL_LEVELS[quote.state] ?? 'unknown')}
-          label={unavailable ?? FRESHNESS_LABELS[quote.state] ?? quote.state}
+          level={unavailable ? 'unknown' : freshnessPillLevelOf(quote.state, quote.grade)}
+          label={unavailable ?? freshnessLabelOf(
+            quote.state,
+            quote.grade,
+            quote.providerTimestamp,
+          )}
           compact
         />
         {quote.reason ? (

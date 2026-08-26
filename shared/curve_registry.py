@@ -1,5 +1,11 @@
-from shared.curves import curve_metadata, curve_roles, curve_trade_uses
+from shared.curves import (
+    curve_metadata,
+    curve_stale_after_days,
+    curve_trade_roles,
+    curve_trade_uses,
+)
 from shared.db import session_scope
+from shared.functions import utcnow
 from shared.models import MarketDataCurve, MarketDataCurvePoint
 
 
@@ -24,18 +30,24 @@ def _latest_rows(session):
     ) in rows:
         if name in latest:
             continue
+        age_days = max(0, (utcnow().date() - as_of).days)
+        stale_after_days = curve_stale_after_days(name)
+        trade_uses = curve_trade_uses(name)
         latest[name] = {
             "curve_id": curve_id,
             "provider": provider,
             "curve_name": name,
             "curve_basis": curve_basis,
-            "roles": list(curve_roles(curve_basis)),
-            "uses": list(curve_trade_uses(name)),
+            "roles": list(curve_trade_roles(name)),
+            "uses": list(trade_uses),
             **curve_metadata(name),
             "currency": currency,
             "index_tenor": index_tenor,
             "as_of_date": str(as_of),
             "received_at": received_at.isoformat(),
+            "age_days": age_days,
+            "stale_after_days": stale_after_days,
+            "stale": stale_after_days is not None and age_days > stale_after_days,
         }
     return latest
 

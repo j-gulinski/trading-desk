@@ -52,6 +52,27 @@ def list_items(quote_providers):
     ]
 
 
+def matching_identities(query):
+    normalized = str(query or "").replace("/", "").upper()
+    with session_scope() as session:
+        rows = [
+            (item.symbol, item.name, item.asset_class, item.currency, item.market)
+            for item in watchlist_items(session)
+            if normalized in item.symbol.replace("/", "").upper()
+            or normalized in str(item.name or "").upper()
+        ]
+    return [
+        {
+            "symbol": symbol,
+            "name": name or symbol,
+            "asset_class": asset_class,
+            "currency": currency,
+            "exchange": market,
+        }
+        for symbol, name, asset_class, currency, market in rows
+    ]
+
+
 def _requested_providers(requested, asset_class, quote_providers):
     capable = [p for p in quote_providers if supports_quotes(p, asset_class)]
     if requested is None:

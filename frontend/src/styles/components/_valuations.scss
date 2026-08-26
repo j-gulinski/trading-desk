@@ -2,8 +2,8 @@
 .business-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-5);
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
 }
 .business-summary {
   grid-template-columns: repeat(2, minmax(0, 1.4fr)) repeat(2, minmax(0, 0.8fr));
@@ -14,7 +14,7 @@
 
 .valuation-section {
   min-width: 0;
-  margin-bottom: var(--sp-6);
+  margin-bottom: var(--sp-5);
 
   &:last-child {
     margin-bottom: 0;
@@ -64,7 +64,7 @@
 .book-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
-  gap: var(--sp-4);
+  gap: var(--sp-3);
 }
 
 .book-card {
@@ -251,7 +251,7 @@
 .business-panels {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: var(--sp-4);
+  gap: var(--sp-3);
   align-items: start;
 }
 .panel__link {
@@ -320,7 +320,7 @@
   }
 }
 
-@container page (max-width: 1240px) {
+@container page (max-width: 900px) {
   .valuation-positions-table-wrap {
     overflow-x: hidden;
   }

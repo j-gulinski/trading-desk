@@ -10,14 +10,14 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
-  padding: 4px 9px;
+  min-height: 26px;
+  padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
   color: var(--text-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1;
   cursor: pointer;
   white-space: nowrap;
@@ -47,7 +47,7 @@
   min-width: 1ch;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
 .filter-chip[aria-pressed="true"] .filter-chip__count {
@@ -83,4 +83,11 @@
 .filter-chip__dot--error,
 .filter-chip__dot--critical {
   background: var(--neg);
+}
+
+@container page (max-width: 620px) {
+  .filter-chip {
+    min-height: 32px;
+    padding: 5px 9px;
+  }
 }

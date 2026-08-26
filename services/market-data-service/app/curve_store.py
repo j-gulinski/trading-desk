@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy.exc import IntegrityError
 
+from shared.curves import CURVE_CATALOG
 from shared.db import session_scope
 from shared.functions import utcnow
 from shared.models import MarketDataCurve, MarketDataCurvePoint
@@ -13,6 +14,15 @@ CURVE_POINT_FIELDS = (
     "source_series",
     "source_as_of",
 )
+
+
+def prune_retired_curve_sets():
+    with session_scope() as session:
+        return (
+            session.query(MarketDataCurve)
+            .filter(MarketDataCurve.curve_name.notin_(tuple(CURVE_CATALOG)))
+            .delete(synchronize_session=False)
+        )
 
 
 def _point_rows(curve_set):
@@ -120,6 +130,7 @@ def latest_curve_sets(provider=None, include_raw=False):
     with session_scope() as session:
         curves = (
             session.query(MarketDataCurve)
+            .filter(MarketDataCurve.curve_name.in_(tuple(CURVE_CATALOG)))
             .order_by(
                 MarketDataCurve.provider,
                 MarketDataCurve.curve_name,

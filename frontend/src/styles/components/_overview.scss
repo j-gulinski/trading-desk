@@ -3,8 +3,8 @@
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-4);
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
 }
 .overview__section-copy {
   display: grid;
@@ -13,7 +13,7 @@
 .overview__section-title {
   margin: 0;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 .overview__section-meta {
@@ -31,12 +31,12 @@
   color: var(--text-secondary);
 }
 .overview__panels {
-  margin-top: var(--sp-5);
+  margin-top: var(--sp-4);
 }
 .overview__panels--two {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--sp-4);
+  gap: var(--sp-3);
 }
 .overview__stream-summary {
   display: grid;

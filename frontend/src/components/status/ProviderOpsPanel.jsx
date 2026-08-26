@@ -152,6 +152,13 @@ function ProviderCard({ provider, now }) {
             .join(' · ')}
         </p>
       )}
+      {runtime?.feeds && (
+        <p className="provider-card__note">
+          {Object.entries(runtime.feeds)
+            .map(([name, feed]) => `${name} ${feed?.status ?? 'UNKNOWN'}`)
+            .join(' · ')}
+        </p>
+      )}
       {budget.capacity != null && (
         <BudgetGauge
           label="Rate limit"
@@ -169,7 +176,11 @@ function ProviderCard({ provider, now }) {
           label="Credits today"
           used={budget.credits_today ?? 0}
           capacity={budget.daily_budget}
-          detail={`${formatNumber(budget.credits_today ?? 0)} counted · ${formatNumber(budget.daily_budget)} safe of ${formatNumber(budget.provider_daily_limit)}/day · ${budget.active_window_hours}h window${
+          detail={`${formatNumber(budget.credits_today ?? 0)} counted · ${formatNumber(budget.daily_budget)} safe of ${formatNumber(budget.provider_daily_limit)}/day${
+            budget.active_window_hours != null
+              ? ` · ${budget.active_window_hours}h window`
+              : ' · daily reset'
+          }${
             strategy.on_pace === false ? ' · ahead of pace' : ''
           }`}
         />

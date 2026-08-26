@@ -169,6 +169,14 @@ def _freeze_curve_provenance(terms, curves):
         terms[f"{field}_as_of"] = curve["as_of_date"]
 
 
+def _stale_curve_names(curves):
+    return sorted(
+        curve["curve_name"]
+        for curve in curves.values()
+        if curve.get("stale") is True
+    )
+
+
 def _validate_curve_open(session, intent, active, terms):
     asset_class = terms["asset_class"]
     intent["symbol"] = model_contract_symbol(asset_class, intent.get("trade_id"))
@@ -187,6 +195,12 @@ def _validate_curve_open(session, intent, active, terms):
     curves, curve_error = _load_terms_curves(terms)
     if curve_error is not None:
         return None, curve_error
+    stale_curves = _stale_curve_names(curves)
+    if stale_curves and intent.get("stale_curve_acknowledged") is not True:
+        return None, (
+            "stale curve acknowledgement is required for "
+            f"{', '.join(stale_curves)}"
+        )
 
     underlying_quote = None
     provider = None
@@ -218,6 +232,8 @@ def _validate_curve_open(session, intent, active, terms):
     if deviation_error is not None:
         return None, deviation_error
     _freeze_curve_provenance(terms, curves)
+    if stale_curves:
+        terms["stale_curve_acknowledged"] = stale_curves
 
     if underlying_quote is not None:
         quote = market_state.ModelQuote(
