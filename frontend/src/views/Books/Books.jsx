@@ -213,7 +213,9 @@ export default function Books() {
 
       {currencySubtotals.length > 0 && (
         <FxReport
-          columns={FX_COLUMNS}
+          columns={totals.closedCount > 0
+            ? FX_COLUMNS
+            : FX_COLUMNS.filter((column) => ['grossEntry', 'unrealized'].includes(column.id))}
           subtotals={currencySubtotals}
           reportingCurrency={reportingCurrency}
           onReportingCurrencyChange={setReportingCurrency}

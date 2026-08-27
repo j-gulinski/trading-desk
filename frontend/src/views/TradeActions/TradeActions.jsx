@@ -50,23 +50,23 @@ export default function TradeActions() {
     <section className="page">
       <div className="trade-actions__stats">
         <StatCard
-          label="ACCEPTED"
+          label="CURRENT PROCESS · ACCEPTED"
           value={unreachable ? '—' : formatNumber(status.accepted)}
-          sub={`${formatNumber(status.processed)} processed`}
+          sub={`${formatNumber(status.processed)} processed since restart`}
         />
         <StatCard
-          label="WRITTEN"
+          label="CURRENT PROCESS · WRITTEN"
           value={unreachable ? '—' : formatNumber(status.created + status.closed)}
-          sub={`${formatNumber(status.created)} opened · ${formatNumber(status.closed)} closed`}
+          sub={`${formatNumber(status.created)} opened · ${formatNumber(status.closed)} closed since restart`}
         />
         <StatCard
-          label="REJECTED · IN FEED"
+          label="RECENT FEED · REJECTED"
           value={feed.error ? '—' : formatNumber(rejected)}
-          sub={`of ${rows.length} shown · ${formatNumber(status.rejected)} this process`}
+          sub={`of ${rows.length} recent actions · ${formatNumber(status.rejected)} since restart`}
           tone={rejected > 0 ? 'warn' : 'default'}
         />
         <StatCard
-          label="AVG PROCESSING"
+          label="CURRENT PROCESS · AVG TIME"
           value={
             !unreachable && status.avgProcessingMs != null
               ? `${formatNumber(status.avgProcessingMs)} ms`
@@ -79,22 +79,22 @@ export default function TradeActions() {
           }
         />
         <StatCard
-          label="LAST ACTION"
-          value={lastActionMs != null ? formatClockTime(lastActionMs, { millis: true }) : '—'}
-          sub="newest audited action"
+          label="LAST AUDITED ACTION"
+          value={lastActionMs != null ? formatClockTime(lastActionMs, { millis: true, day: true }) : '—'}
+          sub="local time · recent feed"
         />
       </div>
 
       <Panel
-        title="ACTION FEED · ACCEPTED / REJECTED"
+        title="RECENT ACTIONS · ACCEPTED / REJECTED"
         meta={
           <>
             {feed.error
               ? <StatusPill level="down" label="UNAVAILABLE" />
-              : <StatusPill level="healthy" label="LIVE" />}
+              : <StatusPill level="healthy" label="CONNECTED" />}
             <span>
-              {windowed ? `newest ${FEED_LIMIT}` : `${rows.length} shown`}
-              {pollAgeMs != null && ` · ${formatElapsedTime(pollAgeMs)}`}
+              {windowed ? `newest ${FEED_LIMIT} events` : `${rows.length} recent events`}
+              {pollAgeMs != null && ` · checked ${formatElapsedTime(pollAgeMs)}`}
             </span>
           </>
         }

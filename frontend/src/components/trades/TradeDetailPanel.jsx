@@ -31,6 +31,8 @@ import {
   priceUnitLabelOf,
   quantityUnitLabelOf,
 } from '../../domain/marketFormat.js'
+import { instrumentLabelOf } from '../../domain/contracts.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
 
 const CURVE_TERMS = ['discount_curve', 'projection_curve']
 const HIDDEN_TERMS = new Set([
@@ -386,8 +388,8 @@ export default function TradeDetailPanel({
     <SidePanel
       wide
       eyebrow="TRADE DETAIL"
-      title={trade.tradeRef}
-      subtitle={`${trade.bookName} · ${trade.symbol ?? 'UNKNOWN'} · ${trade.assetClass}`}
+      title={instrumentLabelOf(trade)}
+      subtitle={`${trade.bookName} · ${trade.tradeRef} · ${assetClassLabel(trade.assetClass)}`}
       onClose={onClose}
       headActions={
         <>
@@ -425,7 +427,7 @@ export default function TradeDetailPanel({
         <span>
           {lastUpdated == null
             ? 'Waiting for detail'
-            : `Updated ${formatClockTime(lastUpdated)}`}
+            : `Updated ${formatClockTime(lastUpdated)} local`}
         </span>
       }
     >
@@ -450,8 +452,8 @@ export default function TradeDetailPanel({
                 valuation == null
                   ? 'not valued yet'
                   : row.valuationSource === 'feed'
-                    ? 'live'
-                    : 'latest'
+                    ? 'live · local time'
+                    : 'latest · local time'
               }
             />
           </section>
@@ -469,10 +471,7 @@ export default function TradeDetailPanel({
               <span>{trade.status}</span>
             </div>
             <dl className="trade-detail__fields">
-              <DetailField label="Trade ID">{trade.id}</DetailField>
               <DetailField label="Book">{trade.bookName}</DetailField>
-              <DetailField label="Instrument">{trade.symbol}</DetailField>
-              <DetailField label="Class">{trade.assetClass}</DetailField>
               <DetailField label={trade.assetClass === 'IRS' ? 'Direction' : 'Side'}>
                 <span className={`trade-side trade-side--${trade.side.toLowerCase()}`}>
                   {tradePositionLabel(trade)}
@@ -490,9 +489,6 @@ export default function TradeDetailPanel({
               <DetailField label={['BOND', 'IRS'].includes(trade.assetClass) ? 'Curve as of' : 'Quote time'}>
                 {trade.entryPriceAtMs == null ? null : formatDateTime(trade.entryPriceAtMs)}
               </DetailField>
-              <DetailField label="Opened">{formatDateTime(trade.openedAtMs)}</DetailField>
-              <DetailField label="Source">{trade.source}</DetailField>
-              <DetailField label="Written by">{trade.createdByService}</DetailField>
               {trade.terms != null &&
                 Object.keys(trade.terms).some(
                   (key) => !HIDDEN_TERMS.has(key),
@@ -518,6 +514,10 @@ export default function TradeDetailPanel({
                   </dl>
                 </DetailField>
               )}
+              <DetailField label="Opened">{formatDateTime(trade.openedAtMs)}</DetailField>
+              <DetailField label="Trade ID">{trade.id}</DetailField>
+              <DetailField label="Source">{trade.source}</DetailField>
+              <DetailField label="Written by">{trade.createdByService}</DetailField>
               {row.lifecycle === 'CLOSED' && (
                 <>
                   <DetailField label="Closed">{formatDateTime(trade.closedAtMs)}</DetailField>

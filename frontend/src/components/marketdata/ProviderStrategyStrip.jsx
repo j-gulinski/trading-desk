@@ -18,7 +18,7 @@ export default function ProviderStrategyStrip({ providers, now, snapshotAtMs }) 
             <span className="provider-strategy__name">{providerLabel(provider)}</span>
             <StatusPill
               level={PROVIDER_STATUS_LEVELS[runtime.status] ?? 'unknown'}
-              label={runtime.status}
+              label={runtime.status === 'OK' ? 'AVAILABLE' : runtime.status}
               compact
             />
             <span className="provider-strategy__text" title={schedule}>

@@ -263,17 +263,19 @@ export default function Valuations() {
           sub={`${portfolio.openCount} open positions`}
           title={headlineTitle}
         />
-        <StatCard
-          label={`REALIZED PNL · ${currency}`}
-          value={realizedHeadline == null ? '—' : formatSignedAmount(realizedHeadline)}
-          sub={`${portfolio.closedCount} closed positions`}
-          tone={
-            realizedHeadline == null
-              ? 'default'
-              : realizedHeadline >= 0 ? 'pos' : 'neg'
-          }
-          title={headlineTitle}
-        />
+        {portfolio.closedCount > 0 && (
+          <StatCard
+            label={`REALIZED PNL · ${currency}`}
+            value={realizedHeadline == null ? '—' : formatSignedAmount(realizedHeadline)}
+            sub={`${portfolio.closedCount} closed positions`}
+            tone={
+              realizedHeadline == null
+                ? 'default'
+                : realizedHeadline >= 0 ? 'pos' : 'neg'
+            }
+            title={headlineTitle}
+          />
+        )}
         <StatCard
           label={`TOTAL PNL · ${currency}`}
           value={totalHeadline == null ? '—' : formatSignedAmount(totalHeadline)}
@@ -297,11 +299,13 @@ export default function Valuations() {
           title={headlineTitle}
         />
         <StatCard label="LIVE" value={summary.live} sub="valued now" tone="info" />
-        <StatCard
-          label="MKT CLOSED"
-          value={summary.marketClosed}
-          sub="marked at the close"
-        />
+        {summary.marketClosed > 0 && (
+          <StatCard
+            label="MKT CLOSED"
+            value={summary.marketClosed}
+            sub="marked at the close"
+          />
+        )}
         <StatCard
           label="STALE"
           value={summary.stale}
@@ -320,7 +324,9 @@ export default function Valuations() {
             <span>{currencySubtotals.length} settlement {currencySubtotals.length === 1 ? 'currency' : 'currencies'}</span>
           </div>
           <FxReport
-            columns={FX_COLUMNS}
+            columns={portfolio.closedCount > 0
+              ? FX_COLUMNS
+              : FX_COLUMNS.filter((column) => ['grossEntry', 'unrealized'].includes(column.id))}
             subtotals={currencySubtotals}
             reportingCurrency={reportingCurrency}
             onReportingCurrencyChange={setReportingCurrency}
@@ -352,8 +358,8 @@ export default function Valuations() {
       <section className="valuation-section" aria-labelledby="valuation-table-title">
         <div className="valuation-section__head">
           <div hidden={matchingRows.length === 0}>
-            <h2 id="valuation-table-title">Top 100 valued open positions</h2>
-            <p>Sorted by the selected column; monetary columns compare in approximate USD</p>
+            <h2 id="valuation-table-title">Open positions</h2>
+            <p>Sorted by the selected column · showing up to 100 rows</p>
           </div>
           <span>
             {hiddenRowCount > 0 ? `${visibleRows.length} of ${matchingRows.length}` : visibleRows.length} rows

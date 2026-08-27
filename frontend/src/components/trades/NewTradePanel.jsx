@@ -578,6 +578,11 @@ export default function NewTradePanel({ onClose }) {
           ? `OPEN ${termCurrency} IRS at model value ${formatSignedAmount(previewPrice)} ${termCurrency}`
           : `${side} ${termValues.underlying_symbol} ${termValues.option_type?.toLowerCase()} option at model premium ${formatSignedAmount(previewPrice)} ${termCurrency ?? ''}`
       : `${side} ${formatNumber(quantity)} ${symbol} at ${formatUnitPrice(quote.price, assetClass)} ${unitLabel ?? quote.currency ?? ''}`
+  const showReview = selectedBook != null && (
+    curvePriced
+      ? previewLoading || previewPrice != null
+      : quote?.price != null
+  )
   const ticketLoading = booksRequest.loading || catalogRequest.loading || termSchemasRequest.loading
   const executionFields = !irs && selectedBook != null ? (
     <ExecutionFields
@@ -651,10 +656,25 @@ export default function NewTradePanel({ onClose }) {
       bodyClassName={`new-trade-panel${irs ? ' new-trade-panel--irs' : ''}`}
       dismissOnOutsideClick={false}
       onClose={onClose}
+      footer={showReview ? (
+        <div className="new-trade-footer">
+          <span className="new-trade-footer__summary">
+            {valid ? submitLabel : 'Complete the required fields to submit'}
+          </span>
+          <button
+            type="submit"
+            form="new-trade-form"
+            className="panel-form__submit"
+            disabled={pending || !valid}
+          >
+            {pending ? 'Submitting…' : 'Submit trade'}
+          </button>
+        </div>
+      ) : null}
     >
       {ticketLoading ? (
         <LoadingSkeleton variant="panel" rows={8} label="Loading new trade inputs" />
-      ) : <form className="panel-form__form" onSubmit={handleSubmit} noValidate>
+      ) : <form id="new-trade-form" className="panel-form__form" onSubmit={handleSubmit} noValidate>
         <div className="panel-form__book-row">
           <div className="panel-form__field panel-form__field--wide">
             <label className="panel-form__label" htmlFor="new-trade-book">BOOK</label>
@@ -795,7 +815,7 @@ export default function NewTradePanel({ onClose }) {
           </div>
         )}
 
-        <div className="panel-form__info">
+        {showReview && <div className="panel-form__info">
           <div className="panel-form__info-row">
             <span
               className={`panel-form__info-label${
@@ -885,15 +905,7 @@ export default function NewTradePanel({ onClose }) {
               </span>
             </div>
           )}
-          <div className="panel-form__info-row">
-            <span className="panel-form__info-label">ASSET CLASS</span>
-            <span className="panel-form__info-value">
-              {selectedBook != null ? (
-                <span className="class-tag"><span className="class-tag__dot" />{assetClassLabel(selectedBook.assetClass)}</span>
-              ) : '—'}
-            </span>
-          </div>
-        </div>
+        </div>}
 
         {curvePriced && previewCurrent && preview?.error && (
           <p className="panel-form__note" role="alert">{preview.error}</p>
@@ -902,9 +914,6 @@ export default function NewTradePanel({ onClose }) {
 
         {submitError && <div className="panel-form__submit-error" role="alert">{submitError}</div>}
 
-        <button type="submit" className="panel-form__submit" disabled={pending || !valid}>
-          {pending ? 'Submitting…' : submitLabel}
-        </button>
       </form>}
     </SidePanel>
   )

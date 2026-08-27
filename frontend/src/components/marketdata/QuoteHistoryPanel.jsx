@@ -169,6 +169,9 @@ export default function QuoteHistoryPanel({ row, onClose }) {
             <span id="current-quote-title">CURRENT MARK</span>
             <strong className={`quote-history__current-price quote-history__current-price--${currentTone}`}>
               {formatUnitPrice(instrument.value, instrument.assetClass)}
+              {instrument.currency && (
+                <span className="quote-history__current-currency">{instrument.currency}</span>
+              )}
             </strong>
           </div>
           <div className="quote-history__current-moves">
@@ -197,11 +200,12 @@ export default function QuoteHistoryPanel({ row, onClose }) {
                 ? formatAsOfDate(instrument.providerTimestampMs)
                 : formatClockTime(instrument.providerTimestampMs, { millis: true })
             }
-            note={reference ? 'official fixing date' : formatAge(providerAgeMs)}
+            note={reference ? 'official fixing date' : `${formatAge(providerAgeMs)} · local time`}
           />
           <Metric
             label="Received"
             value={formatClockTime(instrument.polledAtMs, { millis: true })}
+            note="local time"
           />
           {Array.from({ length: emptyMetricCount }, (_, index) => (
             <div

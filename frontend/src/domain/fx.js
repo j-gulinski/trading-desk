@@ -1,6 +1,14 @@
 import { REPORTING_CURRENCY_BASE_OPTIONS } from '../config/marketData.js'
 import { toNum } from './values.js'
 
+function displayRate(rate) {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 6,
+    useGrouping: false,
+  }).format(rate)
+}
+
 export function fxConversionOf(rateInfo, currency, toCurrency) {
   if (currency === toCurrency) {
     return { rate: 1, identity: true, label: null, reason: null }
@@ -17,7 +25,7 @@ export function fxConversionOf(rateInfo, currency, toCurrency) {
   return {
     rate,
     identity: false,
-    label: `${rateInfo.path} ${rateInfo.rate} · ${rateInfo.provider} · as of ${rateInfo.as_of}`,
+    label: `${rateInfo.path} ${displayRate(rate)} · ${rateInfo.provider} · as of ${rateInfo.as_of}`,
     reason: null,
   }
 }
