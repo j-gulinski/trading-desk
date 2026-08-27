@@ -8,3 +8,6 @@ tmp/
 **/__pycache__/
 *.py[cod]
 .DS_Store
+.venv/
+.vscode/
+scripts/

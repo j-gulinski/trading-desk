@@ -1,0 +1,122 @@
+import math
+
+from desk_runtime.config import env_int, env_str
+
+
+def _symbol_list(name, default):
+    return tuple(
+        symbol.strip().upper()
+        for symbol in env_str(name, default).split(",")
+        if symbol.strip()
+    )
+
+SERVICE_NAME = "market-data-service"
+PORT = 8001
+
+# Cross-provider policy. Provider-published limits are converted to the safer
+# operating budgets below; these settings do not belong to one adapter.
+PROVIDER_BUDGET_USAGE_PERCENT = env_int("PROVIDER_BUDGET_USAGE_PERCENT", 90)
+PROVIDER_ACTIVE_WINDOW_HOURS = env_int("PROVIDER_ACTIVE_WINDOW_HOURS", 12)
+
+# Finnhub — US equity quotes and market status.
+FINNHUB_API_KEY = env_str("FINNHUB_API_KEY")
+FINNHUB_TIER1_POLL_SECONDS = env_int("FINNHUB_TIER1_POLL_SECONDS", 15)
+FINNHUB_TIER2_POLL_SECONDS = env_int("FINNHUB_TIER2_POLL_SECONDS", 60)
+FINNHUB_CLOSED_POLL_SECONDS = env_int("FINNHUB_CLOSED_POLL_SECONDS", 300)
+FINNHUB_PROVIDER_LIMIT_PER_MINUTE = env_int("FINNHUB_PROVIDER_LIMIT_PER_MINUTE", 60)
+FINNHUB_MARKET_STATUS_REFRESH_SECONDS = 600
+FINNHUB_PROVIDER_CLOCK_LAG_SECONDS = 60
+
+# Twelve Data — equity/FX/commodity quotes and catalog search.
+TWELVE_DATA_API_KEY = env_str("TWELVE_DATA_API_KEY")
+TWELVE_DATA_POLL_SECONDS = env_int("TWELVE_DATA_POLL_SECONDS", 900)
+TWELVE_DATA_PROVIDER_LIMIT_PER_DAY = env_int("TWELVE_DATA_PROVIDER_LIMIT_PER_DAY", 800)
+TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE = env_int(
+    "TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE", 8
+)
+
+# Alpha Vantage — US equity EOD and FX quotes.
+ALPHA_VANTAGE_API_KEY = env_str("ALPHA_VANTAGE_API_KEY")
+ALPHA_VANTAGE_PROVIDER_LIMIT_PER_DAY = env_int(
+    "ALPHA_VANTAGE_PROVIDER_LIMIT_PER_DAY", 25
+)
+ALPHA_VANTAGE_MIN_REQUEST_INTERVAL_SECONDS = env_int(
+    "ALPHA_VANTAGE_MIN_REQUEST_INTERVAL_SECONDS", 15
+)
+ALPHA_VANTAGE_FX_POLL_SECONDS = env_int("ALPHA_VANTAGE_FX_POLL_SECONDS", 12 * 3600)
+ALPHA_VANTAGE_EQUITY_STALE_SECONDS = env_int(
+    "ALPHA_VANTAGE_EQUITY_STALE_SECONDS", 5 * 24 * 3600
+)
+ALPHA_VANTAGE_FX_STALE_SECONDS = env_int(
+    "ALPHA_VANTAGE_FX_STALE_SECONDS", 26 * 3600
+)
+
+# NBP — PLN reference fixings and gold fixing.
+NBP_FIXING_SYMBOLS = _symbol_list("NBP_FIXING_SYMBOLS", "EURPLN,USDPLN,XAUPLN_G")
+NBP_GOLD_SYMBOL = "XAUPLN_G"
+NBP_WINDOW_START = (11, 45)
+NBP_WINDOW_END = (12, 20)
+
+# ECB — public reference-rate and yield-curve CSV sources.
+ECB_FIXING_SYMBOLS = _symbol_list("ECB_FIXING_SYMBOLS", "EURUSD,EURPLN")
+ECB_WINDOW_START = (15, 55)
+ECB_WINDOW_END = (16, 45)
+
+# FRED — authenticated time-series source.
+FRED_API_KEY = env_str("FRED_API_KEY")
+FRED_PROVIDER_LIMIT_PER_MINUTE = env_int("FRED_PROVIDER_LIMIT_PER_MINUTE", 120)
+
+# EIOPA — public monthly workbook source.
+EIOPA_REQUEST_BUDGET_PER_MINUTE = env_int("EIOPA_REQUEST_BUDGET_PER_MINUTE", 10)
+EIOPA_TIMEOUT_SECONDS = 60
+EIOPA_CURVE_REFETCH_SECONDS = 24 * 3600
+
+# Local storage and watchlist bounds.
+SNAPSHOT_RETENTION_DAYS = env_int("SNAPSHOT_RETENTION_DAYS", 90)
+MAX_ACTIVE_SYMBOLS = env_int("MAX_ACTIVE_SYMBOLS", 25)
+
+if not 1 <= PROVIDER_BUDGET_USAGE_PERCENT <= 100:
+    raise ValueError("PROVIDER_BUDGET_USAGE_PERCENT must be between 1 and 100")
+if not 1 <= PROVIDER_ACTIVE_WINDOW_HOURS <= 24:
+    raise ValueError("PROVIDER_ACTIVE_WINDOW_HOURS must be between 1 and 24")
+if EIOPA_REQUEST_BUDGET_PER_MINUTE < 1:
+    raise ValueError("EIOPA_REQUEST_BUDGET_PER_MINUTE must be positive")
+
+
+def _safe_budget(provider_limit):
+    if provider_limit < 1:
+        raise ValueError("provider limits must be positive")
+    return max(1, math.floor(provider_limit * PROVIDER_BUDGET_USAGE_PERCENT / 100))
+
+
+FINNHUB_BUDGET_PER_MINUTE = _safe_budget(FINNHUB_PROVIDER_LIMIT_PER_MINUTE)
+TWELVE_DATA_DAILY_BUDGET = _safe_budget(TWELVE_DATA_PROVIDER_LIMIT_PER_DAY)
+TWELVE_DATA_BUDGET_PER_MINUTE = _safe_budget(TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE)
+ALPHA_VANTAGE_DAILY_BUDGET = _safe_budget(ALPHA_VANTAGE_PROVIDER_LIMIT_PER_DAY)
+FRED_BUDGET_PER_MINUTE = _safe_budget(FRED_PROVIDER_LIMIT_PER_MINUTE)
+PROVIDER_ACTIVE_WINDOW_SECONDS = PROVIDER_ACTIVE_WINDOW_HOURS * 3600
+
+# Shared HTTP, reconciliation, freshness and failure policy.
+REQUEST_TIMEOUT_SECONDS = 10
+ACTIVE_SET_REFRESH_SECONDS = 15
+RETENTION_SWEEP_INTERVAL_SECONDS = 24 * 3600
+FRESHNESS_THRESHOLD_MULTIPLIER = 3
+RATE_LIMIT_DEFAULT_COOLDOWN_SECONDS = 60
+AUTH_FAILURE_COOLDOWN_SECONDS = 300
+TRANSIENT_ERROR_BACKOFF_SECONDS = 10
+SYMBOL_SEARCH_CACHE_SECONDS = 600
+SYMBOL_SEARCH_RESULT_LIMIT = 10
+
+# Shared OfficialFixingFeed mechanics used by the NBP and ECB adapters. These are
+# application polling choices, not provider-published request limits.
+OFFICIAL_FIXING_FEED_WINDOW_RETRY_SECONDS = 300
+OFFICIAL_FIXING_FEED_CONFIRM_SECONDS = 3600
+OFFICIAL_FIXING_FEED_UNIVERSE_REFRESH_SECONDS = 60
+OFFICIAL_FIXING_FEED_LOOP_SLEEP_SECONDS = 15
+OFFICIAL_FIXING_FEED_PUBLICATION_GRACE_SECONDS = 4 * 3600
+
+# Shared CurveFeed mechanics. Each provider package chooses which builders and
+# per-curve cadence it registers; these are only common defaults/failure retry.
+CURVE_FEED_LOOP_SLEEP_SECONDS = 15
+CURVE_REFETCH_SECONDS = env_int("CURVE_REFETCH_SECONDS", 6 * 3600)
+CURVE_RETRY_SECONDS = 900

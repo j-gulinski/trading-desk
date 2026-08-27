@@ -1,0 +1,16 @@
+[project]
+name = "pricing-service"
+version = "0.1.0"
+description = "Pricing service: valuations, risk and scenario analysis"
+requires-python = ">=3.14"
+dependencies = [
+    "bottle",
+    "SQLAlchemy",
+]
+
+[project.scripts]
+pricing-service = "pricing_service.main:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

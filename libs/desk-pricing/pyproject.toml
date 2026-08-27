@@ -1,0 +1,10 @@
+[project]
+name = "desk-pricing"
+version = "0.1.0"
+description = "Pure pricing math: curves, bond, European option, IRS, risk"
+requires-python = ">=3.14"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

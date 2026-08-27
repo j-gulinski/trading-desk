@@ -2,14 +2,21 @@
 
 ## Project Structure & Module Organization
 
-The repository is a small trading platform composed of Python services and a React frontend.
-Service code lives in `services/<service>/app/`; every service builds from the single
-`docker/service.Dockerfile` with the shared root `requirements.txt`, and boots through
-`shared/service_runtime.py`. Shared database, domain, logging, serialization and pricing
-utilities are in `shared/`. Alembic configuration and migrations live in `db/` and
-`alembic.ini`. The browser UI is in `frontend/src/`, organized into `views/`, reusable
-`components/`, `domain/` helpers, hooks and API services. HTTP workflow examples are under
-`scenarios/`.
+The repository is a small trading platform composed of Python services and a React frontend,
+organized as ten Python packages installed into one virtual environment, so imports resolve by
+installation rather than by which folder you stand in. Service code lives in
+`services/<service>/src/<service>_service/` (folder names keep their hyphens; only the inner
+package name is on the import path), each with its own `pyproject.toml` naming its dependencies
+and a console entry point named like the service. Dependency versions are pinned in
+`requirements.txt` and nowhere else — the manifests name dependencies without versions. Three libraries live under `libs/`: `desk-pricing` (pure quant math, zero
+dependencies), `desk-runtime` (config, DB engine, logging, serialization, WSGI runtime), and
+`desk-domain` (models, enums, symbols, providers, quotes, curves, term schemas). Every service
+builds from the single `docker/service.Dockerfile` (`ARG SERVICE` selects which service package
+is installed) and boots through `libs/desk-runtime/src/desk_runtime/service_runtime.py`. Alembic
+configuration and migrations live in `db/` and `alembic.ini`, built by their own
+`docker/migrations.Dockerfile` — the only image with alembic in it. The browser UI is in
+`frontend/src/`, organized into `views/`, reusable `components/`, `domain/` helpers, hooks and
+API services. HTTP workflow examples are under `scenarios/`.
 
 Documentation is indexed by `docs/README.md` and has exactly two layers. **Phase reports
 (`docs/phase-reports/`) are the detailed record**: decisions and reasoning, difficult concepts
@@ -31,12 +38,23 @@ reference sheets, README operating decisions and README data flows receive fact-
 
 ## Build, Test, and Development Commands
 
+- `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`, then `for p in libs/*/ services/*/; do .venv/bin/pip install -e "$p"; done` creates the development environment.
+- `set -a && . ./.env && . ./.env.local && set +a && .venv/bin/<service-name>` runs one service outside Docker against localhost URLs.
+- A new dependency is added in two places: the using member's `pyproject.toml` (name only) and `requirements.txt` (pinned `==` version).
 - `docker compose up --build` builds and starts Postgres, migrations, all services, and the frontend.
 - `docker compose down` stops the stack; add `-v` only when intentionally discarding local database data.
 - `docker compose run --rm db-migrations alembic upgrade head` applies pending migrations.
 - `cd frontend && npm install && npm run dev` starts the Vite frontend for UI work.
 - `cd frontend && npm run build` creates a production frontend build.
 - `cd frontend && npm run lint` runs Oxlint; `npm run deadcode` checks unused frontend code with Knip.
+
+After any Python change, the static verification routine is:
+
+- every dependency line in `requirements*.txt` carries an `==` pin.
+- `grep -rE 'from app(\.| import)|\bfrom shared\b' --include='*.py' libs services db` — must stay empty forever; the pre-restructure package shapes (`app`, `shared`) must not regrow.
+
+Full-stack verification (fresh database, migrations, health, reads, log pipeline) is the
+documented command sequence in `scripts/m0.md`.
 
 ## Phase Discovery, Ownership, and Readiness
 
@@ -90,7 +108,7 @@ phase. The roadmap is updated before implementation when discovery invalidates i
 
 ## Coding Style & Naming Conventions
 
-Use four-space indentation and `snake_case` for Python functions, variables, and modules. Keep each service's transport handlers in `app/api.py`, configuration in `app/config.py`, and service-specific business logic in focused modules. Comments — in code, config, and Dockerfiles alike — serve exactly two purposes: a crucial in-place constraint, or a short stage marker inside a multi-stage process function (a polling loop, a guard ladder, a stream consumer) — a few words naming what the next block does, so a first-time read has the map. Never explanation or rationale, and no marker on a body that is a single obvious call. Docstrings fall under the same rule: at most a one-line contract where the name and signature genuinely cannot say it (an opaque tuple return, a non-obvious side effect). All rationale lives in `docs/`: design reasoning in the phase report that introduced it, knob one-liners in `docs/configuration.md`. Database reads extract plain values (tuples, strings) inside the `session_scope()` block and never return ORM objects — commit expires managed instances, so attribute access after the block raises `DetachedInstanceError`; column queries (`session.query(Model.col, …)`) are safe, whole-entity results must be copied out. Environment variables are read only through `shared/config.py` helpers. Use two-space indentation in JavaScript/JSX, `camelCase` for functions and values, and `PascalCase` for React components. Name component files after their exported component, e.g. `TradeTable.jsx`; keep domain helpers lower camel case, e.g. `marketData.js`. Follow the existing import extensions and semicolon-free frontend style.
+Use four-space indentation and `snake_case` for Python functions, variables, and modules. Keep each service's transport handlers in its package's `api.py`, configuration in `config.py`, and service-specific business logic in focused modules. Comments — in code, config, and Dockerfiles alike — serve exactly two purposes: a crucial in-place constraint, or a short stage marker inside a multi-stage process function (a polling loop, a guard ladder, a stream consumer) — a few words naming what the next block does, so a first-time read has the map. Never explanation or rationale, and no marker on a body that is a single obvious call. Docstrings fall under the same rule: at most a one-line contract where the name and signature genuinely cannot say it (an opaque tuple return, a non-obvious side effect). All rationale lives in `docs/`: design reasoning in the phase report that introduced it, knob one-liners in `docs/configuration.md`. Database reads extract plain values (tuples, strings) inside the `session_scope()` block and never return ORM objects — commit expires managed instances, so attribute access after the block raises `DetachedInstanceError`; column queries (`session.query(Model.col, …)`) are safe, whole-entity results must be copied out. Environment variables are read only through `libs/desk-runtime/src/desk_runtime/config.py` helpers. Use two-space indentation in JavaScript/JSX, `camelCase` for functions and values, and `PascalCase` for React components. Name component files after their exported component, e.g. `TradeTable.jsx`; keep domain helpers lower camel case, e.g. `marketData.js`. Follow the existing import extensions and semicolon-free frontend style.
 
 User-facing copy names market state, available actions, and constraints that affect a user's decision. Do not narrate implementation or loading strategy in the UI (for example, "loaded only when selected", "from PostgreSQL", or "via SSE"), and do not surface developer rationale as helper copy. **Never add purpose captions or feature-explainer sentences to a panel** — prose that describes what a section is for, how the system treats its data, or what design rule it follows (owner ruling 2026-08-23; the removed example: "Central-bank fixings, one per business day — the reference for reporting-currency conversion. Not tradeable."). A panel communicates through its title, labels, values, states and provenance tags; the why belongs in `docs/`. Hints, when needed at all, are one short imperative naming the next action ("Choose a reporting currency for a combined total"), and semantic explanations may live only in hover tooltips following the existing freshness-hint pattern. Put those details in the relevant documentation. Keep status and helper text concise and actionable.
 

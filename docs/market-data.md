@@ -67,7 +67,7 @@ Wiring-time facts *(verified 2026-08-23, live)*:
 ### The normalized quote
 
 Every provider payload normalizes to one shape before anything stores or reads it
-(`shared/quotes.py`, `build_quote`):
+(`libs/desk-domain/src/desk_domain/quotes.py`, `build_quote`):
 
 - **Prices are exactly what the provider gave** — `bid`, `ask`, `last`, each nullable,
   parsed straight to `Decimal` from the wire string. A spread is never synthesized; absent
@@ -90,7 +90,7 @@ EXR are official mids.
 
 ### Freshness
 
-`shared/freshness.py`, five states per (provider, symbol):
+`libs/desk-domain/src/desk_domain/freshness.py`, five states per (provider, symbol):
 
 | State | Meaning |
 | --- | --- |
@@ -134,7 +134,7 @@ evening until the next real fixing arrives.
 
 ### The capability matrix
 
-`shared/providers.py` is the registry: providers, their group, and class-level
+`libs/desk-domain/src/desk_domain/providers.py` is the registry: providers, their group, and class-level
 capability facts. An asset class absent from a provider's map *is* the UNSUPPORTED state.
 
 | | EQUITY | FX | COMMODITY | curves |
@@ -174,7 +174,7 @@ not used as ambiguous group sort keys.
 
 ### Curves
 
-`shared/curves.py` owns the curve-to-provider assignment, currency, functional name and
+`libs/desk-domain/src/desk_domain/curves.py` owns the curve-to-provider assignment, currency, functional name and
 product-use allow-list. Provider registration must expose exactly the catalog keys assigned
 to it, and `build_curve_set` rejects a mismatched provider or currency. A `CurveSet` is
 (provider, curve_name, `curve_basis`, currency,
@@ -229,7 +229,7 @@ writes are change-only per (provider, curve, as-of): a confirmation poll only ad
 
 ### Symbols and the symbol master
 
-- Canonical form: uppercase, `^[A-Z0-9][A-Z0-9_.\-]{1,31}$` (`shared/symbols.py`). FX
+- Canonical form: uppercase, `^[A-Z0-9][A-Z0-9_.\-]{1,31}$` (`libs/desk-domain/src/desk_domain/symbols.py`). FX
   pairs are six-letter `BASEQUOTE`; per-provider notation (`EUR/USD`, from/to params) is
   each client's private concern.
 - The symbol master is the **`watchlist_items` table** — the user-curated universe
@@ -244,7 +244,7 @@ writes are change-only per (provider, curve, as-of): a confirmation poll only ad
 
 ## Feeds
 
-Each source is readable inside `app/providers/<provider>/`: `client.py` owns transport and
+Each source is readable inside `src/market_data_service/providers/<provider>/`: `client.py` owns transport and
 provider-body rules, `normalizer.py` maps quote fields when the source serves quotes,
 `curves.py` builds selected rate sets when it serves curves, and `feed.py` wires budgets and
 scheduling. Every package exports the same `ProviderRegistration`; the central registry
@@ -349,7 +349,7 @@ vendor packages: `providers/base.py` for HTTP/error handling, `official_fixing_f
 
 ## The FX resolver and the reporting currency
 
-`shared/fx.py` is the single owner of conversion. It reads the reference board rows
+`libs/desk-domain/src/desk_domain/fx.py` is the single owner of conversion. It reads the reference board rows
 (NBP/ECB, class FX) and resolves `from → to` with fixed precedence:
 
 1. **identity** — rate 1;
@@ -475,18 +475,18 @@ confirmation poll — never pointed at an older observation). Pre-binding rows r
 
 Curve-priced classes (BOND, IRS, EUROPEAN_OPTION) execute **model-priced** through the
 same gate: the ticket previews a model value via pricing `POST /price`; trade-action
-recomputes the PV itself from the stored curves (`shared/curve_registry` + the asset modules in
-`shared/pricing/`) — plus the underlying's board row for options, which passes the
+recomputes the PV itself from the stored curves (`desk_domain/curve_registry.py` + the asset modules in
+`libs/desk-pricing/src/desk_pricing/`) — plus the underlying's board row for options, which passes the
 normal freshness gate on its chosen quote provider — and compares the result against
 `client_seen_price` (IRS deviation is measured against notional; a zero model value skips
-the check). Term validation is shared (`shared/term_schemas.validate_terms`) and enforces
+the check). Term validation is shared (`desk_domain.term_schemas.validate_terms`) and enforces
 the curve guards in both services identically: settlement currency must have a wired
 curve. An IRS must select the approved risk-free curve for its settlement currency; validation
 uses that same set for discounting and projection, rejects a distinct submitted projection,
 and records the single-curve approximation. Rate terms
 (`fixed_rate`, `coupon_rate`) are entered and stored as percent (`4.5`); the same
 percent-stored / fraction-wired boundary the curves use is crossed once, inside the relevant
-`shared/pricing/<asset>.py` formula. The BOND ticket asks for currency, face amount and cashflow terms;
+`libs/desk-pricing/src/desk_pricing/<asset>.py` formula. The BOND ticket asks for currency, face amount and cashflow terms;
 after a curve is selected, an explicit helper can insert the full-schedule par coupon.
 There are no benchmark prefills. The accepted trade records each curve's name, provider
 and as-of in its terms

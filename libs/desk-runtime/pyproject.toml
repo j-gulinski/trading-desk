@@ -1,0 +1,15 @@
+[project]
+name = "desk-runtime"
+version = "0.1.0"
+description = "Service infrastructure: config, DB engine, logging, serialization, WSGI runtime"
+requires-python = ">=3.14"
+dependencies = [
+    "bottle",
+    "psycopg[binary]",
+    "SQLAlchemy",
+    "structlog",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

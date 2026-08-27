@@ -74,13 +74,13 @@ flowchart LR
 
 | Concern | Main files |
 | --- | --- |
-| Provider registry, normalized quote, freshness | `shared/providers.py`, `shared/quotes.py`, `shared/freshness.py` |
-| Active provider-symbol set, watchlist | `shared/active_set.py`, `market-data-service/app/watchlist.py` |
-| Provider interface and runtime registry | `market-data-service/app/providers/registration.py`, `providers/__init__.py`, `scheduler.py` |
-| One source end to end | `market-data-service/app/providers/<provider>/` — client, normalizer/curve builder and feed wiring |
+| Provider registry, normalized quote, freshness | `libs/desk-domain/src/desk_domain/providers.py`, `libs/desk-domain/src/desk_domain/quotes.py`, `libs/desk-domain/src/desk_domain/freshness.py` |
+| Active provider-symbol set, watchlist | `libs/desk-domain/src/desk_domain/active_set.py`, `market-data-service/src/market_data_service/watchlist.py` |
+| Provider interface and runtime registry | `market-data-service/src/market_data_service/providers/registration.py`, `providers/__init__.py`, `scheduler.py` |
+| One source end to end | `market-data-service/src/market_data_service/providers/<provider>/` — client, normalizer/curve builder and feed wiring |
 | Shared provider mechanics | `providers/base.py`, `provider_runtime.py`, `official_fixing_feed.py`, `curve_feed.py`, `poll_schedule.py`, `budget.py` |
-| Curve ownership, domain and persistence | `shared/curves.py` (provider/currency/use catalog), `shared/curve_registry.py`, `curve_store.py` |
-| FX resolver | `shared/fx.py` |
+| Curve ownership, domain and persistence | `libs/desk-domain/src/desk_domain/curves.py` (provider/currency/use catalog), `libs/desk-domain/src/desk_domain/curve_registry.py`, `curve_store.py` |
+| FX resolver | `libs/desk-domain/src/desk_domain/fx.py` |
 | Board, snapshots, history API | `quote_store.py`, `quote_service.py`, `retention.py`, `publisher.py`, `api.py` |
 | Market UI | `useMarketFeed.js`, `useQuoteHistory.js`, `useWatchlist.js`, `MarketData.jsx` |
 | Curve UI | `domain/curves.js`, `CurveSection.jsx`, `CurveChart.jsx` |
@@ -88,8 +88,8 @@ flowchart LR
 | Shared portfolio aggregation | `frontend/src/domain/portfolio.js` |
 | Ticket comparison | `domain/tradeActions.js`, `NewTradePanel.jsx`, `ProviderQuoteOption.jsx`, `TermFields.jsx` |
 | Server execution | `trade_validation.py`, `trade_handlers.py`, `trade_processor.py`, `market_state.py`, `repository.py` |
-| Asset pricing interface | `pricing-service/app/pricers/contract.py`, `pricers/registry.py`, `pricers/<asset>.py`, `shared/pricing/<asset>.py` |
-| Provider-bound valuation | `pricing-service/app/cache.py`, `repository.py`, `market_data_client.py`, `valuation_engine.py` |
+| Asset pricing interface | `pricing-service/src/pricing_service/pricers/contract.py`, `pricers/registry.py`, `pricers/<asset>.py`, `libs/desk-pricing/src/desk_pricing/<asset>.py` |
+| Provider-bound valuation | `pricing-service/src/pricing_service/cache.py`, `repository.py`, `market_data_client.py`, `valuation_engine.py` |
 
 ## Who owns what
 
@@ -138,18 +138,18 @@ before any service starts.
 
 ## Shared runtime
 
-- Every service boots through `shared/service_runtime.py`:
+- Every service boots through `libs/desk-runtime/src/desk_runtime/service_runtime.py`:
   `run_service(name, app, port, startup=…, background=…)` — startup hooks run to completion
   before background daemon threads start and the threaded server begins serving on the
   declared port. A default `/health` is installed unless the service defines a richer one.
-- `os.environ` is read only in `shared/config.py` (`env_str` / `env_int` / `env_float` /
-  `env_required`); each service's `app/config.py` holds its `SERVICE_NAME`, declared port, and
+- `os.environ` is read only in `libs/desk-runtime/src/desk_runtime/config.py` (`env_str` / `env_int` / `env_float` /
+  `env_required`); each service package's `config.py` holds its `SERVICE_NAME`, declared port, and
   service-local knobs. Rationale for every knob: [configuration.md](configuration.md).
 - One image per service, all built from the single `docker/service.Dockerfile` template
-  (python:3.14-slim, multi-stage, one shared dependency layer from the root
-  `requirements.txt`) — the recipe is shared, the images, containers, and processes are not.
-  The `db-migrations` compose entry reuses the market-data image for its one-shot
-  `alembic upgrade head` job.
+  (python:3.14-slim; `pip install -r requirements.txt` then the three libraries and the one
+  selected service package) — the recipe is shared, the images, containers, and processes are
+  not. `db-migrations` builds from its own `docker/migrations.Dockerfile`, the only image that
+  installs alembic, solely for its one-shot `alembic upgrade head` job.
 - Intents carry a client-minted `client_request_id` (`manual-open-…`, `manual-move-…`); it is
   the idempotency key (unique constraint) and the `correlation_id` that joins audit rows and
   log lines into one correlated trace. Browser opens also carry `source=TRADING_TICKET`,

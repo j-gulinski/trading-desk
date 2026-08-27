@@ -3,8 +3,8 @@
 One rule: a tunable
 exists only as an environment variable listed in `.env.example`, and its one-line rationale lives here —
 `.env.example` stays scannable, this table carries the why. `os.environ` is read in exactly one
-place, `shared/config.py` (`env_str` / `env_int` / `env_float` / `env_required`); every other
-module imports typed values from its own `app/config.py` or from `shared.config`. A missing
+place, `libs/desk-runtime/src/desk_runtime/config.py` (`env_str` / `env_int` / `env_float` / `env_required`); every other
+module imports typed values from its own service `config.py` or from `desk_runtime.config`. A missing
 required variable fails at boot with its name, not with an anonymous type error.
 
 Provider budget knobs (poll cadences, daily ledgers, tolerances) arrive with their phases and
@@ -15,7 +15,7 @@ join this table then.
 | Variable | Default | Read by | Why |
 | --- | --- | --- | --- |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | — (required) | compose `postgres` block | Container bootstrap role and database; must match the credentials inside `DATABASE_URL`. |
-| `DATABASE_URL` | — (required, named boot failure) | every service via `shared/db.py` | The single SQLAlchemy DSN; host `postgres` is the compose network name. |
+| `DATABASE_URL` | — (required, named boot failure) | every service via `libs/desk-runtime/src/desk_runtime/db.py` | The single SQLAlchemy DSN; host `postgres` is the compose network name. |
 | `DATABASE_MIGRATION_URL` | — | `db/env.py` (alembic) | Same database reached from the host for hand-run alembic; in compose the migrate container gets `DATABASE_URL` substituted. |
 
 ## Service wiring
@@ -61,7 +61,7 @@ NBP, ECB and EIOPA require no key.
 
 Scheduler mechanics that are not tuning surface (active-set refresh 15 s, Finnhub market-status
 check 10 min, HTTP timeout 10 s, threshold multiplier 3, cooldowns, symbol-search cache 10 min,
-history-endpoint bounds) are plain constants in the service's `app/config.py`. The file groups
+history-endpoint bounds) are plain constants in the service's `config.py`. The file groups
 provider-owned settings under `FINNHUB_*`, `TWELVE_DATA_*`, `NBP_*`, `ECB_*`, `FRED_*` and
 `EIOPA_*`. Reused application engines have explicit `OFFICIAL_FIXING_FEED_*` and `CURVE_FEED_*`
 prefixes. Thus the NBP/ECB publication windows are source-specific, while the common in-window
@@ -69,8 +69,8 @@ prefixes. Thus the NBP/ECB publication windows are source-specific, while the co
 policy shared by both fixing feeds—not provider-published limits. Curves are scheduled rather
 than windowed (`CURVE_REFETCH_SECONDS`, `CURVE_RETRY_SECONDS`,
 `EIOPA_CURVE_REFETCH_SECONDS`). Source facts change only when
-a probe shows the source itself changed. `tzdata` is in
-`requirements.txt` solely so `zoneinfo` can evaluate those two source timezones inside the
+a probe shows the source itself changed. `tzdata` is a
+declared dependency of `market-data-service` solely so `zoneinfo` can evaluate those two source timezones inside the
 `python:slim` images, which ship no system tz database.
 
 ## Reference data — NBP & ECB

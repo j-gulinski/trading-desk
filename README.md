@@ -39,7 +39,7 @@ that introduced it; knob values are in
 | Execution gate | One validation function runs twice: synchronously on `POST /trade-actions` so the ticket hears the reason (**422 with the sentence in the body**), and again in the worker before the row is written, because the market moves in between. Every failure writes `ACTION_REJECTED` with the same reason. | `202 accepted` followed by a silent rejection is not feedback; re-validating at write time is what makes the accept-time check safe to trust. |
 | Freshness at the ticket | LIVE and internally CLOSED rows (displayed EOD) with a usable price can be selected. MISSING, UNSUPPORTED and STALE rows cannot open a trade. Manual close keeps the existing internal stale-exit safeguard so a position is not trapped by a quiet feed. | The booking UI does not offer a stale-price override; current quote quality is part of provider eligibility. |
 | Trade provenance | Every trade written by the gate records the executed price, the price the trader saw, the provider, the provider's quote timestamp, and an optional snapshot FK when that exact observation created a change row. Close records the same timestamp/optional snapshot provenance. `TRADE_CREATED` carries the same pricing facts. | These fields reconstruct why a fill had that number without pointing unchanged polls at an older raw response. |
-| Curve catalog | `shared/curves.py` is the single catalog for six curve keys, their owning provider, currency, desk-facing family and product-use allow-list. Startup requires each provider feed to wire exactly its assigned keys, and curve construction rejects a wrong provider or currency. Provider packages retain only source translations such as ECB dataset keys, FRED series and EIOPA workbook countries. `curve_basis` states how each set was derived; points keep the published percent rate with per-point `source_series` + `source_as_of`, and NULL series marks a publisher-classified extrapolated point. | One domain catalog answers which provider owns a curve, while vendor codes remain adapter details and cannot silently redefine the product. |
+| Curve catalog | `libs/desk-domain/src/desk_domain/curves.py` is the single catalog for six curve keys, their owning provider, currency, desk-facing family and product-use allow-list. Startup requires each provider feed to wire exactly its assigned keys, and curve construction rejects a wrong provider or currency. Provider packages retain only source translations such as ECB dataset keys, FRED series and EIOPA workbook countries. `curve_basis` states how each set was derived; points keep the published percent rate with per-point `source_series` + `source_as_of`, and NULL series marks a publisher-classified extrapolated point. | One domain catalog answers which provider owns a curve, while vendor codes remain adapter details and cannot silently redefine the product. |
 | Curve-priced execution | BOND, IRS and EUROPEAN_OPTION open through the same server-priced gate as spot: the ticket previews a model value (pricing `POST /price`), the server recomputes the PV from the stored curves (and the underlying's board row for options), compares it against `client_seen_price` (IRS deviation measured against notional), and freezes each chosen curve's name, provider and as-of into the trade terms. IRS exposes one approved same-currency risk-free curve and uses it for both discounting and implied floating payments; government-bond curves remain bond-only. The trade records `SINGLE_CURVE_APPROXIMATION`, while the numerical pricing interface still accepts a separate projection curve for a future real index source. Close recomputes the same model value from current stored curves. | A model-priced fill is auditable only if the server owns the model inputs; one honest simplified IRS contract is better than a selectable pseudo-curve that implies dealer-quality projection. |
 | Request budget | A shared configurable 90% ceiling derives Finnhub's 54/60 req/min and Twelve Data's 7/8 credits/min plus 720/800 credits/day. Alpha Vantage uses a persisted 22/25-call daily ledger and a provider-wide 15-second minimum spacing. | One safety rule covers high-rate sources; the persisted Alpha ledger survives restarts and prevents manual refresh from bypassing the daily cap. |
 | Budget exhaustion | A full rolling 60-second budget ends the polling round; due symbols retry when enough safe capacity expires. No state change, no audit. | Client-side throttling is normal operation, distinct from provider failure; a strict window cannot burst above a vendor's minute cap. |
@@ -59,7 +59,7 @@ that introduced it; knob values are in
 | Official reference data | NBP (EUR/PLN, USD/PLN, gold per 1 g) and ECB (EUR/USD, EUR/PLN) fixings join the board as a fourth origin, `reference` — system-owned, beside watched/held/benchmark. The universe is the configured defaults plus settlement currencies still needed by active or closed reportable trades. Watchlist, search and `/instruments` offer watchlisted quote instruments only; a forged reference-provider intent is refused with the reason. | Reference data powers current and realized-PnL conversion, so removing a watchlist row or closing the last position must not silently break reporting — and a fixing is not a fillable price. |
 | Source scheduling | NBP and ECB reference fixings use publication windows (NBP ~11:45–12:20 Warsaw; ECB EXR ~15:55–16:45 Frankfurt): 5-minute retries until a new as-of, then hourly confirmation. Curve builders are scheduled separately: six-hour default and EIOPA daily, with a 15-minute failure retry. FRED/EIOPA builders reserve worst-case minute tokens before starting; keyless NBP/ECB use calls-today counters without invented provider limits. | A fixing's calendar and a lagged curve release are different clocks; each is polled with the smallest defensible mechanism. |
 | Reference freshness | A fixing's stale threshold is computed from the publication calendar: time to the next expected publication plus a 4-hour grace. The UI renders the as-of date, not a seconds counter, and labels an in-date fixing CURRENT. | A Friday fixing must read current through the weekend; STALE has to mean a genuinely missed publication (source holidays excepted — documented limitation). |
-| Currency conversion | One resolver (`shared/fx.py`) with fixed precedence — identity, direct official rate or its inverse, one cross via EUR (ECB), cross via PLN (NBP) — and a path never mixes sources. Served as `GET /fx/rates?to=`; the browser multiplies for display. Valuations, Books and Business Overview show per-currency subtotals; converted totals and per-book figures appear only after an explicit reporting-currency choice (remembered per browser), labeled with rate, path, provider and as-of. PnL is never summed across currencies: a single-currency book shows its own amount, a multi-currency book shows the converted one or `MIXED` with the reason. Nothing converted is persisted. | Ad-hoc conversion at call sites drifts and silently mixes sources; positions keep settlement currency and only portfolio reporting converts (the review's rule). |
+| Currency conversion | One resolver (`libs/desk-domain/src/desk_domain/fx.py`) with fixed precedence — identity, direct official rate or its inverse, one cross via EUR (ECB), cross via PLN (NBP) — and a path never mixes sources. Served as `GET /fx/rates?to=`; the browser multiplies for display. Valuations, Books and Business Overview show per-currency subtotals; converted totals and per-book figures appear only after an explicit reporting-currency choice (remembered per browser), labeled with rate, path, provider and as-of. PnL is never summed across currencies: a single-currency book shows its own amount, a multi-currency book shows the converted one or `MIXED` with the reason. Nothing converted is persisted. | Ad-hoc conversion at call sites drifts and silently mixes sources; positions keep settlement currency and only portfolio reporting converts (the review's rule). |
 | Price units | Every rendered pair price names its unit ("4.3122 PLN per EUR"; gold "PLN per 1 g of gold"); search results name their quote currency. | A bare 4.31 next to a bare 0.86 invites misreading — the demo's TWD confusion was exactly this. |
 
 ## Running
@@ -87,6 +87,44 @@ The browser talks only to the Vite dev server; every `/api/<service>/…` call i
 matching container (`frontend/vite.config.js`). Every configuration knob is listed in
 `.env.example`; each one's rationale is in [docs/configuration.md](docs/configuration.md).
 
+To run a single service outside Docker, create the virtual environment once:
+
+```
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+for p in libs/*/ services/*/; do .venv/bin/pip install -e "$p"; done
+```
+
+then start any service by its own name (`.env.local` overrides the compose-internal hostnames
+with localhost):
+
+```
+set -a && . ./.env && . ./.env.local && set +a
+.venv/bin/pricing-service
+```
+
+## Repository layout
+
+Ten Python packages — three libraries and the six services, plus the migrations — each with
+its own `pyproject.toml`, all installed into one virtual environment. Imports resolve by
+installation, never by which folder you happen to stand in. Dependency versions are pinned in one place,
+`requirements.txt`.
+
+```
+requirements.txt            # every dependency, pinned — the one place versions are set
+alembic.ini                 # migration config; one shared DB ⇒ one history
+db/                         # desk-migrations member: alembic env.py + versions/
+libs/
+  desk-pricing/             # pure quant math — zero dependencies
+  desk-runtime/             # config, DB engine, logging, serialization, WSGI runtime
+  desk-domain/              # models, enums, symbols, providers, quotes, curves, term schemas
+services/
+  <name>-service/           # one member per service: src/<name>_service/ + pyproject.toml
+                            # with a console entry point named like the service
+frontend/                   # React/Vite UI (not a Python package)
+docker/service.Dockerfile   # one shared Dockerfile; ARG SERVICE selects the member
+```
+
 ## Services
 
 | Service | Port | Owns |
@@ -99,8 +137,9 @@ matching container (`frontend/vite.config.js`). Every configuration knob is list
 | trade-action-service | 8008 | the only writer of trades; intent queue |
 
 Each service builds its own image from the shared `docker/service.Dockerfile` template
-(python:3.14-slim, multi-stage, one dependency layer from the root `requirements.txt`) and
-boots through `shared/service_runtime.py`.
+(python:3.14-slim; `pip install -r requirements.txt` for the pinned dependencies, then the
+three libraries and that one service package) and boots through its console entry point into
+`libs/desk-runtime/src/desk_runtime/service_runtime.py`.
 
 ## Data flows
 

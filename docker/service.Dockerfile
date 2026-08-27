@@ -1,15 +1,14 @@
-FROM python:3.14-slim AS deps
-COPY requirements.txt /tmp/requirements.txt
-RUN python -m venv /opt/venv \
- && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
-
 FROM python:3.14-slim
-ARG SERVICE_DIR
-ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
-COPY --from=deps /opt/venv /opt/venv
-COPY alembic.ini ./
-COPY shared/ shared/
-COPY db/ db/
-COPY ${SERVICE_DIR}/ ./
-CMD ["python", "-m", "app.main"]
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+ARG SERVICE
+COPY libs/ libs/
+COPY services/${SERVICE}/ services/${SERVICE}/
+RUN pip install --no-cache-dir --no-deps \
+      libs/desk-pricing libs/desk-runtime libs/desk-domain services/${SERVICE}
+
+ENV SERVICE=${SERVICE}
+CMD ["sh", "-c", "exec \"$SERVICE\""]

@@ -1,6 +1,10 @@
-bottle
-SQLAlchemy
-psycopg[binary]
-structlog
-alembic
-tzdata
+alembic==1.19.1
+bottle==0.13.4
+greenlet==3.5.5
+Mako==1.4.1
+MarkupSafe==3.0.3
+psycopg[binary]==3.3.4
+SQLAlchemy==2.0.52
+structlog==26.1.0
+typing_extensions==4.16.0
+tzdata==2026.3

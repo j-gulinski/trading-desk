@@ -6,7 +6,7 @@ x-logging: &default-logging
 
 services:
   postgres:
-    image: postgres:18
+    image: postgres:18.6
     container_name: postgres
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
@@ -26,9 +26,7 @@ services:
   db-migrations:
     build:
       context: .
-      dockerfile: docker/service.Dockerfile
-      args:
-        SERVICE_DIR: services/market-data-service
+      dockerfile: docker/migrations.Dockerfile
     container_name: db-migrations
     command: ["alembic", "upgrade", "head"]
     environment:
@@ -44,7 +42,7 @@ services:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
-        SERVICE_DIR: services/market-data-service
+        SERVICE: market-data-service
     container_name: market-data-service
     env_file: .env
     volumes:
@@ -62,7 +60,7 @@ services:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
-        SERVICE_DIR: services/pricing-service
+        SERVICE: pricing-service
     container_name: pricing-service
     env_file: .env
     volumes:
@@ -82,7 +80,7 @@ services:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
-        SERVICE_DIR: services/monitoring-service
+        SERVICE: monitoring-service
     container_name: monitoring-service
     env_file: .env
     volumes:
@@ -100,7 +98,7 @@ services:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
-        SERVICE_DIR: services/books-service
+        SERVICE: books-service
     container_name: books-service
     env_file: .env
     volumes:
@@ -118,7 +116,7 @@ services:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
-        SERVICE_DIR: services/trade-action-service
+        SERVICE: trade-action-service
     container_name: trade-action-service
     env_file: .env
     volumes:
@@ -136,7 +134,7 @@ services:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
-        SERVICE_DIR: services/blotter-service
+        SERVICE: blotter-service
     container_name: blotter-service
     env_file: .env
     volumes:

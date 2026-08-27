@@ -1,5 +1,8 @@
 .env
+.venv/
+scripts/*
 __pycache__/
+*.egg-info/
 *.py[cod]
 /tmp/
 *.claude
@@ -20,10 +23,12 @@ node_modules
 dist
 dist-ssr
 *.local
+!.env.local
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
 .idea
 .DS_Store
 *.suo

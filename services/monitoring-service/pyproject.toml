@@ -1,0 +1,16 @@
+[project]
+name = "monitoring-service"
+version = "0.1.0"
+description = "Monitoring service: health polling and log collection"
+requires-python = ">=3.14"
+dependencies = [
+    "bottle",
+    "SQLAlchemy",
+]
+
+[project.scripts]
+monitoring-service = "monitoring_service.main:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,17 @@
+[project]
+name = "market-data-service"
+version = "0.1.0"
+description = "Market-data service: provider polling, quotes, curves and fixings"
+requires-python = ">=3.14"
+dependencies = [
+    "bottle",
+    "SQLAlchemy",
+    "tzdata",
+]
+
+[project.scripts]
+market-data-service = "market_data_service.main:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

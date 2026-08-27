@@ -41,7 +41,7 @@ function groupedRowsOf(rows) {
 }
 
 function rowClassName(row, selectedId, selectedSymbol, hoveredSymbol, group) {
-  const muted = row.state === 'STALE' || row.state === 'MISSING'
+  const muted = row.state === 'EOD' || row.state === 'STALE' || row.state === 'MISSING'
   return [
     'market-provider-row',
     group?.first ? 'market-provider-row--first' : '',

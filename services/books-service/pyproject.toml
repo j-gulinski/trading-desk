@@ -1,0 +1,15 @@
+[project]
+name = "books-service"
+version = "0.1.0"
+description = "Books service: books and positions over blotter trades"
+requires-python = ">=3.14"
+dependencies = [
+    "bottle",
+]
+
+[project.scripts]
+books-service = "books_service.main:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

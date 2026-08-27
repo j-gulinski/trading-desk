@@ -126,7 +126,8 @@ export default function QuoteHistoryPanel({ row, onClose }) {
   const symbol = formatMarketSymbol(instrument)
   const currentTone = directionOf(tickChange.delta)
   const reference = instrument.grade === 'REFERENCE'
-  const changePeriod = state === 'CLOSED' || instrument.marketOpen === false
+  const eod = instrument.grade === 'EOD'
+  const changePeriod = eod || state === 'CLOSED' || instrument.marketOpen === false
     ? 'LAST SESSION'
     : 'TODAY'
   const unit = unitLabelOf(instrument)
@@ -176,7 +177,11 @@ export default function QuoteHistoryPanel({ row, onClose }) {
           </div>
           <div className="quote-history__current-moves">
             <span>LAST TICK</span>
-            <Change instrument={instrument} {...tickChange} empty="waiting for next tick" />
+            <Change
+              instrument={instrument}
+              {...tickChange}
+              empty={eod ? 'not available for EOD' : 'waiting for next tick'}
+            />
             <span>{changePeriod}</span>
             <Change instrument={instrument} {...todayChange} empty="no previous close" />
           </div>

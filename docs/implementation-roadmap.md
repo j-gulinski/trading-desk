@@ -147,7 +147,7 @@ weekend staleness reads as expected, not broken.
 **D4 (revised) — Dynamic active set replaces the fixed catalog.** The polled universe is
 **watchlist ∪ open-trade symbols ∪ benchmark**, capped by `MAX_ACTIVE_SYMBOLS` (decided: 25 to
 start; adding beyond the cap blocks with an explanation) — the cap *is* the honest rate-limit
-contract, surfaced in the UI. `shared/symbols.py` keeps
+contract, surfaced in the UI. `libs/desk-domain/src/desk_domain/symbols.py` keeps
 per-provider symbol conventions plus a **capability matrix** (which providers quote which
 symbol/class — computed once at watchlist-add, cached). Discovery = a search box backed by the
 providers' free search endpoints, provider-tagged and cached. `INSTRUMENT_CATALOG` consumers
@@ -263,7 +263,7 @@ consistency beats a library for one chart. *Rejected:* adding recharts/d3 for a 
 **D16 (decided) — Naming & fork mechanics** as §1: bare-clone push, archive + pointer; the new
 repository is **`trading-desk`**.
 
-**D23 (new) — Currency conversion has one owner.** A single FX resolver (`shared/fx.py`):
+**D23 (new) — Currency conversion has one owner.** A single FX resolver (`libs/desk-domain/src/desk_domain/fx.py`):
 `convert(amount, from_ccy, to_ccy)` returns the converted amount **with full provenance** —
 rate, path, provider, as-of. Precedence: identity → direct official rate or its inverse →
 single cross via EUR (ECB EXR quotes ~30 currencies against EUR, so one hop covers nearly
@@ -320,7 +320,7 @@ pairs join the board with a `reference` origin flag (alongside watched/held/benc
 never the tradeable universe: `/instruments` derives from watched symbols only (held-only
 symbols remain pollable for existing positions), and
 the ticket never offers a REFERENCE-grade row. Corollary pinned in code: watchlist choices
-and symbol search offer **Group A only** (`shared/providers.QUOTE_PROVIDERS`, not "all
+and symbol search offer **Group A only** (`desk_domain.providers.QUOTE_PROVIDERS`, not "all
 wired feeds") — otherwise `POST /watchlist {providers: ["NBP"]}` becomes legal for FX the
 moment NBP registers as a wired feed. *Rejected:* reference pairs as watchlist items —
 user-owned scope would mix with system-owned reference data, and removing one would
@@ -400,7 +400,7 @@ does not mean zero product or teaching complexity.
 ### market-data-service layout
 
 ```
-app/
+src/market_data_service/
   api.py           # /providers, /providers/<p>/health, /market-data/{snapshot,quotes,stream,refresh},
                    # /curves(/…,/refresh), /symbols/search — plus SSE
   providers/registration.py      # one runtime capability contract
@@ -531,7 +531,7 @@ by extraction is in scope, not just deletion.
   modules, unused exports, orphaned SCSS), repo hygiene (`tmp/` and `logs/` untracked,
   `.dockerignore` added).
 - **Extract what every service repeats**: a shared service bootstrap
-  (`shared/service_runtime.py` — threaded WSGI boot, IPv6-ready server class, health route,
+  (`libs/desk-runtime/src/desk_runtime/service_runtime.py` — threaded WSGI boot, IPv6-ready server class, health route,
   logging setup) so eight `main.py` files become declarations instead of copies; config access
   unified through one module. (This also pre-pays Phase 8.1's portability work.)
 - **Slim images**: `python:slim` multi-stage, 1.69 GB → ~200 MB — faster local builds now,
@@ -570,7 +570,7 @@ its executable review contract before another provider is added.
 
 **Phase 3a — core multi-provider workflow *(complete in code)*:**
 1. **CLOSED freshness state** *(ruling; refined 2026-08-19: a first-class state, not a
-   display remap)*: fifth state in `shared/freshness.py`, so `/quotes` and the UI classify
+   display remap)*: fifth state in `libs/desk-domain/src/desk_domain/freshness.py`, so `/quotes` and the UI classify
    identically and rows stay self-classifying (ticks and `/snapshot` rows gain the
    market-open flag). Classification: market open → LIVE/STALE by `provider_timestamp` age
    vs 3× open cadence (unchanged); market closed → **CLOSED** while confirmation polls keep
@@ -691,7 +691,7 @@ fixing stays current through the weekend and STALE means a genuinely missed publ
 `market_open` stays NULL; the UI renders REFERENCE age as "as of 2026-08-22", not a
 seconds counter.
 
-**T4.3 Resolver + surface *(~0.5 d + 0.5 d)*.** `shared/fx.py` per D23 (identity → direct
+**T4.3 Resolver + surface *(~0.5 d + 0.5 d)*.** `libs/desk-domain/src/desk_domain/fx.py` per D23 (identity → direct
 or inverse official rate → one cross via EUR → cross via PLN; a path never mixes sources;
 `Decimal`; "no official path" is an honest value), served as `GET /fx/rates?to=<CCY>`; the
 browser converts for display (D28). UI: an **Official rates section** beside the benchmark
