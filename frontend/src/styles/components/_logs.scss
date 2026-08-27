@@ -95,6 +95,22 @@
   color: var(--warn);
   border-color: var(--warn);
 }
+.logs__clear {
+  min-height: 26px;
+  margin-left: auto;
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--accent-strong);
+    text-decoration: underline;
+  }
+}
 
 .overview__logs-link {
   font-size: 11px;

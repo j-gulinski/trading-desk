@@ -46,8 +46,9 @@ export default function BookRiskCard({ book }) {
         (capital ? ` · assumes ${capital} capital base` : '')
       : undefined
   const rSquared = ready && Number.isFinite(book.rSquared) ? ` · R² ${book.rSquared.toFixed(2)}` : ''
+  const lowFit = ready && Number.isFinite(book.rSquared) && book.rSquared < 0.05
   const riskNote = ready
-    ? `${book.riskObservations}/${book.riskWindow} returns${rSquared}`
+    ? `${book.riskObservations}/${book.riskWindow} returns${rSquared}${lowFit ? ' · low fit' : ''}`
     : book.riskStatus === 'ZERO_BENCHMARK_VARIANCE'
       ? 'benchmark variance zero'
       : `${book.riskObservations ?? 0}/${book.riskMinimumObservations ?? 20} returns`

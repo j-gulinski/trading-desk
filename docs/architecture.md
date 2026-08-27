@@ -95,7 +95,7 @@ flowchart LR
 
 | Service | Port | Owns | Publishes |
 | --- | --- | --- | --- |
-| market-data | 8001 | provider quotes and curves, provider polling and budgets | `GET /snapshot`, `GET /quotes` (+ `/<provider>/<symbol>/history`), `GET /curves` (+ `/<provider>`, `POST /curves/refresh`), `GET /providers` (+ `/<p>/health`), `POST /refresh`, SSE `/stream` |
+| market-data | 8001 | provider quotes and curves, provider polling and budgets | `GET /snapshot`, `GET /quotes` (+ `/<provider>/<symbol>/history`), `GET /curves` (+ `/<provider>`, `/<provider>/<curve>/<as-of>`, `POST /curves/refresh`), `GET /providers` (+ `/<p>/health`), `POST /refresh`, SSE `/stream` |
 | pricing | 8002 | valuations, book alpha/beta, scenario analysis | `GET /valuations`, `GET /book-risk`, SSE `/valuation-stream`, `POST /price`, `POST /scenario` |
 | monitoring | 8003 | health polling, audit queries, log collection | `GET /status`, `GET /audits`, `GET /logs`, SSE `/logs/stream` |
 | books | 8004 | book metadata and lifecycle | `GET/POST/PUT/DELETE /books` |

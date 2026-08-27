@@ -73,6 +73,15 @@ export default function Logs() {
 
   const visible = filterLogLines(lines, { service, minLevel, provider, scope, query })
   const rendered = visible.slice(0, LOG_RENDER_LIMIT)
+  const filtered = service != null || minLevel != null || provider != null || scope != null || query !== ''
+
+  function clearFilters() {
+    setService(null)
+    setMinLevel(null)
+    setProvider(null)
+    setScope(null)
+    setQuery('')
+  }
 
   return (
     <section className="page">
@@ -125,6 +134,11 @@ export default function Logs() {
             onChange={setMinLevel}
           />
         </div>
+        {filtered && (
+          <button type="button" className="logs__clear" onClick={clearFilters}>
+            Clear filters
+          </button>
+        )}
       </div>
 
       <Panel

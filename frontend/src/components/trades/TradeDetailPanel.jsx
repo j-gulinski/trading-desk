@@ -7,7 +7,7 @@ import PanelTabs from '../panel/PanelTabs.jsx'
 import ValuationHistoryTable from './ValuationHistoryTable.jsx'
 import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
 import { CURVE_ROLE_HINTS } from '../../config/marketData.js'
-import { curveTitle } from '../../domain/curves.js'
+import { curveMarketAt, curveTitle } from '../../domain/curves.js'
 import { providerLabel } from '../../config/providers.js'
 import {
   directionOf,
@@ -25,7 +25,14 @@ import {
   tradeSize,
   tradeSizeLabel,
 } from '../../domain/trades.js'
-import { priceUnitLabelOf, quantityUnitLabelOf } from '../../domain/marketFormat.js'
+import {
+  formatDelta,
+  formatPercentDelta,
+  priceUnitLabelOf,
+  quantityUnitLabelOf,
+} from '../../domain/marketFormat.js'
+import { instrumentLabelOf } from '../../domain/contracts.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
 
 const CURVE_TERMS = ['discount_curve', 'projection_curve']
 const HIDDEN_TERMS = new Set([
@@ -235,6 +242,118 @@ function Metric({ label, value, tone = null, note }) {
   )
 }
 
+const PRICE_DRIVER_LABELS = {
+  BOND: 'Bond price move',
+  COMMODITY: 'Spot price move',
+  EQUITY: 'Share price move',
+  EUROPEAN_OPTION: 'Premium move',
+  FX: 'FX rate move',
+  IRS: 'Model NPV move',
+}
+
+function formatRate(rate) {
+  return Number.isFinite(rate) ? `${formatAmount(rate, 3)}%` : '—'
+}
+
+function formatBasisPoints(value) {
+  if (!Number.isFinite(value)) return '—'
+  const rounded = Number(value.toFixed(1))
+  if (rounded === 0) return '0.0 bp'
+  return `${rounded > 0 ? '+' : '−'}${formatAmount(Math.abs(rounded), 1)} bp`
+}
+
+function AttributionCell({ value, note, tone = null }) {
+  return (
+    <span className="trade-detail__attribution-cell">
+      <strong className={tone ? `delta--${tone}` : undefined}>{value}</strong>
+      {note && <small>{note}</small>}
+    </span>
+  )
+}
+
+function MoveAttribution({ trade, row, entryCurve, currentCurve }) {
+  const valuation = row.valuation
+  const entryLevel = tradePriceForDisplay(trade, trade.entryPrice)
+  const currentRaw = valuation?.price ?? (row.lifecycle === 'CLOSED' ? trade.closePrice : null)
+  const currentLevel = tradePriceForDisplay(trade, currentRaw)
+  const delta = Number.isFinite(entryLevel) && Number.isFinite(currentLevel)
+    ? currentLevel - entryLevel
+    : null
+  const percent = Number.isFinite(delta) && Number.isFinite(entryLevel) && entryLevel !== 0
+    ? delta / Math.abs(entryLevel) * 100
+    : null
+  const unit = priceUnitLabelOf(trade)
+  const move = formatDelta(trade, delta)
+  const moveText = move === '—' || !unit ? move : `${move} ${unit}`
+  const percentText = formatPercentDelta(percent)
+  const currency = valuation?.currency ?? trade.currency
+  const currentLabel = row.lifecycle === 'CLOSED'
+    ? 'Close level'
+    : 'Current'
+  const maturity = trade.terms?.maturity_years
+  const entryCurveMarket = trade.assetClass === 'BOND'
+    ? curveMarketAt(entryCurve, maturity)
+    : null
+  const currentCurveMarket = trade.assetClass === 'BOND'
+    ? curveMarketAt(currentCurve, maturity)
+    : null
+  const curveDeltaBps = Number.isFinite(entryCurveMarket?.rate) && Number.isFinite(currentCurveMarket?.rate)
+    ? (currentCurveMarket.rate - entryCurveMarket.rate) * 100
+    : null
+
+  return (
+    <section className="trade-detail__section" aria-labelledby="move-attribution-title">
+      <div className="trade-detail__section-head">
+        <h3 id="move-attribution-title">Move attribution</h3>
+        <span>since entry</span>
+      </div>
+      <div className="trade-detail__attribution" role="table" aria-label="Move attribution inputs">
+        <div className="trade-detail__attribution-head" role="row">
+          <span role="columnheader">Driver</span>
+          <span role="columnheader">Entry</span>
+          <span role="columnheader">{currentLabel}</span>
+          <span role="columnheader">Change</span>
+        </div>
+        {trade.assetClass === 'BOND' && (
+          <div className="trade-detail__attribution-row" role="row">
+            <span role="rowheader" title="The pricing model discounts every bond cash flow on this curve; the maturity rate summarizes the curve shift.">
+              Curve rate at {formatNumber(maturity)}Y
+            </span>
+            <AttributionCell
+              value={formatRate(entryCurveMarket?.rate)}
+              note={entryCurve?.asOfDate ?? trade.terms?.discount_curve_as_of}
+            />
+            <AttributionCell
+              value={formatRate(currentCurveMarket?.rate)}
+              note={currentCurve?.asOfDate}
+            />
+            <AttributionCell
+              value={formatBasisPoints(curveDeltaBps)}
+              tone={directionOf(curveDeltaBps)}
+            />
+          </div>
+        )}
+        <div className="trade-detail__attribution-row" role="row">
+          <span role="rowheader">{PRICE_DRIVER_LABELS[trade.assetClass] ?? 'Market move'}</span>
+          <AttributionCell value={tradeValueText(trade, trade.entryPrice)} />
+          <AttributionCell value={tradeValueText(trade, currentRaw)} />
+          <AttributionCell
+            value={moveText}
+            note={percentText}
+            tone={directionOf(delta)}
+          />
+        </div>
+        <div className="trade-detail__attribution-pnl">
+          <span>{row.lifecycle === 'CLOSED' ? 'Realized PnL' : 'Unrealized PnL'}</span>
+          <strong className={Number.isFinite(row.pnl) ? `delta--${directionOf(row.pnl)}` : undefined}>
+            {formatSignedAmount(row.pnl)} {currency ?? ''}
+          </strong>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export default function TradeDetailPanel({
   row,
   detail,
@@ -249,6 +368,8 @@ export default function TradeDetailPanel({
   closeNote,
   closeReference,
   closeReferenceLabel,
+  entryCurve,
+  currentCurve,
 }) {
   const [tab, setTab] = useState('details')
 
@@ -267,8 +388,8 @@ export default function TradeDetailPanel({
     <SidePanel
       wide
       eyebrow="TRADE DETAIL"
-      title={trade.tradeRef}
-      subtitle={`${trade.bookName} · ${trade.symbol ?? 'UNKNOWN'} · ${trade.assetClass}`}
+      title={instrumentLabelOf(trade)}
+      subtitle={`${trade.bookName} · ${trade.tradeRef} · ${assetClassLabel(trade.assetClass)}`}
       onClose={onClose}
       headActions={
         <>
@@ -306,7 +427,7 @@ export default function TradeDetailPanel({
         <span>
           {lastUpdated == null
             ? 'Waiting for detail'
-            : `Updated ${formatClockTime(lastUpdated)}`}
+            : `Updated ${formatClockTime(lastUpdated)} local`}
         </span>
       }
     >
@@ -331,11 +452,18 @@ export default function TradeDetailPanel({
                 valuation == null
                   ? 'not valued yet'
                   : row.valuationSource === 'feed'
-                    ? 'live'
-                    : 'latest'
+                    ? 'live · local time'
+                    : 'latest · local time'
               }
             />
           </section>
+
+          <MoveAttribution
+            trade={trade}
+            row={row}
+            entryCurve={entryCurve}
+            currentCurve={currentCurve}
+          />
 
           <section className="trade-detail__section" aria-labelledby="trade-summary-title">
             <div className="trade-detail__section-head">
@@ -343,10 +471,7 @@ export default function TradeDetailPanel({
               <span>{trade.status}</span>
             </div>
             <dl className="trade-detail__fields">
-              <DetailField label="Trade ID">{trade.id}</DetailField>
               <DetailField label="Book">{trade.bookName}</DetailField>
-              <DetailField label="Instrument">{trade.symbol}</DetailField>
-              <DetailField label="Class">{trade.assetClass}</DetailField>
               <DetailField label={trade.assetClass === 'IRS' ? 'Direction' : 'Side'}>
                 <span className={`trade-side trade-side--${trade.side.toLowerCase()}`}>
                   {tradePositionLabel(trade)}
@@ -364,9 +489,6 @@ export default function TradeDetailPanel({
               <DetailField label={['BOND', 'IRS'].includes(trade.assetClass) ? 'Curve as of' : 'Quote time'}>
                 {trade.entryPriceAtMs == null ? null : formatDateTime(trade.entryPriceAtMs)}
               </DetailField>
-              <DetailField label="Opened">{formatDateTime(trade.openedAtMs)}</DetailField>
-              <DetailField label="Source">{trade.source}</DetailField>
-              <DetailField label="Written by">{trade.createdByService}</DetailField>
               {trade.terms != null &&
                 Object.keys(trade.terms).some(
                   (key) => !HIDDEN_TERMS.has(key),
@@ -392,6 +514,10 @@ export default function TradeDetailPanel({
                   </dl>
                 </DetailField>
               )}
+              <DetailField label="Opened">{formatDateTime(trade.openedAtMs)}</DetailField>
+              <DetailField label="Trade ID">{trade.id}</DetailField>
+              <DetailField label="Source">{trade.source}</DetailField>
+              <DetailField label="Written by">{trade.createdByService}</DetailField>
               {row.lifecycle === 'CLOSED' && (
                 <>
                   <DetailField label="Closed">{formatDateTime(trade.closedAtMs)}</DetailField>

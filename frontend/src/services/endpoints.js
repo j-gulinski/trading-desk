@@ -26,6 +26,9 @@ export const endpoints = {
       ),
     fxRates: (to) => withQuery('/api/market-data/fx/rates', { to }),
     curves: (raw = false) => withQuery('/api/market-data/curves', { raw: raw ? 1 : null }),
+    curveRevision: (provider, curve, asOf) => (
+      `/api/market-data/curves/${encodeURIComponent(provider)}/${encodeURIComponent(curve)}/${encodeURIComponent(asOf)}`
+    ),
     refresh: (symbol, provider) =>
       withQuery('/api/market-data/refresh', { symbol, provider }),
     watchlist: '/api/market-data/watchlist',

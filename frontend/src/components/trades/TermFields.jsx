@@ -199,20 +199,6 @@ function CurveSelect({
   )
 }
 
-function SingleCurveNotice({ values }) {
-  const legIndex = values.floating_rate_index_tenor
-  if (legIndex == null) return null
-  return (
-    <div className="panel-form__notice" role="note">
-      <strong className="panel-form__notice-title">Single-curve approximation</strong>
-      <p>
-        {'Floating payments are implied from the selected risk-free curve, not from a curve '}
-        {`calibrated to the contract’s ${indexTenorText(legIndex)} index.`}
-      </p>
-    </div>
-  )
-}
-
 function Field({
   field,
   values,
@@ -336,7 +322,7 @@ export default function TermFields({
       {executionFields}
       <div className="panel-form__group panel-form__group--curves">
         <h3 className="panel-form__group-title">
-          {compactSingleCurve ? curveFields[0].label : 'Curves'}
+          {compactSingleCurve ? 'Pricing curve' : 'Curves'}
         </h3>
         <div
           className={`panel-form__terms${
@@ -357,7 +343,6 @@ export default function TermFields({
             />
           ))}
         </div>
-        {assetClass === 'IRS' && <SingleCurveNotice values={values} />}
       </div>
     </div>
   )

@@ -11,6 +11,7 @@ import {
 } from '../../config/books.js'
 import { bookFormErrorsOf, bookFormValuesOf, bookPayloadOf } from '../../domain/books.js'
 import { describeApiError } from '../../domain/apiErrors.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
 
 function FieldError({ id, message }) {
   if (!message) return null
@@ -140,7 +141,7 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
               <option value="">Select asset class…</option>
               {BOOK_ASSET_CLASSES.map((assetClass) => (
                 <option key={assetClass} value={assetClass}>
-                  {assetClass}
+                  {assetClassLabel(assetClass)}
                 </option>
               ))}
             </select>
@@ -170,9 +171,14 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
             </div>
           )}
 
-          <button type="submit" className="panel-form__submit" disabled={pending}>
-            {pending ? 'Saving…' : editing ? 'Save changes' : 'Create book'}
-          </button>
+          <div className="panel-form__actions">
+            <button type="button" className="panel-form__cancel" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="panel-form__submit" disabled={pending}>
+              {pending ? 'Saving…' : editing ? 'Save changes' : 'Create book'}
+            </button>
+          </div>
         </form>
       )}
     </SidePanel>

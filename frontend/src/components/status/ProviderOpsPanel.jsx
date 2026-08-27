@@ -51,7 +51,7 @@ function marketSessionText(runtime) {
   if (total === 0) return '—'
   if (open === total) return 'open'
   if (closed === total) return 'closed'
-  if (unknown === total) return 'awaiting quotes'
+  if (unknown === total) return 'awaiting first quotes'
   return [
     open > 0 && `${open} open`,
     closed > 0 && `${closed} closed`,
@@ -120,7 +120,7 @@ function ProviderCard({ provider, now }) {
         )}
         <StatusPill
           level={PROVIDER_STATUS_LEVELS[runtime?.status] ?? 'unknown'}
-          label={runtime?.status ?? 'UNKNOWN'}
+          label={runtime?.status === 'OK' ? 'AVAILABLE' : runtime?.status ?? 'UNKNOWN'}
           compact
         />
       </header>
@@ -131,7 +131,7 @@ function ProviderCard({ provider, now }) {
         ) : keyless ? (
           <Fact label="Last fixing">{strategy.last_as_of ?? '—'}</Fact>
         ) : (
-          <Fact label="Market">{marketSessionText(runtime)}</Fact>
+          <Fact label="Quote state">{marketSessionText(runtime)}</Fact>
         )}
         <Fact label="Polling">
           {curveOnly

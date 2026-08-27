@@ -15,6 +15,7 @@ import {
 } from '../../domain/marketFormat.js'
 import { instrumentLabelOf } from '../../domain/contracts.js'
 import { irsDirectionLabel } from '../../domain/trades.js'
+import { assetClassLabel } from '../../config/tradeActions.js'
 
 function PnlMetric({ label, value, title, signed = true }) {
   return (
@@ -166,7 +167,7 @@ export default function BookCard({
         </div>
         <span className="book-tile__class">
           <span className="book-tile__badge-dot" />
-          {book.assetClass}
+          {assetClassLabel(book.assetClass)}
         </span>
       </header>
 
@@ -182,16 +183,20 @@ export default function BookCard({
           value={reported.values?.unrealized ?? null}
           title={reported.title}
         />
-        <PnlMetric
-          label={`Realized · ${reported.currency}`}
-          value={reported.values?.realized ?? null}
-          title={reported.title}
-        />
-        <PnlMetric
-          label={`Total PnL · ${reported.currency}`}
-          value={reported.values?.total ?? null}
-          title={reported.title}
-        />
+        {book.closedTrades > 0 && (
+          <>
+            <PnlMetric
+              label={`Realized · ${reported.currency}`}
+              value={reported.values?.realized ?? null}
+              title={reported.title}
+            />
+            <PnlMetric
+              label={`Total PnL · ${reported.currency}`}
+              value={reported.values?.total ?? null}
+              title={reported.title}
+            />
+          </>
+        )}
       </div>
 
       <footer className="book-tile__foot">

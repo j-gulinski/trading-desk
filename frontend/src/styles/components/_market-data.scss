@@ -542,6 +542,27 @@
   }
 }
 
+@container page (min-width: 900px) {
+  .market-benchmark {
+    display: grid;
+    grid-template-columns: auto minmax(240px, 1fr) minmax(360px, auto);
+    align-items: center;
+    gap: var(--sp-4);
+  }
+  .market-benchmark__head {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--sp-2);
+  }
+  .market-benchmark__facts {
+    padding-top: 0;
+    padding-left: var(--sp-4);
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+}
+
 @media (max-width: 620px) {
   .market-benchmark__facts {
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));

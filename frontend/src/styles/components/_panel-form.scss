@@ -573,6 +573,25 @@
   gap: var(--sp-3);
   margin-top: var(--sp-4);
 }
+.new-trade-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-4);
+  width: 100%;
+}
+.new-trade-footer__summary {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.new-trade-footer .panel-form__submit {
+  min-width: 132px;
+}
 .panel-form__message {
   margin: 0 0 var(--sp-4);
   color: var(--text-secondary);
@@ -748,6 +767,13 @@
 }
 
 @media (max-width: 620px) {
+  .new-trade-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .new-trade-footer__summary {
+    white-space: normal;
+  }
+
   .panel-form__row,
   .panel-form__execution-row,
   .panel-form__terms {

@@ -67,10 +67,15 @@ export default function BusinessOverview() {
     )
   }
 
-  const books = bookRisksOf(rows, bookRisk).map((book) => ({
-    ...book,
-    reported: reported(book.subtotals, book.currency, book),
-  }))
+  const books = bookRisksOf(rows, bookRisk)
+    .map((book) => ({
+      ...book,
+      reported: reported(book.subtotals, book.currency, book),
+    }))
+    .sort((left, right) => (
+      Math.abs(right.reported.values?.unrealized ?? 0) -
+      Math.abs(left.reported.values?.unrealized ?? 0)
+    ))
   const headline = portfolio.reported
   const currency = headline.currency
   const fresh = summary.live + summary.marketClosed
@@ -115,17 +120,19 @@ export default function BusinessOverview() {
           }
           title={headline.title}
         />
-        <StatCard
-          label={`REALIZED PNL · ALL BOOKS · ${currency}`}
-          value={headline.values == null ? '—' : formatSignedAmount(headline.values.realized)}
-          sub={`${portfolio.closedCount} closed positions`}
-          tone={
-            headline.values == null
-              ? 'default'
-              : headline.values.realized >= 0 ? 'pos' : 'neg'
-          }
-          title={headline.title}
-        />
+        {portfolio.closedCount > 0 && (
+          <StatCard
+            label={`REALIZED PNL · ALL BOOKS · ${currency}`}
+            value={headline.values == null ? '—' : formatSignedAmount(headline.values.realized)}
+            sub={`${portfolio.closedCount} closed positions`}
+            tone={
+              headline.values == null
+                ? 'default'
+                : headline.values.realized >= 0 ? 'pos' : 'neg'
+            }
+            title={headline.title}
+          />
+        )}
         <StatCard
           label={`TOTAL PNL · ALL BOOKS · ${currency}`}
           value={headline.values == null ? '—' : formatSignedAmount(headline.values.total)}
@@ -144,11 +151,13 @@ export default function BusinessOverview() {
           tone={unvaluedOpen > 0 ? 'warn' : 'default'}
           href="#/valuations"
         />
-        <StatCard
-          label="CLOSED TRADES"
-          value={portfolio.closedCount}
-          sub={`${actualBooks} books · ${summary.books} with a valuation`}
-        />
+        {portfolio.closedCount > 0 && (
+          <StatCard
+            label="CLOSED TRADES"
+            value={portfolio.closedCount}
+            sub={`${actualBooks} books · ${summary.books} with a valuation`}
+          />
+        )}
       </div>
 
       <div className="business-panels">

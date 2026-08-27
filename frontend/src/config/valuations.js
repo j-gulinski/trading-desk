@@ -44,7 +44,6 @@ export const VALUATION_COLUMNS = [
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerNote: 'asset unit',
   },
   {
     id: 'fairValue',

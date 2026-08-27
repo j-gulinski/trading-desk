@@ -126,6 +126,44 @@ def _store_curve_set(curve_set):
         return False, changed, True
 
 
+def _curve_entry(session, row, include_raw=False):
+    entry = {
+        "provider": row.provider,
+        "curve_name": row.curve_name,
+        "curve_basis": row.curve_basis,
+        "currency": row.currency,
+        "index_tenor": row.index_tenor,
+        "as_of_date": row.as_of_date,
+        "received_at": row.received_at,
+        **({"raw_payload": row.raw_payload} if include_raw else {}),
+    }
+    points = (
+        session.query(MarketDataCurvePoint)
+        .filter_by(curve_id=row.curve_id)
+        .order_by(MarketDataCurvePoint.tenor_years)
+        .all()
+    )
+    entry["points"] = [
+        {field: getattr(point, field) for field in CURVE_POINT_FIELDS}
+        for point in points
+    ]
+    return entry
+
+
+def curve_revision(provider, curve_name, as_of_date, include_raw=False):
+    with session_scope() as session:
+        row = (
+            session.query(MarketDataCurve)
+            .filter_by(
+                provider=provider,
+                curve_name=curve_name,
+                as_of_date=as_of_date,
+            )
+            .one_or_none()
+        )
+        return None if row is None else _curve_entry(session, row, include_raw)
+
+
 def latest_curve_sets(provider=None, include_raw=False):
     with session_scope() as session:
         curves = (
@@ -145,28 +183,7 @@ def latest_curve_sets(provider=None, include_raw=False):
                 continue
             if provider is not None and row.provider != provider:
                 continue
-            latest[key] = {
-                "curve_id": row.curve_id,
-                "provider": row.provider,
-                "curve_name": row.curve_name,
-                "curve_basis": row.curve_basis,
-                "currency": row.currency,
-                "index_tenor": row.index_tenor,
-                "as_of_date": row.as_of_date,
-                "received_at": row.received_at,
-                **({"raw_payload": row.raw_payload} if include_raw else {}),
-            }
-        for entry in latest.values():
-            points = (
-                session.query(MarketDataCurvePoint)
-                .filter_by(curve_id=entry.pop("curve_id"))
-                .order_by(MarketDataCurvePoint.tenor_years)
-                .all()
-            )
-            entry["points"] = [
-                {field: getattr(point, field) for field in CURVE_POINT_FIELDS}
-                for point in points
-            ]
+            latest[key] = _curve_entry(session, row, include_raw)
         return sorted(latest.values(), key=lambda entry: entry["curve_name"])
 
 

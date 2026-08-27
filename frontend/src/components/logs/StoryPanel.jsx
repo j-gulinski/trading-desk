@@ -3,7 +3,7 @@ import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import { normalizeAuditEvents } from '../../domain/auditEvents.js'
 import { normalizeLogLines, payloadEntriesOf } from '../../domain/logLines.js'
-import { formatClockTime } from '../../domain/formatting.js'
+import { formatClockTime, formatShortId } from '../../domain/formatting.js'
 import { STORY_LOG_LIMIT } from '../../config/logs.js'
 import SidePanel from '../panel/SidePanel.jsx'
 import StatusPill from '../status/StatusPill.jsx'
@@ -67,7 +67,10 @@ function StoryRow({ entry }) {
 
 export default function StoryPanel({ story, onOpenStory, onClose }) {
   const { kind, id } = story
-  const { eyebrow, subtitle, auditParam } = STORY_KINDS[kind]
+  const { eyebrow, auditParam } = STORY_KINDS[kind]
+  const title = kind === 'trade'
+    ? `Trade ${formatShortId(id)}`
+    : `Correlation ${formatShortId(id)}`
 
   const logs = usePolling(({ signal }) =>
     apiGet(endpoints.monitoring.logs({ q: id, limit: STORY_LOG_LIMIT }), { signal }),
@@ -83,7 +86,7 @@ export default function StoryPanel({ story, onOpenStory, onClose }) {
   const loading = logs.loading || audits.loading
 
   return (
-    <SidePanel wide eyebrow={eyebrow} title={id} subtitle={subtitle} onClose={onClose}>
+    <SidePanel wide eyebrow={eyebrow} title={title} subtitle={id} onClose={onClose}>
       {loading && <LoadingSkeleton variant="panel" label="Assembling the story" />}
       {!loading && entries.length === 0 && (
         <EmptyState message="Nothing recorded for this id — log lines may have rotated out of the buffer." />
