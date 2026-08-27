@@ -352,6 +352,7 @@ export default function Trades() {
           row={selectedRow}
           bookNames={bookNames}
           instruments={instruments}
+          curves={curves}
           onClose={closeTradeDetail}
         />
       )}

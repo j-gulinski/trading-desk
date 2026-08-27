@@ -6,13 +6,14 @@ import { normalizeAuditEvents } from '../../domain/auditEvents.js'
 import { tradeDetailOf } from '../../domain/trades.js'
 import { buildCloseTradeIntent } from '../../domain/tradeActions.js'
 import { describeApiError } from '../../domain/apiErrors.js'
+import { curveOf } from '../../domain/curves.js'
 import { BLOTTER_POLL_INTERVAL_MS } from '../../config/trades.js'
 import TradeDetailPanel from '../../components/trades/TradeDetailPanel.jsx'
 
 const CLOSE_STALL_MS = 15000
 const MODEL_PRICED_CLASSES = new Set(['BOND', 'IRS', 'EUROPEAN_OPTION'])
 
-export default function TradeDetail({ row, bookNames, instruments, onClose }) {
+export default function TradeDetail({ row, bookNames, instruments, curves, onClose }) {
   const detail = usePolling(
     ({ signal }) => apiGet(endpoints.blotter.trade(row.trade.id), { signal }),
     { intervalMs: BLOTTER_POLL_INTERVAL_MS },
@@ -22,6 +23,8 @@ export default function TradeDetail({ row, bookNames, instruments, onClose }) {
 
   const [closing, setClosing] = useState(false)
   const [closeNote, setCloseNote] = useState(null)
+  const [entryCurve, setEntryCurve] = useState(null)
+  const [valuationCurve, setValuationCurve] = useState(null)
   const stallTimer = useRef(null)
   const modelPriced = MODEL_PRICED_CLASSES.has(row.trade.assetClass)
   const closingSide = row.trade.side === 'SELL' ? 'BUY' : 'SELL'
@@ -32,6 +35,42 @@ export default function TradeDetail({ row, bookNames, instruments, onClose }) {
     : Number.isFinite(quotedClose)
       ? quotedClose
       : marketQuote?.value
+
+  const curveName = row.trade.terms?.discount_curve
+  const curveProvider = row.trade.terms?.discount_curve_provider
+  const curveAsOf = row.trade.terms?.discount_curve_as_of
+  const valuationCurveAsOf = row.valuation?.curveAsOf
+  const feedCurve = curveName ? curves?.[curveName] ?? null : null
+
+  useEffect(() => {
+    if (row.trade.assetClass !== 'BOND' || !curveName || !curveProvider || !curveAsOf) return
+    const controller = new AbortController()
+    apiGet(
+      endpoints.marketData.curveRevision(curveProvider, curveName, curveAsOf),
+      { signal: controller.signal },
+    )
+      .then((data) => setEntryCurve(curveOf(data)))
+      .catch(() => setEntryCurve(null))
+    return () => controller.abort()
+  }, [curveAsOf, curveName, curveProvider, row.trade.assetClass])
+
+  useEffect(() => {
+    if (
+      row.trade.assetClass !== 'BOND' || !curveName || !curveProvider ||
+      !valuationCurveAsOf || feedCurve?.asOfDate === valuationCurveAsOf
+    ) {
+      setValuationCurve(null)
+      return
+    }
+    const controller = new AbortController()
+    apiGet(
+      endpoints.marketData.curveRevision(curveProvider, curveName, valuationCurveAsOf),
+      { signal: controller.signal },
+    )
+      .then((data) => setValuationCurve(curveOf(data)))
+      .catch(() => setValuationCurve(null))
+    return () => controller.abort()
+  }, [curveName, curveProvider, feedCurve?.asOfDate, row.trade.assetClass, valuationCurveAsOf])
 
   useEffect(() => {
     if (!closing || detailStatus == null || detailStatus === 'ACTIVE') {
@@ -71,6 +110,8 @@ export default function TradeDetail({ row, bookNames, instruments, onClose }) {
     <TradeDetailPanel
       row={row}
       detail={detailData}
+      entryCurve={entryCurve}
+      currentCurve={feedCurve?.asOfDate === valuationCurveAsOf ? feedCurve : valuationCurve}
       auditEvents={normalizeAuditEvents(detail.data?.audit_logs)}
       loading={detail.loading}
       error={detail.error}

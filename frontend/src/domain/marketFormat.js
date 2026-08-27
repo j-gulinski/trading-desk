@@ -54,22 +54,6 @@ export function unitLabelOf(instrument) {
 }
 
 export function priceUnitLabelOf(instrument) {
-  if (instrument.symbol === 'XAUPLN_G') return 'PLN/g'
-  const pair = currencyPair(instrument.symbol)
-  if (pair && instrument.assetClass === 'FX') return `${pair.quote}/${pair.base}`
-  if (pair && instrument.assetClass === 'COMMODITY') return `${pair.quote}/${pair.base} oz`
-  if (instrument.assetClass === 'EQUITY') {
-    return instrument.currency ? `${instrument.currency}/sh` : '/sh'
-  }
-  if (instrument.assetClass === 'EUROPEAN_OPTION') {
-    return instrument.currency ? `${instrument.currency}/contract` : '/contract'
-  }
-  if (instrument.assetClass === 'BOND') {
-    return instrument.currency ? `${instrument.currency}/100` : '/100'
-  }
-  if (instrument.assetClass === 'IRS') {
-    return instrument.currency ? `${instrument.currency} NPV` : 'NPV'
-  }
   return instrument.currency ?? null
 }
 

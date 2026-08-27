@@ -131,6 +131,10 @@ export default function QuoteHistoryPanel({ row, onClose }) {
     : 'TODAY'
   const unit = unitLabelOf(instrument)
   const latestRawPayload = points.find((point) => point.rawPayload != null)?.rawPayload ?? null
+  const marketMetricCount = [instrument.bid, instrument.ask, instrument.last]
+    .filter(Number.isFinite).length
+  const metricCount = reference ? 3 : marketMetricCount + 3
+  const emptyMetricCount = (3 - metricCount % 3) % 3
   const [visibleRows, setVisibleRows] = useState(INITIAL_HISTORY_ROWS)
   useEffect(() => {
     setVisibleRows(INITIAL_HISTORY_ROWS)
@@ -199,6 +203,13 @@ export default function QuoteHistoryPanel({ row, onClose }) {
             label="Received"
             value={formatClockTime(instrument.polledAtMs, { millis: true })}
           />
+          {Array.from({ length: emptyMetricCount }, (_, index) => (
+            <div
+              key={`empty-metric-${index}`}
+              className="quote-history__metric quote-history__metric--empty"
+              aria-hidden="true"
+            />
+          ))}
         </dl>
       </section>
 

@@ -212,10 +212,10 @@ of reusing one equity-shaped `Price` or `Fair value` concept for every asset:
 | Surface | Final presentation | Unit and currency contract | Ordering contract |
 | --- | --- | --- | --- |
 | Market quotes | Symbol/name/class/market first; quote source, mark, day move, tick move, quote status, quote age and actions second | Mark uses the native quote unit (`USD`, `USD per EUR`, `JPY per USD`, `USD per XAU (troy oz)`); absolute moves carry that currency; usable session closes display `EOD (date)` | Identity columns are structurally sortable; provider observations stay grouped under their instrument identity |
-| Trades | Default columns are Trade, Book, Instrument, Position, Size, Entry value, Pricing source, Current value, Position value, PnL and Valuation status; Class remains available in the column picker | Equity `USD/sh`; FX quote/base; commodity quote/XAU oz; option currency/contract; bond currency/100; IRS currency NPV; position value and PnL always carry settlement currency | Position value and PnL compare through one captured approximate USD snapshot; the active non-USD sort cells show that captured `≈ USD` value under the native amount |
+| Trades | Default columns are Trade, Book, Instrument, Position, Size, Entry value, Pricing source, Current value, Position value, PnL and Valuation status; Class remains available in the column picker | Entry/current cells show the native currency without repeating denominator suffixes; Size and contract labels retain the financial unit. Position value and PnL always carry settlement currency | Position value and PnL compare through one captured approximate USD snapshot; the active non-USD sort cells show that captured `≈ USD` value under the native amount |
 | Valuations | Current model/mark is separate from position value and gross entry; contract identity includes option type/strike/term, bond maturity/coupon and IRS maturity/fixed rate | Every monetary cell carries native settlement currency, and current values use the same asset-specific units as Trades | Monetary sorts use the same captured USD comparator; structural sorts remain native and the result remains capped at 100 rows |
 | Valuation history | Valuation time, Position value, Unrealized PnL, Realized PnL and Total PnL | Every historical amount carries its currency | Newest first; no false cross-currency ranking is implied |
-| Books and portfolio | Book totals use Gross entry, Unrealized, Realized and Total PnL; expanded positions use contract-specific measures | Bonds show Face and Entry/Current per 100; IRS shows Notional and Entry/Current NPV; options show contracts and premium/contract; FX shows notional and rates | Native currency subtotals remain separate; the reporting overlay uses official, dated conversion provenance |
+| Books and portfolio | Book totals use Gross entry, Unrealized, Realized and Total PnL; expanded positions use contract-specific measures | Position labels preserve Face, Notional, contracts, rates, NPV and bond per-100 semantics; numeric entry/current values carry only the native currency | Native currency subtotals remain separate; the reporting overlay uses official, dated conversion provenance |
 
 This makes the previously odd non-equity rows interpretable. FX displays the executable rate
 separately from the converted position value. XAU is a price per troy ounce. A bond's `100.00`
@@ -223,6 +223,14 @@ is a clean-price-style amount per 100 face, not a EUR 100 position. An option va
 per contract. An IRS has no generic spot price at all: it displays entry and current NPV against
 notional. A newly struck par swap can therefore show `0.00 EUR NPV` honestly; that is a priced
 at-par contract, not missing data.
+
+The trade detail links each observed pricing driver to its entry level, current or close level,
+signed change and resulting PnL. Bond attribution also retrieves the dated entry curve retained
+by Market Data and compares its rate at the bond maturity with the current curve in basis points;
+the bond-price row then shows the model outcome. The maturity rate is a compact summary of the
+curve shift—the pricing model still discounts every coupon and principal cash flow on the full
+curve. This is input attribution from observed valuation arguments; it does not claim a news,
+macro or Greek-level cause that the platform does not observe.
 
 The mixed-currency path is intentionally cheap. Each page fetches the USD conversion set once
 and refreshes it on the existing one-minute cadence. Selecting a monetary sort performs one

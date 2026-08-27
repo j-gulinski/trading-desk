@@ -114,6 +114,9 @@
     white-space: nowrap;
   }
 }
+.quote-history__metric--empty {
+  min-height: 70px;
+}
 
 .quote-history__observations {
   display: flex;

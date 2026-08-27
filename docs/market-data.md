@@ -426,6 +426,7 @@ credits).
 | `GET /market-data/quotes/<provider>/<symbol>/history?limit=&raw=` | latest stored change observations, newest provider timestamp first; limit 1–200; `raw=1` includes each observation's stored raw payload (the provenance drill) |
 | `GET /market-data/curves?raw=` | latest stored set per curve: metadata, provenance-carrying points, pricing arrays; `raw=1` adds each set's stored source evidence (decoded response or EIOPA summary) |
 | `GET /market-data/curves/<provider>?raw=` | the same filtered to one wired provider; unknown provider is 404 |
+| `GET /market-data/curves/<provider>/<curve>/<as-of>?raw=` | one retained curve revision by exact provider, curve name and ISO source date; used to compare a model-priced trade's frozen entry inputs with the current curve; missing revision is 404 |
 | `POST /market-data/curves/refresh?curve=&provider=` | targeted curve refetch within the provider budget; without `curve`: every curve the provider (or all providers) builds |
 | `GET /fx/rates?to=<CCY>` | one resolution per known currency: rate, path, provider, as-of, or an honest no-path reason |
 | `GET /watchlist` · `POST /watchlist` · `DELETE /watchlist/<symbol>?provider=` | the symbol master, self-service — offers quote providers only |

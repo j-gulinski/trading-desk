@@ -30,7 +30,6 @@ export const TRADE_COLUMNS = [
     sortable: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerNote: 'native unit',
   },
   {
     id: 'provider',
@@ -45,7 +44,6 @@ export const TRADE_COLUMNS = [
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerNote: 'asset unit',
   },
   {
     id: 'fairValue',

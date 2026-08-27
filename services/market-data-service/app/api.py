@@ -120,6 +120,25 @@ def get_provider_curves(provider):
     return to_json(curves)
 
 
+@app.route("/curves/<provider>/<curve_name>/<as_of>")
+@app.route("/market-data/curves/<provider>/<curve_name>/<as_of>")
+def get_curve_revision(provider, curve_name, as_of):
+    response.content_type = "application/json"
+    normalized_provider = provider.strip().upper()
+    normalized_curve = curve_name.strip().upper()
+    include_raw = (request.query.raw or "").strip() in ("1", "true")
+    curve, error, status = curve_service.get_curve_revision(
+        normalized_provider,
+        normalized_curve,
+        as_of.strip(),
+        include_raw,
+    )
+    if error is not None:
+        response.status = status
+        return to_json({"error": error})
+    return to_json(curve)
+
+
 @app.route("/curves/refresh", method="POST")
 @app.route("/market-data/curves/refresh", method="POST")
 def refresh_curves():
