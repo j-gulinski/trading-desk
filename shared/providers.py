@@ -2,6 +2,7 @@ from shared.freshness import QuoteGrade
 
 FINNHUB = "FINNHUB"
 TWELVE_DATA = "TWELVE_DATA"
+ALPHA_VANTAGE = "ALPHA_VANTAGE"
 NBP = "NBP"
 ECB = "ECB"
 FRED = "FRED"
@@ -22,6 +23,14 @@ PROVIDERS = {
             "EQUITY": QuoteGrade.REALTIME,
             "FX": QuoteGrade.REALTIME,
             "COMMODITY": QuoteGrade.REALTIME,
+        },
+        "serves_curves": False,
+    },
+    ALPHA_VANTAGE: {
+        "group": GROUP_QUOTE,
+        "quotes": {
+            "EQUITY": QuoteGrade.EOD,
+            "FX": QuoteGrade.REALTIME,
         },
         "serves_curves": False,
     },

@@ -58,8 +58,8 @@ random flow, or generator-specific branch threaded through the provider abstract
 
 | | NBP | ECB | FRED |
 | --- | --- | --- | --- |
-| Data | FX fixings: table A (`mid`), **table C (`bid`/`ask`)**, gold (PLN per 1 g) | Yield curves **AAA (`G_N_A`) and all-bonds (`G_N_C`)**, tenors `SR_3M…SR_30Y`; EXR FX fixings | `DGS1MO…DGS30` Treasury curve; SOFR/DFF; **OECD Poland series** |
-| Verified Mon Aug 17 | table `158/A` dated 08-17; C: bid 3.6804 / ask 3.7548; 157/C was Friday — clean business-day sequence | YC as-of 08-14 (Fri, publishes next TARGET day ~noon); EXR 08-17: USD 1.1593, PLN 4.3063 | DGS through 08-13 (1–2 business-day lag); SOFR through 08-14; **Poland monthly through 2026-06** |
+| Data | FX fixings: table A (`mid`), **table C (`bid`/`ask`)**, gold (PLN per 1 g) | Yield curves **AAA (`G_N_A`) and all-bonds (`G_N_C`)**, tenors `SR_3M…SR_30Y`; EXR FX fixings | `DGS1MO…DGS30` Treasury curve; SOFR/DFF |
+| Verified Mon Aug 17 | table `158/A` dated 08-17; C: bid 3.6804 / ask 3.7548; 157/C was Friday — clean business-day sequence | YC as-of 08-14 (Fri, publishes next TARGET day ~noon); EXR 08-17: USD 1.1593, PLN 4.3063 | DGS through 08-13 (1–2 business-day lag); SOFR through 08-14 |
 | Auth / limits | none; 93-day range cap | none; fair use | free instant key; 120 req/min |
 | Format note | plain JSON | **use `format=csvdata`** — SDMX-JSON nests values ~5 levels deep; CSV is stdlib-parseable | JSON; values are *strings*, missing = `"."` |
 
@@ -73,12 +73,12 @@ random flow, or generator-specific branch threaded through the provider abstract
    governor spreads credits across the day, D7.
 4. **Finnhub has no free FX** → per-provider capability differs by asset class → the fourth
    freshness state **UNSUPPORTED** (a capability fact, distinct from MISSING data), D3.
-5. **The PLN curve is viable on real data**: FRED's OECD Poland series are alive —
-   `IR3TIB01PLM156N` (3M interbank) and `IRLTLT01PLM156N` (10Y gov bond), monthly, ~2-month
-   lag → D6.
-6. **ECB serves two genuine EUR curves** (verified keys) → real projection-vs-discount choice;
-   and ECB×NBP FX cross-check agreed to <0.3% today → the disagreement-in-bps idea works on
-   official data too.
+5. **Two Polish reference observations do not make a forward curve.** FRED/OECD publishes a
+   monthly 3M interbank observation and a 10Y government yield, but interpolating between them
+   creates false precision rather than a defensible IRS projection → the set is retired in D6.
+6. **ECB serves two genuine EUR government curves** (verified keys), but those are bond curves,
+   not floating-index projection choices. The ECB×NBP FX cross-check agreed to <0.3% today →
+   the disagreement-in-bps idea works on official data too.
 7. **Errors hide in 200 bodies** (Alpha Vantage `"Information"`, Twelve Data `code` field) →
    the client's error classifier must read bodies, not just status codes.
 8. **Benchmark: SPY on Finnhub.** Indices are premium everywhere; SPY is a free real-time S&P
@@ -170,20 +170,20 @@ numbers.
 - `USD_GOVERNMENT_BONDS` — 11 FRED DGS series, 1–2 business-day lag; par-treated-as-zero documented.
 - `EUR_GOVERNMENT_BONDS_AAA` / `EUR_GOVERNMENT_BONDS_ALL` — ECB `G_N_A` / `G_N_C` (both keys verified),
   `SR_3M…SR_30Y`, `csvdata` format; deliberately limited to EUR bond context/discounting.
-- `PLN_REFERENCE_PROJECTION_3M` — **composite from live FRED/OECD series**: 3M interbank + 10Y gov bond, monthly,
-  ~2-month lag, interpolated between two real anchors, explicitly labeled; the investigation
-  write-up (NBP has no rates API — 404 verified; WIBOR licensed; what the lag costs) remains
-  the domain-analysis centerpiece.
 - `EUR_RISK_FREE` / `USD_RISK_FREE` / `PLN_RISK_FREE` — EIOPA monthly risk-free term
   structures, kept as a coherent discount source for the three model currencies. Their
-  source derivations and any extrapolated points remain visible.
-- **The tenor dimension, honestly** (audit fix — the review's driving example: a 3M vs 6M
-  WIBOR projection choice on a PLN-settled swap): curve metadata gains an
-  `index_tenor` label, IRS terms gain `floating_rate_index_tenor`, and validation matches the
-  projection curve's declared tenor to the leg — so the *mechanism* the review described exists in
-  schema, pickers, and rules. What free data cannot supply is the tenor-differentiated *curves*
-  themselves (WIBOR 3M/6M are licensed; EMMI Euribor likewise) — the domain write-up states
-  this trade-off explicitly instead of silently narrowing the ask.
+  source derivations and any extrapolated points remain visible. IRS tickets use one eligible
+  same-currency risk-free curve for both discounting and projection and label this explicitly as
+  a single-curve approximation.
+- `PLN_REFERENCE_PROJECTION_3M` is retired. It mixed one monthly 3M interbank observation with a
+  10Y government yield and linearly interpolated the middle, so its matching tenor label implied
+  precision it did not have. Government-bond curves remain bond-only; same currency alone does
+  not qualify a curve to forecast an IRS index.
+- **The tenor dimension, honestly:** IRS terms retain `floating_rate_index_tenor` for contract
+  payment mechanics and disclosure, while the public selector makes no claim to be calibrated to
+  that 3M or 6M index. The numerical pricing interface still accepts separate discount and
+  projection curves so a licensed, index-calibrated source can restore a genuine two-curve
+  contract later.
 - NBP tables A/C + gold and ECB EXR stored as reference quotes (`REFERENCE` grade, daily
   thresholds). NBP gold is PLN per **gram**; XAU/USD is per troy ounce — the documented
   conversion (×31.1034768) is a nice cross-check detail.
@@ -198,7 +198,7 @@ the remaining *daily* ledger; **Alpha Vantage** — fixed daily slots (equities 
 close — they're EOD anyway; FX bid/ask anchor 2×/day) plus a 5-call reserve for manual refresh;
 **Group B** — calendar windows in each source's timezone (NBP ~08:15/12:15 CET, ECB YC ~12:00
 CET, ECB EXR ~16:00 CET, FRED ~16:15 ET) polled until a new as-of appears, then asleep till the
-next window; OECD Poland checked weekly. `429`/limit bodies classify as `RATE_LIMITED` (own
+next window. `429`/limit bodies classify as `RATE_LIMITED` (own
 state + audit + cooldown), never as generic errors; `Retry-After` respected. Opening a ticket
 fires a targeted `POST /market-data/refresh?symbol=` within budget (Finnhub always, Twelve Data
 if headroom, Alpha Vantage only via an explicit button showing remaining budget).
@@ -765,12 +765,18 @@ full-width and narrow browser passes are clean for Market Data and every asset t
 licensed term-index curves, vol surfaces, historical analysis, session analytics and
 futures.
 
-### Phase 6 — final project closure *(~3–4 focused days)*
+### Phase 6 — final project closure *(delivered 2026-08-26)*
 
 **Goal.** Make the next review the final project review. Add Alpha Vantage as the third
 tradeable quote source, close the small correctness and compliance gaps left by earlier phases,
 and verify the complete application from provider response to persisted trade, revaluation,
 close and portfolio presentation. This phase does not redesign working architecture.
+
+**Status.** Delivered. The authoritative handoff and measured evidence are in
+[`phase-reports/phase-6.md`](phase-reports/phase-6.md), the integrated executable path is
+[`../scenarios/full-provider-flow.http`](../scenarios/full-provider-flow.http), and bounded
+load/growth evidence is in [`performance.md`](performance.md). Everything below remains the
+acceptance plan that produced that shipped boundary; later headings are optional extensions.
 
 **T6.0 Discovery and frozen scope.** Re-run the Phase 5 gate on retained and fresh data. Check
 the assignment against the running routes, UI and schemas; record every remaining item as
@@ -858,8 +864,8 @@ the browser, never by inserting business rows directly:
    receive time and `TRADING_TICKET` provenance.
 5. Build the curve-priced contracts from their inputs rather than using hidden fixtures. Use the
    minimum coverage matrix below, apply the curve-implied bond coupon/fair IRS rate where useful,
-   and deliberately try one wrong-currency curve and one incompatible projection index to prove
-   readable rejection.
+   and deliberately try one wrong-currency curve, one same-currency government curve for IRS and
+   one distinct IRS projection input to prove readable rejection.
 
    | Category | Required review examples | What the pair proves |
    | --- | --- | --- |
@@ -867,7 +873,7 @@ the browser, never by inserting business rows directly:
    | FX | EUR/USD plus GBP/USD or USD/PLN | base-notional/quote-currency units and two currency paths |
    | Commodity | XAU/USD; optionally XAG/USD only if the live catalog and entitlement both confirm it | quoted-unit quantity and no guessed commodity capability |
    | Bond | USD government 5Y, EUR government 10Y and a PLN risk-free example | face amount/coupon/frequency, different curves and currencies |
-   | IRS | EUR receive-fixed 6M-index example and PLN pay-fixed 3M-index example | opposite directions and honest discount/projection approximation |
+   | IRS | EUR receive-fixed 6M-index example and PLN pay-fixed 3M-index example | opposite directions and an explicit single-risk-free-curve approximation |
    | European option | AAPL call and another-company put; optionally a PLN-equity option only after its underlying currency is verified | call/put, strike/maturity, provider-bound underlying and same-currency discounting |
 
 6. For **each supported category** leave at least one position open and close at least one other
@@ -980,7 +986,7 @@ and introduces no new market-data provider.
 | Equity | underlying spot % | side and quantity | price follows spot; position PnL reverses for SELL |
 | FX / spot commodity | quoted spot % | side and base/quoted-unit quantity | value change is in the quote currency |
 | Bond | parallel discount-curve bp shock | coupon, face value, maturity, payment frequency | yields up → PV down; maturity/coupon change sensitivity |
-| IRS | parallel shock plus separate discount/projection bp shocks | fixed rate, maturity, notional, pay/receive direction | projection moves floating cashflows; discounting reweights both legs |
+| IRS | parallel single-curve bp shock | fixed rate, maturity, notional, pay/receive direction | one risk-free curve implies floating cashflows and discounts both legs |
 | European option | underlying spot %, assumed volatility percentage-point shock and risk-free-rate bp shock | strike, maturity, call/put and side | non-linear spot/vol response; call/put rate direction under Black–Scholes assumptions |
 
 Volatility remains an explicit **model assumption** until a defensible market-volatility
@@ -1005,9 +1011,9 @@ scenario — not a forecast, market quote or executable price**. The current sin
 endpoint remains the minimal Phase 5 evidence until this UI is deliberately scheduled.
 
 **Acceptance examples.** From an open bond, `+25 bp` leaves coupon/face/maturity unchanged,
-shows a lower shocked PV and explains the discounting effect. From a pay-fixed IRS, separate
-projection and discount shocks produce separately labeled contributions rather than one
-unexplained number. From a call draft, a spot or assumed-volatility sweep draws the expected
+shows a lower shocked PV and explains the discounting effect. From a pay-fixed IRS, a parallel
+single-curve shock moves both the implied floating cashflows and discounting under the documented
+approximation. From a call draft, a spot or assumed-volatility sweep draws the expected
 non-linear price curve while strike/maturity changes remain clearly identified as contract
 edits. Closing the lab leaves trade count, stored curves, quote snapshots and valuations
 unchanged. A later book-level view may aggregate the returned per-position scenario P&L, but

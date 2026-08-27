@@ -213,6 +213,16 @@ class WatchlistItem(Base):
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class ProviderRequestLedger(Base):
+    __tablename__ = "provider_request_ledgers"
+
+    provider = Column(Text, primary_key=True)
+    usage_date = Column(Date, primary_key=True)
+    requests = Column(Integer, nullable=False, server_default="0")
+    credits = Column(Integer, nullable=False, server_default="0")
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     __table_args__ = (

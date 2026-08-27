@@ -2,26 +2,25 @@
 
 Current facts only: providers, normalized contracts, feed parameters, endpoints, storage.
 The reasoning behind these facts — why each boundary exists and what was rejected — lives
-in the phase reports. Provider facts come from live API probes (2026-08-17, all six
-providers; NBP/ECB re-verified 2026-08-23 at wiring); *verified* = seen in a live
+in the phase reports. Provider facts come from live API probes (2026-08-17 through
+2026-08-26, all seven providers); *verified* = seen in a live
 response, *docs* = provider documentation, re-check when credentials or plans change.
-Alpha Vantage belongs to the next phase and is not part of the current provider contract.
 
 ## Quote providers
 
-| | Finnhub | Twelve Data |
-| --- | --- | --- |
-| Free budget | **60 req/min** | 8 credits/min, **800/day** (the real constraint) |
-| Equity quote | `c/d/dp/h/l/o/pc/t` — last trade, unix seconds *(verified)* | `close` + `timestamp` (unix) + `last_quote_at` + `is_market_open` *(verified)* |
-| Equity bid/ask | none | none |
-| FX | **premium only** *(docs)* | free (`EUR/USD` style) *(verified)* |
-| Metals (XAU) | premium | free `XAU/USD` quote *(verified with registered key)* |
-| Indices (^GSPC/SPX) | premium *(docs)* | limited |
-| ETF (SPY) | free, real-time US *(docs)* | free |
-| Batch | none | **`symbol=A,B,…` — one HTTP call, 1 credit/symbol** *(docs)* |
-| Symbol search | `/search` + full `/stock/symbol?exchange=US` directory | `symbol_search` — one API credit per request |
-| Market open/closed | `/stock/market-status`, free *(docs)* | `is_market_open` on every quote *(verified)* |
-| Error shape | proper `401`/`429` + `{"error": …}` *(verified 401)* | **HTTP 200** + `{"code":429,"status":"error"}` *(verified shape)* |
+| | Finnhub | Twelve Data | Alpha Vantage |
+| --- | --- | --- | --- |
+| Free budget | **60 req/min** | 8 credits/min, **800/day** (the real constraint) | **25 calls/day**; application safe cap 22 plus ≥15 s spacing |
+| Equity quote | `c/d/dp/h/l/o/pc/t` — last trade, unix seconds *(verified)* | `close` + `timestamp` (unix) + `last_quote_at` + `is_market_open` *(verified)* | `GLOBAL_QUOTE`; last, prior close and latest trading date, grade EOD *(verified 2026-08-26)* |
+| Equity bid/ask | none | none | none; stays NULL |
+| FX | **premium only** *(docs)* | free (`EUR/USD` style) *(verified)* | `CURRENCY_EXCHANGE_RATE`; exchange rate plus bid/ask and refresh time *(verified 2026-08-26)* |
+| Metals (XAU) | premium | free `XAU/USD` quote *(verified with registered key)* | not registered |
+| Indices (^GSPC/SPX) | premium *(docs)* | limited | not registered |
+| ETF (SPY) | free, real-time US *(docs)* | free | EOD through `GLOBAL_QUOTE` when explicitly watched |
+| Batch | none | **`symbol=A,B,…` — one HTTP call, 1 credit/symbol** *(docs)* | none |
+| Symbol search | `/search` + full `/stock/symbol?exchange=US` directory | `symbol_search` — one API credit per request | no typeahead call; attaches to normalized US equity/ETF and FX identities |
+| Market open/closed | `/stock/market-status`, free *(docs)* | `is_market_open` on every quote *(verified)* | no session field; equity grade and source date make EOD explicit |
+| Error shape | proper `401`/`429` + `{"error": …}` *(verified 401)* | **HTTP 200** + `{"code":429,"status":"error"}` *(verified shape)* | **HTTP 200** `Information`/`Note`/`Error Message`, classified before normalization *(verified throttle)* |
 
 Day ranges, 52-week ranges, volume, order-book depth and open interest stay outside the
 normalized contract. The Phase 5 brief needs comparable prices, clocks and provenance;
@@ -40,8 +39,8 @@ the EIOPA archive needs a 60-second client timeout, not the shared 10-second one
 
 | | NBP | ECB | FRED |
 | --- | --- | --- | --- |
-| Data | FX fixings: table A (`mid`), gold (PLN per 1 g) | Yield curves **AAA (`G_N_A`) and all-bonds (`G_N_C`)**, tenors `SR_3M…SR_30Y`; EXR FX fixings | `DGS1MO…DGS30` Treasury curve; selected **OECD Poland series** |
-| Verified Mon Aug 17 | table `158/A` dated 08-17 and the latest gold fixing | YC as-of 08-14 (Fri, publishes next TARGET day ~noon); EXR 08-17: USD 1.1593, PLN 4.3063 | DGS through 08-13 (1–2 business-day lag); **Poland monthly through 2026-06** |
+| Data | FX fixings: table A (`mid`), gold (PLN per 1 g) | Yield curves **AAA (`G_N_A`) and all-bonds (`G_N_C`)**, tenors `SR_3M…SR_30Y`; EXR FX fixings | `DGS1MO…DGS30` Treasury curve |
+| Verified Mon Aug 17 | table `158/A` dated 08-17 and the latest gold fixing | YC as-of 08-14 (Fri, publishes next TARGET day ~noon); EXR 08-17: USD 1.1593, PLN 4.3063 | DGS through 08-13 (1–2 business-day lag) |
 | Auth / limits | none; `last/{n}` caps: 67 tables, 255 gold quotations | none; fair use | free instant key; 120 req/min |
 | Format note | plain JSON | **use `format=csvdata`** — SDMX-JSON nests values ~5 levels deep; CSV is stdlib-parseable | JSON; values are *strings*, missing = `"."` |
 
@@ -59,9 +58,9 @@ Wiring-time facts *(verified 2026-08-23, live)*:
   (`D.USD+PLN.EUR.SP00.A`, one row each); a currency the dataset lacks is simply absent.
 - EUR/PLN cross-check example (Fri 08-21): NBP `4.3122` (~11:00 fixing) vs ECB `4.3078`
   (14:15 concertation) — ~10 bps apart; the UI chip shows this spread live.
-- FRED has **no NBP-equivalent Polish rate endpoint** (404 verified on NBP's side): a PLN
-  curve must be assembled from FRED's OECD Poland series (`IR3TIB01PLM156N` 3M interbank,
-  `IRLTLT01PLM156N` 10Y gov bond; monthly, ~2-month lag).
+- The investigation found FRED/OECD Poland observations for a 3M interbank rate and a 10Y
+  government yield, but combining those two monthly anchors and interpolating the middle is not
+  an index-calibrated projection curve. Phase 6 therefore does not catalog or fetch that set.
 
 ## Contracts
 
@@ -79,14 +78,15 @@ Every provider payload normalizes to one shape before anything stores or reads i
 - **`price_basis`** records which case produced `mid`: `BID_ASK`, `REFERENCE_MID`, or
   `LAST`. Valuation and display headline use `mid`; spot execution uses ask for BUY / bid
   for SELL, falling back to `mid` when the provider publishes no spread.
-- **`quote_grade`**: `REALTIME` (live tradable) or `REFERENCE` (official fixing — NBP,
-  ECB). The grade travels with every quote.
+- **`quote_grade`**: `REALTIME`, `EOD` (Alpha equity daily close), or `REFERENCE`
+  (official fixing — NBP, ECB). The grade travels with every quote.
 - **Two clocks**: `provider_timestamp` (the provider's own event time, nullable) and
   `received_at` (ingest time). Age is measured on the provider's clock; ingest lag is the
   difference.
 
-Per-provider basis mapping: Finnhub and Twelve Data are last-only; NBP table A is an
-official mid; ECB EXR is an official mid.
+Per-provider basis mapping: Finnhub and Twelve Data are last-only; Alpha equity is
+last-only while Alpha FX uses returned bid/ask when both are present; NBP table A and ECB
+EXR are official mids.
 
 ### Freshness
 
@@ -102,8 +102,9 @@ official mid; ECB EXR is an official mid.
 
 The classifier is a pure function with two clocks and two regimes: market open judges the
 *provider* timestamp against 3× the open cadence; market closed judges the *received*
-timestamp against 3× the closed cadence — STALE means "the feed is broken" in both, and an
-overnight board reads CLOSED. Every tick and snapshot row carries `market_open`,
+timestamp against 3× the closed cadence — STALE means "the feed is broken" in both. An
+overnight row classifies internally as CLOSED and renders to the user as `EOD (date)`.
+Every tick and snapshot row carries `market_open`,
 `stale_after_seconds` and `closed_stale_after_seconds`, so `/quotes` and the UI classify
 identically. The market-open flag is Finnhub's exchange-level `/stock/market-status` for
 Finnhub rows and Twelve Data's per-symbol `is_market_open` for Twelve Data rows.
@@ -115,7 +116,14 @@ discount-curve as-of; IRS checks discount and projection as-of; option checks un
 quote freshness plus discount-curve as-of. Quote-backed rows show **MKT CLOSED** (distinct
 from a closed trade) while the venue is shut. Missing/mismatched curve inputs or a broken/
 lagging quote feed give STALE; a flat 10 s wall-clock rule survives only when no market-data
-identity is available. Curves have no separate age gate.
+identity is available.
+
+Alpha equity closes have no market-session flag. They remain internally eligible for five
+days but every consumer renders the neutral `EOD (YYYY-MM-DD)` label using the provider's
+latest trading date; they are never presented as LIVE. Alpha FX uses the returned UTC/GMT
+refresh clock and a 26-hour stale limit. Curve sets carry their own catalog age limits
+(daily government curves 7 days and EIOPA risk-free curves 75 days); opening
+against a set beyond its limit requires the ticket's explicit stale-curve acknowledgement.
 
 Reference rows derive freshness from the publication calendar instead of a cadence: at
 store time `stale_after_seconds` = time from the fixing's as-of to the next expected
@@ -133,6 +141,7 @@ capability facts. An asset class absent from a provider's map *is* the UNSUPPORT
 | --- | --- | --- | --- | --- |
 | FINNHUB | REALTIME | — | — | — |
 | TWELVE_DATA | REALTIME | REALTIME | REALTIME | — |
+| ALPHA_VANTAGE | EOD | REALTIME | — | — |
 | NBP | — | REFERENCE | REFERENCE (gold) | — |
 | ECB | — | REFERENCE | — | ✓ |
 | FRED | — | — | — | ✓ |
@@ -172,13 +181,11 @@ to it, and `build_curve_set` rejects a mismatched provider or currency. A `Curve
 optional `index_tenor`, as-of date) plus ordered `CurvePoint`s and stored source evidence.
 FRED/ECB retain decoded responses; EIOPA retains a compact release/series/rates summary
 rather than archive bytes. Each point carries `source_series` (the publisher's series id;
-NULL marks a non-anchor/derived point) and `source_as_of` (always the anchor's own date —
-visible when it lags the set's as-of). PLN composite points are calculated by this desk;
-EIOPA post-LLP rates are published by EIOPA and classified here as extrapolated/non-liquid.
-`index_tenor` names the floating index a
-projection curve follows, so tenor-matching validation has a schema fact. `curve_basis`
+NULL marks a publisher-classified extrapolated/non-liquid point) and `source_as_of`.
+EIOPA post-LLP rates are published by EIOPA rather than calculated by this desk.
+`index_tenor` remains available for a future index-calibrated projection source. `curve_basis`
 states **how the numbers were derived**: `GOVERNMENT_BONDS`, `INTEREST_RATE_SWAPS`,
-`OVERNIGHT_INDEX`, `INTERBANK_COMPOSITE`. A set's as-of is the **oldest**
+`OVERNIGHT_INDEX`. A set's as-of is the **oldest**
 of its sources' dates — a curve is only as current as its stalest anchor, the same rule
 the FX resolver applies to cross legs.
 
@@ -186,10 +193,11 @@ the FX resolver applies to cross legs.
 product allow-list. The catalog also owns the provider, currency, desk-facing family and
 qualifier; `curve_name` is the functional system key. Provider packages map their assigned
 keys to series, dataset or workbook coordinates, which remain source-specific provenance.
-A projection curve whose `index_tenor` does not match the leg is rejected;
-a curve without a declared index can be used only where the allow-list accepts the
-approximation, which the ticket names and the trade records as
-`projection_curve_tracks_index: false`.
+IRS has one public curve choice per settlement currency: the catalog-approved risk-free set.
+Validation copies that name into both discount and projection roles and records
+`pricing_approach: SINGLE_CURVE_APPROXIMATION`. Government-bond sets stay bond-only even when
+their currency matches. The pricing function still accepts a separate projection curve, but
+the public contract does not expose one until a defensible index-calibrated source exists.
 
 The wired catalog (latest stored set per name serves reads; history accumulates one set
 per source-day):
@@ -202,7 +210,6 @@ per source-day):
 | USD · Government bonds | `USD_GOVERNMENT_BONDS` | FRED, 11 `DGS*` series (1M–30Y), one request each | GOVERNMENT_BONDS | 11, all sourced | daily, 1–2 business-day lag; a series whose newest value is `"."` falls back within a 7-observation lookback |
 | EUR · Government bonds · AAA | `EUR_GOVERNMENT_BONDS_AAA` | ECB YC `G_N_A`, one csvdata request | GOVERNMENT_BONDS | ≤11 (3M–30Y), all sourced | daily, publishes ~12:00 CET for the prior TARGET day |
 | EUR · Government bonds · all ratings | `EUR_GOVERNMENT_BONDS_ALL` | ECB YC `G_N_C`, one csvdata request | GOVERNMENT_BONDS | ≤11, all sourced | same — its gap to the AAA curve is the credit-quality spread |
-| PLN · Reference projection · 3M | `PLN_REFERENCE_PROJECTION_3M` | FRED OECD `IR3TIB01PLM156N` (3M interbank) + `IRLTLT01PLM156N` (10Y gov) | INTERBANK_COMPOSITE, `index_tenor` 3M | 2 sourced anchors + 3 linearly interpolated (1Y/2Y/5Y, NULL series) | monthly, ~2-month lag; refetched weekly |
 
 Each EIOPA country build reads the release page; under a stable release a provider-wide
 cycle therefore makes three page requests plus one archive download. The archive is parsed
@@ -212,7 +219,7 @@ is counted, each build reserves two minute tokens before it starts, and only the
 normally downloads the held archive. The stored evidence
 carries the series code, last liquid point, ultimate forward rate, credit risk adjustment
 and selected rates. Licensed benchmarks (Euribor, WIBOR/POLSTR, term SOFR, ICE swap rates) are out
-of reach on the free tier, so every projection except `PLN_REFERENCE_PROJECTION_3M`'s is an approximation.
+of reach on the free tier, so IRS floating payments are explicitly a single-curve approximation.
 
 Stored rates are the published percent values. The wire shape carries both: `points`
 (percent, with per-point provenance — what the chart and inspector read) and flattened
@@ -274,14 +281,31 @@ vendor packages: `providers/base.py` for HTTP/error handling, `official_fixing_f
   interval so the board refreshes rolling rather than in lockstep.
 - **Clocks**: payload `timestamp` is the day bar's open — wrong for freshness;
   `last_quote_at` is the actual quote time and is what the normalizer uses.
-- **Session is per symbol** (`is_market_open` on every quote): NVDA reads CLOSED overnight
-  while EUR/USD on the same provider reads LIVE. FX keeps ticking through the weekend —
+- **Session is per symbol** (`is_market_open` on every quote): NVDA classifies CLOSED overnight
+  and displays EOD, while EUR/USD on the same provider reads LIVE. FX keeps ticking through the weekend —
   verified Sunday 2026-08-23: `"is_market_open": true`, fresh `last_quote_at`, close
   moving 4.31225 → 4.31182. That is Twelve Data's consolidated retail feed (weekend-active
   venues, indicative pricing); the board reports the provider's claim, and the
   official-rates panel beside it (frozen at Friday's as-of) is the counterweight.
 - Errors arrive as HTTP 200 with `{"code": …, "status": "error"}`; `classify_body` maps
   them into the shared state machine.
+
+### Alpha Vantage
+
+- Classes: EQUITY/ETF through `GLOBAL_QUOTE` at grade `EOD`; FX through
+  `CURRENCY_EXCHANGE_RATE` at grade `REALTIME`. Equity normalization accepts an unqualified
+  US symbol with USD currency and the exact returned symbol. FX normalization checks exact
+  from/to currency codes and accepts only UTC/GMT source clocks.
+- Every scheduled, add-triggered and manual request shares one persisted daily ledger keyed
+  by provider and UTC day (22 safe calls of the published 25) and one provider-wide 15-second
+  minimum spacing. Restart seeds due-times from fresh stored observations, restores healthy
+  runtime state and does not consume another call.
+- US equities refresh once after 16:30 America/New_York on business days. Selected FX rows
+  refresh no more than every 12 hours. There is no Alpha typeahead traffic: an existing
+  normalized US equity/ETF or FX search identity gains an Alpha toggle locally.
+- HTTP-200 `Information` and `Note` bodies become typed rate-limit failures;
+  `Error Message` becomes a typed provider-data failure. None can reach normalization or
+  storage as a quote.
 
 ### NBP and ECB
 
@@ -313,14 +337,14 @@ vendor packages: `providers/base.py` for HTTP/error handling, `official_fixing_f
   with `"."` for missing; a bad/unregistered key answers **HTTP 400** naming `api_key`,
   classified as AUTH_FAILED. Budget: 108/min bucket from the published 120/min.
 - Curves are scheduled, not windowed: each builder re-reads on its own interval
-  (`CURVE_REFETCH_SECONDS`, 6 h; EIOPA 24 h; `PLN_REFERENCE_PROJECTION_3M` 7 days) and retries 15 minutes
+  (`CURVE_REFETCH_SECONDS`, 6 h; EIOPA 24 h) and retries 15 minutes
   after a failure. A freshly booted stack builds every set on the first loop tick. The
   publication-window pattern stays with the fixings, where it belongs: a fixing is dated
   the day it is published, so "have we got today's yet?" is answerable, while every curve
   source here publishes with a lag — chasing today's date would poll forever. Manual
   `POST /curves/refresh?curve=` / `?provider=` refetches on demand within the budget.
-- ECB's yield curves share the ECB runtime with the EXR fixings (one status machine,
-  two loops). The former locally entered NBP policy proxy was removed because it was not
+- ECB's yield curves share the ECB runtime with the EXR fixings and two loops; the runtime
+  response exposes separate `feeds.fixings` and `feeds.curves` health snapshots. The former locally entered NBP policy proxy was removed because it was not
   a published term structure.
 
 ## The FX resolver and the reporting currency
@@ -380,8 +404,9 @@ against the reference universe).
   alive by a position or the benchmark stay as POS/BMK rows. History rows are untouched.
 - `GET /symbols/search?q=` — Finnhub `/search` + Twelve Data `symbol_search` fetched in
   parallel, both through their provider budgets, cached 10 min per query, ranked
-  exact-prefix-first, provider-tagged, results name their quote currency. The UI renders
-  one row per symbol with capable providers as toggles.
+  exact-prefix-first and provider-tagged. Normalized US equity/ETF and FX identities attach
+  Alpha capability without an Alpha request; retained watchlist identity provides the same
+  fallback when one external search budget is unavailable. Results name their quote currency.
 
 The board draws no intraday trend: `market_data_snapshots` holds sparse changes observed
 while this application ran, not a market series — connecting them would invent movement
@@ -405,7 +430,7 @@ credits).
 | `GET /fx/rates?to=<CCY>` | one resolution per known currency: rate, path, provider, as-of, or an honest no-path reason |
 | `GET /watchlist` · `POST /watchlist` · `DELETE /watchlist/<symbol>?provider=` | the symbol master, self-service — offers quote providers only |
 | `GET /symbols/search?q=` | provider-tagged discovery, cached 10 min |
-| `GET /providers` | all six wired provider registrations with capabilities and runtime: status, budget + daily ledger, market session, active symbols, and the current poll `strategy` (what the board strip and ops card display) |
+| `GET /providers` | all seven wired registrations with capabilities and runtime: status, budgets/ledgers, market session, active symbols, feed-specific health where relevant, and current poll strategy |
 | `GET /providers/<p>/health` | one provider's runtime detail |
 | `POST /market-data/refresh?symbol=&provider=` | targeted poll within budget — the watchlist row's `↻` action calls this for exactly that symbol/provider pair and the resulting quote returns over SSE; 404 unknown symbol, 422 unsupported class, 429 budget/pace exhausted, 503 disabled/cooldown. Without `symbol`: the provider's whole set — for NBP/ECB one keyless table refetch republishing every reference row |
 
@@ -416,8 +441,10 @@ like quote ticks) — pricing seeds both from the snapshot and follows both even
 Every quote tick carries the full normalized quote plus `stale_after_seconds`,
 `closed_stale_after_seconds`, `market_open` and the origin flags, so any consumer
 classifies freshness without asking the server. Each provider HTTP call writes one
-`provider_http_response` log line (request metadata, outcome, latency, `response_json`) —
-the Logs view formats it on expansion.
+`provider_http_response` log line and one minimal `PROVIDER_FETCH_SUCCEEDED`,
+`PROVIDER_FETCH_FAILED` or `PROVIDER_FETCH_RATE_LIMITED` audit. Fields are limited to
+provider, method, endpoint, status, duration, outcome, optional result count and error type;
+response bodies and credentials are excluded.
 
 ### Error state machine (all providers)
 
@@ -453,8 +480,9 @@ normal freshness gate on its chosen quote provider — and compares the result a
 `client_seen_price` (IRS deviation is measured against notional; a zero model value skips
 the check). Term validation is shared (`shared/term_schemas.validate_terms`) and enforces
 the curve guards in both services identically: settlement currency must have a wired
-curve, discount and projection curves must match it, and a projection curve's declared
-`index_tenor` must match the leg's `floating_rate_index_tenor`. Rate terms
+curve. An IRS must select the approved risk-free curve for its settlement currency; validation
+uses that same set for discounting and projection, rejects a distinct submitted projection,
+and records the single-curve approximation. Rate terms
 (`fixed_rate`, `coupon_rate`) are entered and stored as percent (`4.5`); the same
 percent-stored / fraction-wired boundary the curves use is crossed once, inside the relevant
 `shared/pricing/<asset>.py` formula. The BOND ticket asks for currency, face amount and cashflow terms;
@@ -471,6 +499,10 @@ stamp. `GET /instruments/term-schemas` answers
 `{"schemas", "curves"}` — the schemas with resolved choices plus the curve catalog the
 pickers and guards read.
 
+Each curve metadata row also exposes `age_days`, `stale_after_days` and `stale`. An open
+using any stale selected curve is rejected unless the top-level intent explicitly carries
+`stale_curve_acknowledged: true`; the accepted terms freeze the acknowledged curve names.
+
 ## Storage
 
 | Table | Role | Keying | Growth |
@@ -479,6 +511,7 @@ pickers and guards read.
 | `market_data_snapshots` | quote history, one row per *changed* quote, with `raw_payload` | append; indexed (provider, symbol, received_at) | ~10k rows/day worst case; swept daily past `SNAPSHOT_RETENTION_DAYS` |
 | `market_data_curves` + `market_data_curve_points` | curve sets (basis, stored source evidence) / per-point provenance | unique (provider, curve_name, as_of_date); same-date revisions replace points in place | ≤ one retained set per source date; not swept — years fit in megabytes |
 | `watchlist_items` | the symbol master | symbol (primary key) | user-bounded (cap 25) |
+| `provider_request_ledgers` | restart-safe daily request/credit spend | provider + UTC usage date | one small row per metered provider-day |
 
 Provenance chain: quote-priced trades carry `market_data_provider`; all trades carry
 `entry_price_timestamp`, `client_seen_price`, optional `entry_snapshot_id`, and matching
@@ -491,3 +524,6 @@ rows per source per day, each carrying the full raw table. Curve-priced trades f
 their curve provenance in `metadata` — the drill from a trade runs trade → frozen curve
 name + as-of → retained `market_data_curves` row → stored source evidence. It is traceable,
 but not immutable across a provider revision for the same as-of date.
+
+Quote persistence follows the economic-change rule: a changed price writes the snapshot and
+`QUOTE_WRITTEN`; an unchanged confirmation updates the current row clocks only.

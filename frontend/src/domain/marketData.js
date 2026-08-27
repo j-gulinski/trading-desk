@@ -328,6 +328,7 @@ export function summarizeFeed(instruments, now) {
     rows: instruments.length,
     symbols: new Set(instruments.map((instrument) => instrument.symbol)).size,
     live: 0,
+    eod: 0,
     stale: 0,
     closed: 0,
     missing: 0,
@@ -335,7 +336,8 @@ export function summarizeFeed(instruments, now) {
   }
   for (const instrument of instruments) {
     const state = freshnessOf(instrument, now)
-    if (state === 'LIVE') summary.live += 1
+    if (state === 'LIVE' && instrument.grade === 'EOD') summary.eod += 1
+    else if (state === 'LIVE') summary.live += 1
     else if (state === 'CLOSED') summary.closed += 1
     else if (state === 'MISSING') summary.missing += 1
     else summary.stale += 1

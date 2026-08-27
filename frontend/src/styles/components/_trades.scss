@@ -24,8 +24,8 @@
 // (both carry its class in the markup) and only restate their own sizing here.
 .blotter-toolbar__select,
 .blotter-toolbar__search {
-  min-height: 34px;
-  font-size: 12px;
+  min-height: var(--control-height);
+  font-size: 11px;
 }
 .blotter-toolbar__select {
   width: 200px;
@@ -56,17 +56,17 @@
   background: var(--bg-app);
 }
 .trade-tabs__button {
-  min-height: 28px;
+  min-height: 26px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
+  padding: 3px 9px;
   border: 0;
   border-radius: 4px;
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 
   &:hover {
@@ -111,7 +111,7 @@
   background: var(--bg-panel);
 }
 .blotter-table-panel__head {
-  min-height: 44px;
+  min-height: 38px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -420,7 +420,7 @@
   }
 }
 
-@container page (max-width: 1240px) {
+@container page (max-width: 900px) {
   .trade-blotter-table-wrap {
     overflow-x: hidden;
   }

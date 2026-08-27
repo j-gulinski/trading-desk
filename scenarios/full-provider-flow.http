@@ -1,0 +1,390 @@
+###############################################################################
+# Final integrated acceptance: seven sources, six asset classes, provenance,
+# idempotency, revaluation, close and reconciled portfolio reads.
+#
+# Run top-to-bottom with a REST Client. Provider prices and curve dates are live;
+# never replace a failed provider with a guessed number. Pause at the marked points.
+# Alpha add-triggered refreshes consume the persisted 22-of-25 daily ledger, so use
+# an isolated review day/database when repeating the full setup.
+###############################################################################
+
+@marketData = http://localhost:8001
+@pricing    = http://localhost:8002
+@monitoring = http://localhost:8003
+@books      = http://localhost:8004
+@blotter    = http://localhost:8006
+@actions    = http://localhost:8008
+
+# =========================== BOOT AND SEVEN SOURCES =========================
+
+### Every service is reachable
+GET {{marketData}}/health
+
+###
+GET {{pricing}}/health
+
+###
+GET {{monitoring}}/health
+
+###
+GET {{books}}/health
+
+###
+GET {{blotter}}/health
+
+###
+GET {{actions}}/health
+
+### Exactly seven registrations: FINNHUB, TWELVE_DATA, ALPHA_VANTAGE,
+### NBP, ECB, FRED and EIOPA. ECB exposes fixings and curves separately.
+GET {{marketData}}/providers
+
+### Alpha shows persisted requests/credits, safe budget 22, provider limit 25,
+### minimum spacing, active rows and the EOD/FX strategy.
+GET {{marketData}}/providers/ALPHA_VANTAGE/health
+
+### Official FX from NBP + ECB, with source/path/as-of for display conversion
+GET {{marketData}}/fx/rates?to=EUR
+
+### FRED + ECB + EIOPA curve sets; each set includes age/stale metadata
+GET {{marketData}}/market-data/curves
+
+### Provider-specific curve evidence proves all three curve sources
+GET {{marketData}}/market-data/curves/FRED?raw=1
+
+###
+GET {{marketData}}/market-data/curves/ECB?raw=1
+
+###
+GET {{marketData}}/market-data/curves/EIOPA?raw=1
+
+# ========================= DISCOVERY AND WATCHLIST ==========================
+
+### Search makes Alpha capability visible without calling Alpha typeahead
+GET {{marketData}}/symbols/search?q=AAPL
+
+### Merge each explicitly selected AAPL provider into one instrument identity
+POST {{marketData}}/watchlist
+Content-Type: application/json
+
+{ "symbol": "AAPL", "name": "Apple Inc.", "asset_class": "EQUITY", "currency": "USD", "market": "NASDAQ", "providers": ["FINNHUB"] }
+
+###
+POST {{marketData}}/watchlist
+Content-Type: application/json
+
+{ "symbol": "AAPL", "name": "Apple Inc.", "asset_class": "EQUITY", "currency": "USD", "market": "NASDAQ", "providers": ["TWELVE_DATA"] }
+
+### The first Alpha membership normally performs one budgeted targeted fetch
+POST {{marketData}}/watchlist
+Content-Type: application/json
+
+{ "symbol": "AAPL", "name": "Apple Inc.", "asset_class": "EQUITY", "currency": "USD", "market": "NASDAQ", "providers": ["ALPHA_VANTAGE"] }
+
+### EUR/USD on its two tradeable FX providers
+POST {{marketData}}/watchlist
+Content-Type: application/json
+
+{ "symbol": "EURUSD", "name": "Euro / US Dollar", "asset_class": "FX", "currency": "USD", "market": "OTC", "providers": ["TWELVE_DATA", "ALPHA_VANTAGE"] }
+
+### Commodity coverage
+POST {{marketData}}/watchlist
+Content-Type: application/json
+
+{ "symbol": "XAUUSD", "name": "Gold Spot / US Dollar", "asset_class": "COMMODITY", "currency": "USD", "market": "OTC", "providers": ["TWELVE_DATA"] }
+
+# Wait for add-triggered refreshes. Alpha enforces >=15 seconds between calls.
+
+### Three independent AAPL rows; Alpha is EOD with no synthetic bid/ask
+GET {{marketData}}/market-data/quotes?symbol=AAPL
+
+### Alpha FX carries returned bid/ask and provider refresh time
+GET {{marketData}}/market-data/quotes/ALPHA_VANTAGE/EURUSD
+
+### Snapshot-before-SSE seed contains quotes and curves
+GET {{marketData}}/market-data/snapshot
+
+# ============================= REVIEW BOOKS ================================
+
+# @name equityBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "PHASE6_EQUITY_{{$timestamp}}", "expected_asset_class": "EQUITY" }
+
+###
+# @name fxBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "PHASE6_FX_{{$timestamp}}", "expected_asset_class": "FX" }
+
+###
+# @name commodityBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "PHASE6_COMMODITY_{{$timestamp}}", "expected_asset_class": "COMMODITY" }
+
+###
+# @name bondBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "PHASE6_BOND_{{$timestamp}}", "expected_asset_class": "BOND" }
+
+###
+# @name ratesBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "PHASE6_RATES_{{$timestamp}}", "expected_asset_class": "IRS" }
+
+###
+# @name optionBook
+POST {{books}}/books
+Content-Type: application/json
+
+{ "name": "PHASE6_OPTION_{{$timestamp}}", "expected_asset_class": "EUROPEAN_OPTION" }
+
+### Ticket catalogs are derived from the watchlist/provider and curve catalogs
+GET {{actions}}/instruments
+
+###
+GET {{actions}}/instruments/term-schemas
+
+# ======================== THREE AAPL PROVIDER TRADES ========================
+
+# @name finnhubAapl
+GET {{marketData}}/market-data/quotes/FINNHUB/AAPL
+
+###
+# @name twelveAapl
+GET {{marketData}}/market-data/quotes/TWELVE_DATA/AAPL
+
+###
+# @name alphaAapl
+GET {{marketData}}/market-data/quotes/ALPHA_VANTAGE/AAPL
+
+###
+# @name finnhubTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "phase6-finnhub-{{$timestamp}}", "book_id": "{{equityBook.response.body.$.book_id}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "FINNHUB", "client_seen_price": "{{finnhubAapl.response.body.$.mid}}", "source": "TRADING_TICKET" }
+
+###
+# @name twelveTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "phase6-twelve-{{$timestamp}}", "book_id": "{{equityBook.response.body.$.book_id}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "SELL", "quantity": 1, "market_data_provider": "TWELVE_DATA", "client_seen_price": "{{twelveAapl.response.body.$.mid}}", "source": "TRADING_TICKET" }
+
+### Stable idempotency key for the Alpha request
+@alphaRequestId = phase6-alpha-{{$timestamp}}
+
+###
+# @name alphaTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "{{alphaRequestId}}", "book_id": "{{equityBook.response.body.$.book_id}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "ALPHA_VANTAGE", "client_seen_price": "{{alphaAapl.response.body.$.mid}}", "source": "TRADING_TICKET" }
+
+### Replay returns the same trade id and creates no second economic trade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "{{alphaRequestId}}", "book_id": "{{equityBook.response.body.$.book_id}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "ALPHA_VANTAGE", "client_seen_price": "{{alphaAapl.response.body.$.mid}}", "source": "TRADING_TICKET" }
+
+# ========================= FX AND COMMODITY TRADES ==========================
+
+# @name alphaFx
+GET {{marketData}}/market-data/quotes/ALPHA_VANTAGE/EURUSD
+
+###
+# @name fxTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "phase6-fx-{{$timestamp}}", "book_id": "{{fxBook.response.body.$.book_id}}", "asset_class": "FX", "symbol": "EURUSD", "side": "BUY", "quantity": 1000, "market_data_provider": "ALPHA_VANTAGE", "client_seen_price": "{{alphaFx.response.body.$.mid}}", "source": "TRADING_TICKET" }
+
+###
+# @name xauQuote
+GET {{marketData}}/market-data/quotes/TWELVE_DATA/XAUUSD
+
+###
+# @name commodityTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "phase6-xau-{{$timestamp}}", "book_id": "{{commodityBook.response.body.$.book_id}}", "asset_class": "COMMODITY", "symbol": "XAUUSD", "side": "BUY", "quantity": 1, "market_data_provider": "TWELVE_DATA", "client_seen_price": "{{xauQuote.response.body.$.mid}}", "source": "TRADING_TICKET" }
+
+# ============================ MODEL-PRICED TRADES ===========================
+
+### USD five-year government bond preview
+# @name bondPreview
+POST {{pricing}}/price
+Content-Type: application/json
+
+{ "asset_class": "BOND", "symbol": "BOND-USD-5Y", "terms": { "settlement_currency": "USD", "face_value": 100000, "coupon_rate": 4.0, "maturity_years": 5, "payments_per_year": 2, "discount_curve": "USD_GOVERNMENT_BONDS" } }
+
+###
+# @name bondTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "phase6-bond-{{$timestamp}}", "book_id": "{{bondBook.response.body.$.book_id}}", "asset_class": "BOND", "symbol": "BOND-USD-5Y", "side": "BUY", "quantity": 1, "client_seen_price": "{{bondPreview.response.body.$.price}}", "currency": "USD", "source": "TRADING_TICKET", "terms": { "settlement_currency": "USD", "face_value": 100000, "coupon_rate": 4.0, "maturity_years": 5, "payments_per_year": 2, "discount_curve": "USD_GOVERNMENT_BONDS" } }
+
+### PLN IRS preview. One approved risk-free curve supplies discount factors and
+### implied floating payments under the explicit single-curve approximation.
+# @name irsPreview
+POST {{pricing}}/price
+Content-Type: application/json
+
+{ "asset_class": "IRS", "symbol": "IRS-PLN-5Y", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_RISK_FREE" } }
+
+###
+# @name irsTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "phase6-irs-{{$timestamp}}", "book_id": "{{ratesBook.response.body.$.book_id}}", "asset_class": "IRS", "symbol": "IRS-PLN-5Y", "side": "BUY", "quantity": 1, "client_seen_price": "{{irsPreview.response.body.$.price}}", "currency": "PLN", "source": "TRADING_TICKET", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_RISK_FREE" } }
+
+### AAPL call preview uses the selected Alpha underlying and USD risk-free curve
+# @name optionPreview
+POST {{pricing}}/price
+Content-Type: application/json
+
+{ "asset_class": "EUROPEAN_OPTION", "symbol": "OPT-AAPL-CALL", "market_data_provider": "ALPHA_VANTAGE", "terms": { "underlying_symbol": "AAPL", "option_type": "CALL", "strike": 300, "maturity_years": 1, "discount_curve": "USD_RISK_FREE" } }
+
+###
+# @name optionTrade
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "phase6-option-{{$timestamp}}", "book_id": "{{optionBook.response.body.$.book_id}}", "asset_class": "EUROPEAN_OPTION", "symbol": "OPT-AAPL-CALL", "side": "BUY", "quantity": 1, "market_data_provider": "ALPHA_VANTAGE", "client_seen_price": "{{optionPreview.response.body.$.price}}", "currency": "USD", "source": "TRADING_TICKET", "terms": { "underlying_symbol": "AAPL", "option_type": "CALL", "strike": 300, "maturity_years": 1, "discount_curve": "USD_RISK_FREE" } }
+
+# Wait 3-5 seconds for pricing and blotter reconciliation.
+
+# ========================= PROVENANCE AND PORTFOLIO =========================
+
+### Source, writer, entry snapshot/provider time, live/final valuation and audits
+GET {{blotter}}/trades/{{alphaTrade.response.body.$.trade_id}}
+
+### Curve names/provider/as-of are frozen in the accepted terms
+GET {{blotter}}/trades/{{irsTrade.response.body.$.trade_id}}
+
+### Durable valuation samples
+GET {{blotter}}/trades/{{alphaTrade.response.body.$.trade_id}}/valuations
+
+### Trade create/reject/close and valuation events
+GET {{blotter}}/trades/{{alphaTrade.response.body.$.trade_id}}/audit-logs
+
+### Shared gross/unrealized/realized/total inputs used by all three portfolio screens
+GET {{blotter}}/books/summary
+
+###
+GET {{pricing}}/valuations
+
+###
+GET {{pricing}}/book-risk
+
+### Queue and monitoring surfaces
+GET {{actions}}/queue/status
+
+###
+GET {{monitoring}}/status
+
+### Minimal provider fetch audits contain no response body
+GET {{monitoring}}/audits?event_type=PROVIDER_FETCH_SUCCEEDED&limit=50
+
+### Safe structured call logs
+GET {{monitoring}}/logs?service=market-data-service&q=provider_http_response&limit=50
+
+# ================================ CLOSE ====================================
+
+### Close quote-backed examples with the visible price; the server still rereads
+### the provider frozen on each trade and uses side-aware bid/ask/mid.
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "phase6-close-finnhub-{{$timestamp}}", "trade_id": "{{finnhubTrade.response.body.$.trade_id}}", "client_seen_price": "{{finnhubAapl.response.body.$.mid}}", "close_reason": "PHASE6_SCENARIO" }
+
+###
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "phase6-close-twelve-{{$timestamp}}", "trade_id": "{{twelveTrade.response.body.$.trade_id}}", "client_seen_price": "{{twelveAapl.response.body.$.mid}}", "close_reason": "PHASE6_SCENARIO" }
+
+###
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "phase6-close-alpha-{{$timestamp}}", "trade_id": "{{alphaTrade.response.body.$.trade_id}}", "client_seen_price": "{{alphaAapl.response.body.$.mid}}", "close_reason": "PHASE6_SCENARIO" }
+
+###
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "phase6-close-fx-{{$timestamp}}", "trade_id": "{{fxTrade.response.body.$.trade_id}}", "client_seen_price": "{{alphaFx.response.body.$.mid}}", "close_reason": "PHASE6_SCENARIO" }
+
+###
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "phase6-close-xau-{{$timestamp}}", "trade_id": "{{commodityTrade.response.body.$.trade_id}}", "client_seen_price": "{{xauQuote.response.body.$.mid}}", "close_reason": "PHASE6_SCENARIO" }
+
+### Re-preview model values immediately before close if curves changed.
+### These requests deliberately use the latest preview response as client_seen_price.
+# @name bondClosePreview
+POST {{pricing}}/price
+Content-Type: application/json
+
+{ "asset_class": "BOND", "symbol": "BOND-USD-5Y", "terms": { "settlement_currency": "USD", "face_value": 100000, "coupon_rate": 4.0, "maturity_years": 5, "payments_per_year": 2, "discount_curve": "USD_GOVERNMENT_BONDS" } }
+
+###
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "phase6-close-bond-{{$timestamp}}", "trade_id": "{{bondTrade.response.body.$.trade_id}}", "client_seen_price": "{{bondClosePreview.response.body.$.price}}", "close_reason": "PHASE6_SCENARIO" }
+
+###
+# @name irsClosePreview
+POST {{pricing}}/price
+Content-Type: application/json
+
+{ "asset_class": "IRS", "symbol": "IRS-PLN-5Y", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_RISK_FREE" } }
+
+###
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "phase6-close-irs-{{$timestamp}}", "trade_id": "{{irsTrade.response.body.$.trade_id}}", "client_seen_price": "{{irsClosePreview.response.body.$.price}}", "close_reason": "PHASE6_SCENARIO" }
+
+###
+# @name optionClosePreview
+POST {{pricing}}/price
+Content-Type: application/json
+
+{ "asset_class": "EUROPEAN_OPTION", "symbol": "OPT-AAPL-CALL", "market_data_provider": "ALPHA_VANTAGE", "terms": { "underlying_symbol": "AAPL", "option_type": "CALL", "strike": 300, "maturity_years": 1, "discount_curve": "USD_RISK_FREE" } }
+
+###
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "action_type": "CLOSE_TRADE", "client_request_id": "phase6-close-option-{{$timestamp}}", "trade_id": "{{optionTrade.response.body.$.trade_id}}", "client_seen_price": "{{optionClosePreview.response.body.$.price}}", "close_reason": "PHASE6_SCENARIO" }
+
+# Wait 3-5 seconds. Re-read trade detail and books summary: terminal valuation is
+# present once, realized PnL moved into closed totals, and open gross entry fell.
+
+###
+GET {{blotter}}/trades/{{alphaTrade.response.body.$.trade_id}}
+
+###
+GET {{blotter}}/books/summary
+
+###############################################################################
+# Cleanup is intentionally explicit. Deactivate only these scenario-owned books after
+# every close has reconciled. Watchlist rows may be retained as the named review board;
+# remove only memberships this run added when a disposable state is desired.
+###############################################################################

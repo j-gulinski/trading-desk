@@ -21,7 +21,6 @@ PROJECTION = "PROJECTION"
 GOVERNMENT_BONDS = "GOVERNMENT_BONDS"
 INTEREST_RATE_SWAPS = "INTEREST_RATE_SWAPS"
 OVERNIGHT_INDEX = "OVERNIGHT_INDEX"
-INTERBANK_COMPOSITE = "INTERBANK_COMPOSITE"
 
 EUR_RISK_FREE = "EUR_RISK_FREE"
 USD_RISK_FREE = "USD_RISK_FREE"
@@ -29,13 +28,11 @@ PLN_RISK_FREE = "PLN_RISK_FREE"
 EUR_GOVERNMENT_BONDS_AAA = "EUR_GOVERNMENT_BONDS_AAA"
 EUR_GOVERNMENT_BONDS_ALL = "EUR_GOVERNMENT_BONDS_ALL"
 USD_GOVERNMENT_BONDS = "USD_GOVERNMENT_BONDS"
-PLN_REFERENCE_PROJECTION_3M = "PLN_REFERENCE_PROJECTION_3M"
 
 CURVE_BASES = {
     GOVERNMENT_BONDS: (DISCOUNT, PROJECTION),
     INTEREST_RATE_SWAPS: (DISCOUNT, PROJECTION),
     OVERNIGHT_INDEX: (DISCOUNT, PROJECTION),
-    INTERBANK_COMPOSITE: (DISCOUNT, PROJECTION),
 }
 
 CURVE_CATALOG = {
@@ -45,6 +42,7 @@ CURVE_CATALOG = {
         "family": "RISK_FREE",
         "display_name": "Risk-free",
         "display_qualifier": None,
+        "stale_after_days": 75,
         "uses": (
             "BOND:DISCOUNT", "EUROPEAN_OPTION:DISCOUNT",
             "IRS:DISCOUNT", "IRS:PROJECTION",
@@ -56,6 +54,7 @@ CURVE_CATALOG = {
         "family": "RISK_FREE",
         "display_name": "Risk-free",
         "display_qualifier": None,
+        "stale_after_days": 75,
         "uses": (
             "BOND:DISCOUNT", "EUROPEAN_OPTION:DISCOUNT",
             "IRS:DISCOUNT", "IRS:PROJECTION",
@@ -67,6 +66,7 @@ CURVE_CATALOG = {
         "family": "RISK_FREE",
         "display_name": "Risk-free",
         "display_qualifier": None,
+        "stale_after_days": 75,
         "uses": (
             "BOND:DISCOUNT", "EUROPEAN_OPTION:DISCOUNT",
             "IRS:DISCOUNT", "IRS:PROJECTION",
@@ -78,6 +78,7 @@ CURVE_CATALOG = {
         "family": "GOVERNMENT_BONDS",
         "display_name": "Government bonds",
         "display_qualifier": "AAA",
+        "stale_after_days": 7,
         "uses": ("BOND:DISCOUNT",),
     },
     EUR_GOVERNMENT_BONDS_ALL: {
@@ -86,6 +87,7 @@ CURVE_CATALOG = {
         "family": "GOVERNMENT_BONDS",
         "display_name": "Government bonds",
         "display_qualifier": "all ratings",
+        "stale_after_days": 7,
         "uses": ("BOND:DISCOUNT",),
     },
     USD_GOVERNMENT_BONDS: {
@@ -94,15 +96,8 @@ CURVE_CATALOG = {
         "family": "GOVERNMENT_BONDS",
         "display_name": "Government bonds",
         "display_qualifier": None,
+        "stale_after_days": 7,
         "uses": ("BOND:DISCOUNT",),
-    },
-    PLN_REFERENCE_PROJECTION_3M: {
-        "provider": FRED,
-        "currency": "PLN",
-        "family": "REFERENCE_PROJECTION",
-        "display_name": "Reference projection",
-        "display_qualifier": "3M",
-        "uses": ("IRS:PROJECTION",),
     },
 }
 
@@ -133,6 +128,10 @@ def curve_trade_uses(curve_name):
     return CURVE_CATALOG.get(curve_name, {}).get("uses", ())
 
 
+def curve_trade_roles(curve_name):
+    return tuple(sorted({use.rsplit(":", 1)[-1] for use in curve_trade_uses(curve_name)}))
+
+
 def curve_metadata(curve_name):
     definition = CURVE_CATALOG.get(curve_name)
     if definition is None:
@@ -148,8 +147,9 @@ def curve_metadata(curve_name):
     }
 
 
-def projection_follows_index(index_tenor, leg_index_tenor):
-    return index_tenor is not None and index_tenor == leg_index_tenor
+def curve_stale_after_days(curve_name):
+    definition = CURVE_CATALOG.get(curve_name)
+    return definition.get("stale_after_days") if definition else None
 
 
 @dataclass(frozen=True)

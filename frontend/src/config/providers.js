@@ -8,6 +8,7 @@ export const PROVIDER_STATUS_LEVELS = {
 }
 
 const PROVIDER_NAMES = {
+  ALPHA_VANTAGE: 'Alpha Vantage',
   NBP: 'National Bank of Poland',
   ECB: 'European Central Bank',
   FRED: 'Federal Reserve Economic Data',

@@ -1,9 +1,9 @@
 import StatusPill from '../status/StatusPill.jsx'
 import { providerLabel } from '../../config/providers.js'
 import {
-  FRESHNESS_HINTS,
-  FRESHNESS_LABELS,
   FRESHNESS_PILL_LEVELS,
+  freshnessHintOf,
+  freshnessLabelOf,
 } from '../../config/marketData.js'
 import { formatUnitPrice } from '../../domain/formatting.js'
 import {
@@ -42,8 +42,12 @@ export default function MarketBenchmark({ row }) {
         <span className="market-benchmark__eyebrow">MARKET BENCHMARK</span>
         <StatusPill
           level={FRESHNESS_PILL_LEVELS[row.state] ?? 'unknown'}
-          label={FRESHNESS_LABELS[row.state] ?? row.state}
-          title={FRESHNESS_HINTS[row.state]}
+          label={freshnessLabelOf(
+            row.state,
+            instrument.grade,
+            instrument.providerTimestamp,
+          )}
+          title={freshnessHintOf(row.state, instrument.grade)}
           compact
         />
       </div>

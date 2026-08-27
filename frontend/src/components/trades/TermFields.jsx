@@ -6,7 +6,6 @@ import {
   curveMarketAt,
   curveOptionLabel,
   curveSourceName,
-  curveTitle,
   indexTenorText,
   irsParRateAt,
 } from '../../domain/curves.js'
@@ -96,7 +95,8 @@ function CurveSelect({
   onChange,
 }) {
   const waitingForUnderlying = assetClass === 'EUROPEAN_OPTION' && !currency
-  const choices = waitingForUnderlying
+  const waitingForCurrency = ['BOND', 'IRS'].includes(assetClass) && !currency
+  const choices = waitingForUnderlying || waitingForCurrency
     ? []
     : curveChoicesFor(
         curves,
@@ -107,32 +107,48 @@ function CurveSelect({
       )
   const selected = choices.find((curve) => curve.curve_name === value)
   const marketCurve = selected ? marketCurves?.[value] : null
+  const automaticallyResolved = selected != null && choices.length === 1
   return (
     <>
-    <select
-      id={`term-${field.name}`}
-      className="panel-form__select"
-      value={selected ? value : ''}
-      disabled={choices.length === 0}
-      onChange={(event) => onChange(field.name, event.target.value)}
-    >
-      <option value="">
-        {waitingForUnderlying
-          ? 'Choose underlying first'
-          : curves.length === 0
-          ? 'No curves stored yet'
-          : choices.length === 0
-            ? `No ${currency ? `${currency} ` : ''}curve can take this role`
-            : field.name === 'projection_curve'
-              ? 'Choose projection curve…'
-              : 'Choose discount curve…'}
-      </option>
-      {choices.map((curve) => (
-        <option key={curve.curve_name} value={curve.curve_name}>
-          {curveOptionLabel(curve)}
+    {automaticallyResolved ? (
+      <div
+        id={`term-${field.name}`}
+        className="panel-form__curve-selection"
+        role="status"
+        aria-labelledby={`term-${field.name}-label`}
+        title={`Only eligible ${currency} curve for this role`}
+      >
+        <span>{curveOptionLabel(selected)}</span>
+        <span className="panel-form__curve-selection-mode">Auto</span>
+      </div>
+    ) : (
+      <select
+        id={`term-${field.name}`}
+        className="panel-form__select"
+        value={selected ? value : ''}
+        disabled={choices.length === 0}
+        onChange={(event) => onChange(field.name, event.target.value)}
+      >
+        <option value="">
+          {waitingForUnderlying
+            ? 'Choose underlying first'
+            : waitingForCurrency
+              ? 'Choose currency first'
+              : curves.length === 0
+                ? 'No curves stored yet'
+                : choices.length === 0
+                  ? `No ${currency ? `${currency} ` : ''}curve can take this role`
+                  : field.name === 'projection_curve'
+                    ? 'Choose projection curve…'
+                    : 'Choose discount curve…'}
         </option>
-      ))}
-    </select>
+        {choices.map((curve) => (
+          <option key={curve.curve_name} value={curve.curve_name}>
+            {curveOptionLabel(curve)}
+          </option>
+        ))}
+      </select>
+    )}
     {selected && (
       <details className="panel-form__curve-provenance">
         <summary>
@@ -165,6 +181,11 @@ function CurveSelect({
         </dl>
       </details>
     )}
+    {selected?.stale === true && (
+      <p className="panel-form__error" role="status">
+        {`Stale by this curve’s ${selected.stale_after_days}-day limit.`}
+      </p>
+    )}
     {marketCurve && (
       <CurveMarketContext
         curve={marketCurve}
@@ -178,27 +199,35 @@ function CurveSelect({
   )
 }
 
-function ProjectionNotice({ curves, values }) {
-  const chosen = curves.find((curve) => curve.curve_name === values.projection_curve)
+function SingleCurveNotice({ values }) {
   const legIndex = values.floating_rate_index_tenor
-  if (chosen == null || legIndex == null || chosen.index_tenor === legIndex) return null
+  if (legIndex == null) return null
   return (
-    <details className="panel-form__notice panel-form__notice--expandable">
-      <summary>Projection is an approximation</summary>
+    <div className="panel-form__notice" role="note">
+      <strong className="panel-form__notice-title">Single-curve approximation</strong>
       <p>
-        {`${curveTitle(chosen)} does not follow the ${indexTenorText(legIndex)} `}
-        {'index this leg pays, so the floating payments are approximate.'}
+        {'Floating payments are implied from the selected risk-free curve, not from a curve '}
+        {`calibrated to the contract’s ${indexTenorText(legIndex)} index.`}
       </p>
-    </details>
+    </div>
   )
 }
 
-function Field({ field, values, curves, marketCurves, currency, assetClass, onChange }) {
+function Field({
+  field,
+  values,
+  curves,
+  marketCurves,
+  currency,
+  assetClass,
+  onChange,
+  visuallyHideLabel = false,
+}) {
   const isCurve = CURVE_FIELDS.includes(field.name)
   const fairRate = assetClass === 'IRS' && field.name === 'fixed_rate'
     ? irsParRateAt(
         marketCurves?.[values.discount_curve],
-        marketCurves?.[values.projection_curve],
+        marketCurves?.[values.projection_curve ?? values.discount_curve],
         values.maturity_years,
         values.floating_rate_index_tenor,
       )
@@ -206,8 +235,11 @@ function Field({ field, values, curves, marketCurves, currency, assetClass, onCh
   return (
     <div className={`panel-form__field${isCurve ? ' panel-form__field--wide' : ''}`}>
       <label
-        className={`panel-form__label${
-          CURVE_ROLE_HINTS[field.name] ? ' panel-form__label--hinted' : ''
+        id={`term-${field.name}-label`}
+        className={`panel-form__label${visuallyHideLabel ? ' panel-form__label--sr-only' : ''}${
+          CURVE_ROLE_HINTS[field.name] && !visuallyHideLabel
+            ? ' panel-form__label--hinted'
+            : ''
         }`}
         htmlFor={`term-${field.name}`}
         title={CURVE_ROLE_HINTS[field.name]}
@@ -264,9 +296,6 @@ function Field({ field, values, curves, marketCurves, currency, assetClass, onCh
           </button>
         </div>
       )}
-      {field.name === 'projection_curve' && (
-        <ProjectionNotice curves={curves} values={values} />
-      )}
     </div>
   )
 }
@@ -283,6 +312,7 @@ export default function TermFields({
 }) {
   const contract = schema.fields.filter((field) => !CURVE_FIELDS.includes(field.name))
   const curveFields = schema.fields.filter((field) => CURVE_FIELDS.includes(field.name))
+  const compactSingleCurve = curveFields.length === 1
 
   return (
     <div className="panel-form__model-layout">
@@ -305,7 +335,9 @@ export default function TermFields({
       </div>
       {executionFields}
       <div className="panel-form__group panel-form__group--curves">
-        <h3 className="panel-form__group-title">Curves</h3>
+        <h3 className="panel-form__group-title">
+          {compactSingleCurve ? curveFields[0].label : 'Curves'}
+        </h3>
         <div
           className={`panel-form__terms${
             curveFields.length > 1 ? ' panel-form__terms--paired-curves' : ''
@@ -321,9 +353,11 @@ export default function TermFields({
               currency={currency}
               assetClass={assetClass}
               onChange={onChange}
+              visuallyHideLabel={compactSingleCurve}
             />
           ))}
         </div>
+        {assetClass === 'IRS' && <SingleCurveNotice values={values} />}
       </div>
     </div>
   )

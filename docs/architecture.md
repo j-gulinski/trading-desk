@@ -3,7 +3,7 @@
 Six Python services, one Postgres, one React frontend, started by
 `./scripts/docker-dev.sh up` (a guarded wrapper around Docker Compose).
 Synthetic flows from the forked repository are gone, and market data comes from configured
-real providers. Future capability sequencing lives in the
+real providers. Optional post-project extensions live in the
 [implementation roadmap](implementation-roadmap.md).
 
 ## The system in seven steps
@@ -42,6 +42,7 @@ below replace.
 flowchart LR
     F[Finnhub API] --> C[Provider clients]
     T[Twelve Data API] --> C
+    AV[Alpha Vantage API] --> C
     NB[NBP API] --> C
     EC[ECB API] --> C
     FR[FRED API] --> C
@@ -59,7 +60,7 @@ flowchart LR
     R --> V[(Valuations)]
     R --> B[valuation SSE]
     B --> U
-    C --> L[structured provider_http_response log]
+    C --> L[minimal fetch audit + structured provider_http_response log]
     L --> M[Monitoring log tail]
     M --> U
 ```
@@ -84,6 +85,7 @@ flowchart LR
 | Market UI | `useMarketFeed.js`, `useQuoteHistory.js`, `useWatchlist.js`, `MarketData.jsx` |
 | Curve UI | `domain/curves.js`, `CurveSection.jsx`, `CurveChart.jsx` |
 | Reporting-currency overlay | `useFxRates.js`, `useReportingCurrency.js`, `domain/fx.js`, `FxReport.jsx` |
+| Shared portfolio aggregation | `frontend/src/domain/portfolio.js` |
 | Ticket comparison | `domain/tradeActions.js`, `NewTradePanel.jsx`, `ProviderQuoteOption.jsx`, `TermFields.jsx` |
 | Server execution | `trade_validation.py`, `trade_handlers.py`, `trade_processor.py`, `market_state.py`, `repository.py` |
 | Asset pricing interface | `pricing-service/app/pricers/contract.py`, `pricers/registry.py`, `pricers/<asset>.py`, `shared/pricing/<asset>.py` |
@@ -109,14 +111,15 @@ deployment-independent.
 
 - **`books`** — `book_id`, name, expected asset class, `is_active` (retirement is a soft
   delete).
-- **`trades`** — identity, book, side, quantity, prices, lifecycle status, and `metadata JSONB`
+- **`trades`** — identity, book, side, quantity, prices, lifecycle status, `source`, and `metadata JSONB`
   holding the frozen terms; `asset_class` is `TEXT`, not a database enum. Provenance columns
   are `market_data_provider`, `entry_price_timestamp`,
   optional `entry_snapshot_id` (FK when the exact board observation has a change snapshot),
   `client_seen_price`, `created_by_service`, plus matching close timestamp/snapshot fields —
   written by the execution gate on every trade the ticket creates.
-- **`valuations`** — one row per repricing, plus the terminal row written at close; stamped
-  with `market_data_provider` + `market_data_timestamp`.
+- **`valuations`** — sampled non-terminal repricings (at most once per trade per configured
+  write interval), plus the terminal row written at close; stamped with
+  `market_data_provider` + `market_data_timestamp`. Every revaluation can still publish SSE.
 - **`audit_logs`** — service, event type, severity, message, entity, `correlation_id`,
   timestamp. The audit trail is the business record; rotating log files plus monitoring's
   bounded in-memory buffers are the technical one.
@@ -127,6 +130,8 @@ deployment-independent.
   (`curve_basis` naming how the numbers were derived, stored source evidence at set level)
   with per-point provenance;
   `watchlist_items` — the symbol master that replaced the static instrument catalog.
+- **`provider_request_ledgers`** — durable `(provider, UTC usage day)` request and credit
+  counts; Alpha Vantage uses it to preserve the 22-call safety ceiling across restarts.
 
 Migrations live in `db/versions/` (Alembic) and run as the one-shot `db-migrations` container
 before any service starts.
@@ -147,7 +152,8 @@ before any service starts.
   `alembic upgrade head` job.
 - Intents carry a client-minted `client_request_id` (`manual-open-…`, `manual-move-…`); it is
   the idempotency key (unique constraint) and the `correlation_id` that joins audit rows and
-  log lines into one correlated trace.
+  log lines into one correlated trace. Browser opens also carry `source=TRADING_TICKET`,
+  retained beside `created_by_service=trade-action-service` in the blotter detail.
 
 ## Conventions
 

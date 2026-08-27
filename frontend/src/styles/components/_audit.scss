@@ -18,7 +18,7 @@
   cursor: pointer;
   list-style: none;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
 
   &::-webkit-details-marker {
@@ -73,7 +73,7 @@
 }
 .audit-row__detail-message {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-primary);
 }
 .audit-row__meta-grid {

@@ -111,6 +111,7 @@ export default function NewTradePanel({ onClose }) {
   const [providerChoice, setProviderChoice] = useState('')
   const [quantityText, setQuantityText] = useState('')
   const [termValues, setTermValues] = useState({})
+  const [staleCurveAcknowledged, setStaleCurveAcknowledged] = useState(false)
   const [preview, setPreview] = useState(null)
   const [previewPending, setPreviewPending] = useState(false)
   const [previewRetry, setPreviewRetry] = useState(0)
@@ -165,6 +166,9 @@ export default function NewTradePanel({ onClose }) {
   const underlying = isOption
     ? (catalog ?? []).find((entry) => entry.symbol === termValues.underlying_symbol) ?? null
     : null
+  const selectedStaleCurves = CURVE_TERM_FIELDS
+    .map((field) => curves.find((curve) => curve.curve_name === termValues[field]))
+    .filter((curve) => curve?.stale === true)
 
   useEffect(() => {
     if (selectedBook == null || curvePriced || catalog == null) return
@@ -374,6 +378,7 @@ export default function NewTradePanel({ onClose }) {
     setQuantityText('')
     setErrors({})
     setTermValues({})
+    setStaleCurveAcknowledged(false)
     setPreview(null)
     setPreviewPending(false)
     setSubmitError(null)
@@ -397,6 +402,7 @@ export default function NewTradePanel({ onClose }) {
     setProviderChoice('')
     setQuantityText('')
     setTermValues({})
+    setStaleCurveAcknowledged(false)
     setPreview(null)
     setPreviewPending(false)
     setErrors({})
@@ -409,6 +415,7 @@ export default function NewTradePanel({ onClose }) {
     previewSeq.current += 1
     setPreview(null)
     setPreviewPending(false)
+    setStaleCurveAcknowledged(false)
     setTermValues((current) => {
       const next = { ...current, [name]: value }
       if (!isOption && CURVE_TERM_FIELDS.includes(name) && !next.settlement_currency) {
@@ -469,6 +476,9 @@ export default function NewTradePanel({ onClose }) {
     if (!bookId) next.book = 'Pick a book.'
     if (schema == null) next.terms = 'Term schema unavailable — retrying.'
     else if (!termsComplete) next.terms = 'Fill in every term.'
+    else if (selectedStaleCurves.length > 0 && !staleCurveAcknowledged) {
+      next.terms = 'Acknowledge the stale curve before submitting this trade.'
+    }
     if (isOption && provider === '') {
       next.provider = 'Pick a market data provider for the underlying.'
     } else if (isOption && quote?.state === 'STALE') {
@@ -516,6 +526,7 @@ export default function NewTradePanel({ onClose }) {
             currency: termCurrency,
             provider: isOption ? provider : null,
             previewPrice,
+            staleCurveAcknowledged,
           })
         : buildOpenTradeIntent({
             clientRequestId: requestId,
@@ -718,6 +729,21 @@ export default function NewTradePanel({ onClose }) {
               onChange={setTerm}
               executionFields={executionFields}
             />
+            {selectedStaleCurves.length > 0 && (
+              <label className="panel-form__check">
+                <input
+                  type="checkbox"
+                  checked={staleCurveAcknowledged}
+                  onChange={(event) => {
+                    setStaleCurveAcknowledged(event.target.checked)
+                    clearError('terms')
+                  }}
+                />
+                {`Use ${selectedStaleCurves
+                  .map((curve) => curve.curve_name)
+                  .join(', ')} despite stale source dates`}
+              </label>
+            )}
             <FieldError id="new-trade-terms-error" message={errors.terms} />
           </>
         )}
@@ -785,7 +811,7 @@ export default function NewTradePanel({ onClose }) {
                   ? <LoadingSkeleton variant="inline" label="Computing model value" />
                   : previewPrice != null
                     ? bond
-                      ? formatAmount(bondPricePer100, 2)
+                      ? `${formatAmount(bondPricePer100, 2)} ${termCurrency ?? ''} / 100 face`.trim()
                       : `${irs ? formatSignedAmount(previewPrice) : formatAmount(previewPrice, 2)} ${termCurrency ?? ''}`
                     : '—'
                 : quote?.price != null

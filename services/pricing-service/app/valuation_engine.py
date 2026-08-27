@@ -1,6 +1,7 @@
 """Pricing, revaluation routing, and the active-trade polling loop."""
 
 import time
+import threading
 
 from app import cache, repository
 from app.pnl import compute_pnl, signed_quantity
@@ -9,8 +10,42 @@ from app.valuation_publisher import publish_valuation
 from app.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
 from shared.functions import get_iso_timestamp
 from shared.logging_config import get_logger
+from shared.audit import write_audit
 
 log = get_logger(SERVICE_NAME)
+_blocked_lock = threading.Lock()
+_blocked_trades = set()
+
+
+def _audit_blocked(trade):
+    trade_id = trade["trade_id"]
+    with _blocked_lock:
+        if trade_id in _blocked_trades:
+            return
+        _blocked_trades.add(trade_id)
+    write_audit(
+        SERVICE_NAME,
+        "VALUATION_BLOCKED",
+        "Valuation blocked: required market data is unavailable",
+        entity_type="TRADE",
+        entity_id=trade_id,
+        severity="WARNING",
+        payload={
+            "asset_class": trade["asset_class"],
+            "symbol": trade["symbol"],
+            "market_data_provider": trade.get("market_data_provider"),
+        },
+    )
+
+
+def _clear_blocked(trade_id):
+    with _blocked_lock:
+        _blocked_trades.discard(trade_id)
+
+
+def _retain_active_blocked(active):
+    with _blocked_lock:
+        _blocked_trades.intersection_update(active)
 
 
 def value_trade(trade):
@@ -60,6 +95,20 @@ def value_trade(trade):
                if meta.get("projection_curve") else {}),
             **({"underlying_symbol": meta["underlying_symbol"]}
                if meta.get("underlying_symbol") else {}),
+            **({"face_value": meta["face_value"]}
+               if meta.get("face_value") else {}),
+            "contract_terms": {
+                key: meta[key]
+                for key in (
+                    "coupon_rate",
+                    "fixed_rate",
+                    "maturity_years",
+                    "option_type",
+                    "strike",
+                    "underlying_symbol",
+                )
+                if meta.get(key) is not None
+            },
         },
     }
 
@@ -69,9 +118,12 @@ def _value_and_store(trades):
     for trade in trades:
         valuation = value_trade(trade)
         if valuation is None:
+            _audit_blocked(trade)
             continue
-        if not repository.save_valuation(valuation):
+        persisted = repository.save_valuation(valuation)
+        if persisted == repository.VALUATION_PERSIST_BLOCKED:
             continue
+        _clear_blocked(valuation["trade_id"])
         if not cache.record_valuation(valuation):
             log.debug("valuation_after_final_dropped", trade_id=valuation["trade_id"])
             continue
@@ -96,6 +148,7 @@ def value_all_active():
 
 def refresh_active_trades():
     active = repository.load_active_trades()
+    _retain_active_blocked(active)
     dirty, first_load = cache.replace_active_trades(active)
     if first_load:
         log.info("active_set_bootstrapped", trades=len(active))

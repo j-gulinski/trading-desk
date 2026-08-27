@@ -1,15 +1,15 @@
 ###############################################################################
 # Curves: FRED + ECB + EIOPA curves, provenance, and
-# curve-priced trading with selectable discount/projection curves.
+# curve-priced trading with an explicit single-curve IRS approximation.
 #
 # It covers the /curves routes with per-point provenance and raw source
 # responses, the curve ops surface, a manual curve refresh, the term schemas
 # with their curve catalog, model-priced IRS open/close on currency-consistent
-# curves, and the guards that reject a currency or tenor mismatch.
+# curves, and the guards that reject a currency or product-role mismatch.
 #
 # Prerequisites: the full stack is running and FRED_API_KEY is set (ECB and
 # EIOPA work keyless). Curve sets load within a minute of boot;
-# FRED DGS series lag 1-2 business days, the OECD Poland anchors ~2 months.
+# FRED DGS series lag 1-2 business days.
 ###############################################################################
 
 @marketData = http://localhost:8001
@@ -28,9 +28,8 @@ GET {{marketData}}/providers/FRED/health
 # ============================== CURVE ROUTES ===============================
 
 ### Every latest curve set: points with tenor, published percent rate,
-### source series and source as-of. NULL is a non-anchor/derived classification:
-### PLN reference-projection points are desk-interpolated; EIOPA post-LLP rates are publisher-supplied
-### but classified extrapolated/non-liquid.
+### source series and source as-of. EIOPA post-LLP rates are publisher-supplied
+### but classified extrapolated/non-liquid with a NULL source series.
 GET {{marketData}}/market-data/curves
 
 ### One provider's sets via the provider route
@@ -60,8 +59,8 @@ POST {{marketData}}/market-data/curves/refresh?provider=EIOPA
 
 # ===================== TERM SCHEMAS AND THE CURVE CATALOG ==================
 
-### IRS/BOND/EUROPEAN_OPTION schemas now carry curve pickers; the curve
-### catalog names currency, index tenor and as-of for an informed choice
+### IRS/BOND/EUROPEAN_OPTION schemas carry approved curve choices. IRS exposes
+### one combined discount/projection field and records the single-curve approach.
 GET {{actions}}/instruments/term-schemas
 
 # ========================= MODEL-PRICED EXECUTION ==========================
@@ -81,18 +80,18 @@ Content-Type: application/json
 POST {{pricing}}/price
 Content-Type: application/json
 
-{ "asset_class": "IRS", "symbol": "IRS-PLN-5Y", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_RISK_FREE", "projection_curve": "PLN_REFERENCE_PROJECTION_3M" } }
+{ "asset_class": "IRS", "symbol": "IRS-PLN-5Y", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_RISK_FREE" } }
 
 ###
 @irsSeen = {{irsPreview.response.body.$.price}}
 
-### Open the PLN swap: server recomputes the PV from the stored curves and
-### freezes both curve as-ofs into the trade terms
+### Open the PLN swap: server uses PLN_RISK_FREE for both roles and freezes
+### the shared curve name/as-of plus SINGLE_CURVE_APPROXIMATION in the terms.
 # @name irsTrade
 POST {{actions}}/trade-actions
 Content-Type: application/json
 
-{ "client_request_id": "irs-open-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-PLN-5Y", "side": "BUY", "quantity": 1, "client_seen_price": "{{irsSeen}}", "currency": "PLN", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_RISK_FREE", "projection_curve": "PLN_REFERENCE_PROJECTION_3M" } }
+{ "client_request_id": "irs-open-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-PLN-5Y", "side": "BUY", "quantity": 1, "client_seen_price": "{{irsSeen}}", "currency": "PLN", "source": "TRADING_TICKET", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_RISK_FREE" } }
 
 # ============================ THE CURVE GUARDS =============================
 
@@ -100,13 +99,19 @@ Content-Type: application/json
 POST {{actions}}/trade-actions
 Content-Type: application/json
 
-{ "client_request_id": "irs-guard-ccy-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-PLN-BAD", "side": "BUY", "quantity": 1, "client_seen_price": "0", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "USD_GOVERNMENT_BONDS", "projection_curve": "PLN_REFERENCE_PROJECTION_3M" } }
+{ "client_request_id": "irs-guard-ccy-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-PLN-BAD", "side": "BUY", "quantity": 1, "client_seen_price": "0", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "USD_RISK_FREE" } }
 
-### A 6M floating leg cannot project off the 3M reference-projection curve (422)
+### Same currency is insufficient: a USD government curve cannot project an IRS (422)
 POST {{actions}}/trade-actions
 Content-Type: application/json
 
-{ "client_request_id": "irs-guard-tenor-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-PLN-BAD", "side": "BUY", "quantity": 1, "client_seen_price": "0", "currency": "PLN", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "6M", "discount_curve": "PLN_RISK_FREE", "projection_curve": "PLN_REFERENCE_PROJECTION_3M" } }
+{ "client_request_id": "irs-guard-role-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-USD-BAD", "side": "BUY", "quantity": 1, "client_seen_price": "0", "currency": "USD", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "USD", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "USD_GOVERNMENT_BONDS" } }
+
+### The public contract rejects a separately selected projection curve (422)
+POST {{actions}}/trade-actions
+Content-Type: application/json
+
+{ "client_request_id": "irs-guard-two-curve-{{$timestamp}}", "book_id": "{{irsBookId}}", "asset_class": "IRS", "symbol": "IRS-PLN-BAD", "side": "BUY", "quantity": 1, "client_seen_price": "0", "currency": "PLN", "terms": { "direction": "PAY_FIXED_RECEIVE_FLOAT", "settlement_currency": "PLN", "notional": 1000000, "fixed_rate": 4.5, "maturity_years": 5, "payments_per_year": 4, "floating_rate_index_tenor": "3M", "discount_curve": "PLN_RISK_FREE", "projection_curve": "USD_RISK_FREE" } }
 
 # ===================== THE TRADE AND ITS FROZEN CURVES =====================
 
@@ -123,7 +128,7 @@ GET {{pricing}}/valuations
 POST {{actions}}/trade-actions
 Content-Type: application/json
 
-{ "action_type": "CLOSE_TRADE", "client_request_id": "irs-close-{{$timestamp}}", "trade_id": "{{irsTrade.response.body.$.trade_id}}", "close_reason": "CURVE_SCENARIO_CLEANUP" }
+{ "action_type": "CLOSE_TRADE", "client_request_id": "irs-close-{{$timestamp}}", "trade_id": "{{irsTrade.response.body.$.trade_id}}", "client_seen_price": "{{irsSeen}}", "close_reason": "CURVE_SCENARIO_CLEANUP" }
 
 ### Wait a few seconds for the asynchronous close, then deactivate the empty book
 DELETE {{books}}/books/{{irsBookId}}

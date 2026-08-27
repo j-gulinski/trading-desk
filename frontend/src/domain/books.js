@@ -15,14 +15,17 @@ export function bookSummariesOf(raw) {
       assetClass: book.expected_asset_class ?? 'UNKNOWN',
       activeTrades: toNum(book.active_trades) ?? 0,
       closedTrades: toNum(book.closed_trades) ?? 0,
+      grossEntryValue: toNum(book.gross_entry_value),
       realizedPnl: toNum(book.realized_pnl),
       unrealizedPnl: toNum(book.unrealized_pnl),
       currency: book.currency ?? null,
       subtotals: (Array.isArray(book.subtotals) ? book.subtotals : []).map((row) => ({
         currency: row.currency,
         values: {
+          grossEntry: toNum(row.values?.gross_entry) ?? 0,
           unrealized: toNum(row.values?.unrealized) ?? 0,
           realized: toNum(row.values?.realized) ?? 0,
+          total: toNum(row.values?.total) ?? 0,
         },
       })),
       isActive: book.is_active !== false,
@@ -35,13 +38,6 @@ export function moveTargetsOf(books, book) {
   return books.filter(
     (other) => other.isActive && other.id !== book.id && other.assetClass === book.assetClass,
   )
-}
-
-export function summarizeBooks(books) {
-  return {
-    books: books.length,
-    openPositions: books.reduce((sum, book) => sum + book.activeTrades, 0),
-  }
 }
 
 function positionStatusOf(position, now, instruments, curves) {
@@ -81,11 +77,12 @@ export function bookPositionsOf(book, now, instruments = {}, curves = {}) {
   return (book?.positions ?? []).map((position) => {
     const provider = position.market_data_provider ?? null
     return {
-      id: `${position.symbol}:${position.currency ?? 'N/A'}:${provider ?? 'MODEL'}`,
+      id: `${position.symbol}:${position.currency ?? 'N/A'}:${provider ?? 'MODEL'}:${position.contract_key ?? ''}`,
       symbol: position.symbol,
       provider,
       currency: position.currency ?? null,
       assetClass: position.asset_class ?? 'UNKNOWN',
+      terms: position.terms && typeof position.terms === 'object' ? position.terms : null,
       netQuantity: toNum(position.net_quantity) ?? 0,
       averageEntry: toNum(position.average_entry),
       price: toNum(position.current_price),

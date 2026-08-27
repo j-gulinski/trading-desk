@@ -79,14 +79,14 @@ GET {{marketData}}/market-data/quotes/TWELVE_DATA/AAPL
 POST {{actions}}/trade-actions
 Content-Type: application/json
 
-{ "client_request_id": "finnhub-{{$timestamp}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "FINNHUB", "client_seen_price": "{{finnhubQuote.response.body.$.mid}}" }
+{ "client_request_id": "finnhub-{{$timestamp}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "FINNHUB", "client_seen_price": "{{finnhubQuote.response.body.$.mid}}", "source": "TRADING_TICKET" }
 
 ### Open through Twelve Data
 # @name twelveTrade
 POST {{actions}}/trade-actions
 Content-Type: application/json
 
-{ "client_request_id": "twelve-{{$timestamp}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "TWELVE_DATA", "client_seen_price": "{{twelveQuote.response.body.$.mid}}" }
+{ "client_request_id": "twelve-{{$timestamp}}", "book_id": "{{bookId}}", "asset_class": "EQUITY", "symbol": "AAPL", "side": "BUY", "quantity": 1, "market_data_provider": "TWELVE_DATA", "client_seen_price": "{{twelveQuote.response.body.$.mid}}", "source": "TRADING_TICKET" }
 
 ### Repeat the first request ID; the worker must not create a second trade
 # @name duplicateFinnhubTrade
@@ -110,13 +110,13 @@ GET {{blotter}}/trades/{{duplicateFinnhubTrade.response.body.$.trade_id}}
 POST {{actions}}/trade-actions
 Content-Type: application/json
 
-{ "action_type": "CLOSE_TRADE", "client_request_id": "close-finnhub-{{$timestamp}}", "trade_id": "{{finnhubTrade.response.body.$.trade_id}}", "close_reason": "SCENARIO_CLEANUP" }
+{ "action_type": "CLOSE_TRADE", "client_request_id": "close-finnhub-{{$timestamp}}", "trade_id": "{{finnhubTrade.response.body.$.trade_id}}", "client_seen_price": "{{finnhubQuote.response.body.$.mid}}", "close_reason": "SCENARIO_CLEANUP" }
 
 ### Close the Twelve Data trade through its frozen feed
 POST {{actions}}/trade-actions
 Content-Type: application/json
 
-{ "action_type": "CLOSE_TRADE", "client_request_id": "close-twelve-{{$timestamp}}", "trade_id": "{{twelveTrade.response.body.$.trade_id}}", "close_reason": "SCENARIO_CLEANUP" }
+{ "action_type": "CLOSE_TRADE", "client_request_id": "close-twelve-{{$timestamp}}", "trade_id": "{{twelveTrade.response.body.$.trade_id}}", "client_seen_price": "{{twelveQuote.response.body.$.mid}}", "close_reason": "SCENARIO_CLEANUP" }
 
 ### A second close is rejected because the trade is no longer active
 POST {{actions}}/trade-actions

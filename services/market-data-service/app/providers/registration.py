@@ -42,6 +42,7 @@ class ProviderRegistration:
     quote_feed: QuoteFeed | None = None
     curve_feed: CurveFeedContract | None = None
     normalize_search: Callable[[dict], list[dict]] | None = None
+    attach_search: Callable[[dict], dict | None] | None = None
 
     def __post_init__(self):
         capability = PROVIDERS.get(self.name)
@@ -68,6 +69,8 @@ class ProviderRegistration:
             raise ValueError(f"{self.name} curve feed declares {self.curve_feed.provider}")
         if self.normalize_search is not None and self.quote_mode != "symbol":
             raise ValueError(f"{self.name} search requires a symbol quote feed")
+        if self.attach_search is not None and self.quote_mode != "symbol":
+            raise ValueError(f"{self.name} attached search requires a symbol quote feed")
 
     def poll_loops(self):
         loops = []

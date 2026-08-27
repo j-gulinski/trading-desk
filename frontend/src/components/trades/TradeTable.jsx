@@ -32,6 +32,8 @@ export default function TradeTable({
   selectedTradeId,
   onSelect,
   caption,
+  sortDisabledReason,
+  comparisonCurrency,
 }) {
   return (
     <DataTable
@@ -39,10 +41,19 @@ export default function TradeTable({
       rows={rows}
       rowKey={(row) => row.trade.id}
       renderCell={(column, row) => (
-        <TradeCell column={column} row={row} onSelect={onSelect} />
+        <TradeCell
+          column={column}
+          row={row}
+          onSelect={onSelect}
+          comparisonValue={
+            column.id === table.sort.column ? table.sort.snapshot?.[row.trade.id] : null
+          }
+          comparisonCurrency={comparisonCurrency}
+        />
       )}
       sort={table.sort}
       onSort={table.toggleSort}
+      sortDisabledReason={sortDisabledReason}
       rowClassName={(row) => rowClassName(row, selectedTradeId)}
       cellClassName={cellClassName}
       cellTitle={cellTitle}

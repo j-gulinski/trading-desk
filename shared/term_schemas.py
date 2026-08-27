@@ -1,7 +1,5 @@
 import math
 
-from shared.curves import projection_follows_index
-
 DEFAULT_VOLATILITY = 0.22
 IRS_PAYMENTS_PER_YEAR = {"3M": 4, "6M": 2}
 MAX_CONTRACT_AMOUNT = 1_000_000_000_000
@@ -43,9 +41,8 @@ TERM_SCHEMAS = {
             {"name": "floating_rate_index_tenor", "label": "FLOATING INDEX TENOR",
              "type": "choice", "choices": ["3M", "6M"],
              "labels": {"3M": "3-month", "6M": "6-month"}},
-            {"name": "discount_curve", "label": "DISCOUNT CURVE", "type": "choice",
-             "choices_source": "CURVES"},
-            {"name": "projection_curve", "label": "PROJECTION CURVE", "type": "choice",
+            {"name": "discount_curve", "label": "DISCOUNT / PROJECTION CURVE",
+             "type": "choice",
              "choices_source": "CURVES"},
         ],
     },
@@ -87,6 +84,17 @@ def _field_choices(field, underlying_choices, curves):
     return field["choices"]
 
 
+def _public_curve_choices(asset_class, field_name, curves):
+    required_uses = {_trade_use(asset_class, field_name)}
+    if asset_class == "IRS":
+        required_uses = {"IRS:DISCOUNT", "IRS:PROJECTION"}
+    return [
+        curve["curve_name"]
+        for curve in curves
+        if required_uses.issubset(set(curve.get("uses", ())))
+    ]
+
+
 def public_term_schemas(underlying_choices, curves=()):
     schemas = {}
     for asset_class, schema in TERM_SCHEMAS.items():
@@ -98,7 +106,11 @@ def public_term_schemas(underlying_choices, curves=()):
             public_field = {
                 key: value for key, value in field.items() if key != "choices_source"
             }
-            public_field["choices"] = _field_choices(field, underlying_choices, curves)
+            public_field["choices"] = (
+                _public_curve_choices(asset_class, field["name"], curves)
+                if field.get("choices_source") == "CURVES"
+                else _field_choices(field, underlying_choices, curves)
+            )
             if field.get("choices_source") == "CURVES":
                 public_field["choices_source"] = "CURVES"
             fields.append(public_field)
@@ -185,6 +197,13 @@ def validate_terms(asset_class, raw, underlying_choices=(), curves=(),
         terms["payments_per_year"] = IRS_PAYMENTS_PER_YEAR[
             terms["floating_rate_index_tenor"]
         ]
+        supplied_projection = raw.get("projection_curve")
+        if supplied_projection not in (None, "", terms["discount_curve"]):
+            return None, (
+                "IRS uses one selected risk-free curve for discounting and projection"
+            )
+        terms["projection_curve"] = terms["discount_curve"]
+        terms["pricing_approach"] = "SINGLE_CURVE_APPROXIMATION"
 
     terms["asset_class"] = asset_class
     if "settlement_currency" in terms:
@@ -201,11 +220,4 @@ def validate_terms(asset_class, raw, underlying_choices=(), curves=(),
     guard_error = _curve_guards(asset_class, terms, curves)
     if guard_error is not None:
         return None, guard_error
-    projection = next(
-        (c for c in curves if c["curve_name"] == terms.get("projection_curve")), None
-    )
-    if projection is not None:
-        terms["projection_curve_tracks_index"] = projection_follows_index(
-            projection.get("index_tenor"), terms.get("floating_rate_index_tenor")
-        )
     return terms, None

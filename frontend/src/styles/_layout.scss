@@ -9,7 +9,7 @@
   box-sizing: border-box;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
-  padding: var(--sp-5) var(--sp-4);
+  padding: var(--sp-4) var(--sp-3);
 
   position: sticky;
   top: 0;
@@ -17,7 +17,7 @@
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-5);
+  gap: var(--sp-4);
   overflow-y: auto;
 }
 
@@ -73,7 +73,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 14px;
 }
 .sidebar__brand-sub {
   font-size: 10px;
@@ -100,12 +100,12 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  min-height: 36px;
-  padding: var(--sp-2) var(--sp-2);
+  min-height: 32px;
+  padding: 6px var(--sp-2);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   text-decoration: none;
-  font-size: 13px;
+  font-size: 12px;
 
   &:hover {
     background: var(--bg-panel-hover);
@@ -234,35 +234,35 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--sp-4);
-  padding: var(--sp-5) var(--sp-6);
-  margin-bottom: var(--sp-4);
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--page-gutter);
+  margin-bottom: var(--sp-3);
   border-bottom: 1px solid var(--border);
 }
 .topbar__heading {
   min-width: 0;
 }
 .topbar__title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
 }
 .topbar__subtitle {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   margin-top: 2px;
 }
 .topbar__action {
-  min-height: 34px;
+  min-height: 32px;
   flex-shrink: 0;
-  padding: 0 var(--sp-4);
+  padding: 0 var(--sp-3);
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: var(--text-on-accent);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   transition: background 120ms ease;
@@ -276,7 +276,7 @@
   }
 }
 .page {
-  padding: 0 var(--sp-6) var(--sp-6);
+  padding: 0 var(--page-gutter) var(--page-gutter);
 }
 .page__placeholder {
   border: 1px dashed var(--border-strong);
@@ -337,7 +337,7 @@
 
   .streams-badge,
   .sidebar--collapsed .streams-badge {
-    width: 44px;
+    width: 100%;
     justify-content: center;
     padding: var(--sp-2) 0;
     gap: var(--sp-1);
@@ -356,7 +356,7 @@
     align-items: center;
     gap: var(--sp-3);
     padding: var(--sp-4);
-    margin-bottom: var(--sp-4);
+    margin-bottom: var(--sp-3);
   }
 
   .topbar__title {
@@ -379,6 +379,6 @@
   }
 
   .page {
-    padding: 0 var(--sp-4) var(--sp-5);
+    padding: 0 var(--sp-3) var(--sp-5);
   }
 }

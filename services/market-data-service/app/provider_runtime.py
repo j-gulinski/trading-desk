@@ -38,6 +38,8 @@ class ProviderRuntime:
         provider_minute_limit=None,
         provider_daily_limit=None,
         keyless=False,
+        persisted_daily_ledger=False,
+        min_request_interval_seconds=None,
     ):
         self.provider = provider
         self.keyless = keyless
@@ -45,9 +47,17 @@ class ProviderRuntime:
             RollingMinuteBudget(budget_per_minute)
             if budget_per_minute is not None else None
         )
-        self.ledger = DailyLedger(daily_budget, provider_daily_limit)
+        self.ledger = DailyLedger(
+            daily_budget,
+            provider_daily_limit,
+            provider=provider,
+            persisted=persisted_daily_ledger,
+        )
         self._budget_per_minute = budget_per_minute
         self._provider_minute_limit = provider_minute_limit
+        self._min_request_interval_seconds = min_request_interval_seconds
+        self._last_budget_take = None
+        self._take_lock = threading.Lock()
         self._lock = threading.Lock()
         self._status = "STARTING" if api_key_present else "DISABLED"
         self._last_error = None if api_key_present else "API key is not set"
@@ -61,10 +71,38 @@ class ProviderRuntime:
         self._active_loaded_at = None
 
     def try_take(self, cost=1):
-        return True if self.bucket is None else self.bucket.try_take(cost)
+        with self._take_lock:
+            now = time.monotonic()
+            if (
+                self._min_request_interval_seconds is not None
+                and self._last_budget_take is not None
+                and now - self._last_budget_take < self._min_request_interval_seconds
+            ):
+                return False
+            if self.bucket is not None and not self.bucket.try_take(cost):
+                return False
+            self._last_budget_take = now
+            return True
 
     def budget_wait_seconds(self, cost=1):
-        return 0 if self.bucket is None else self.bucket.seconds_until_available(cost)
+        minute_wait = 0 if self.bucket is None else self.bucket.seconds_until_available(cost)
+        with self._take_lock:
+            spacing_wait = 0
+            if (
+                self._min_request_interval_seconds is not None
+                and self._last_budget_take is not None
+            ):
+                spacing_wait = max(
+                    0,
+                    round(
+                        self._last_budget_take
+                        + self._min_request_interval_seconds
+                        - time.monotonic()
+                    ),
+                )
+        if minute_wait is None:
+            return spacing_wait or None
+        return max(minute_wait, spacing_wait)
 
     def record_request(self, credits=1):
         self.ledger.record(credits)
@@ -194,6 +232,14 @@ class ProviderRuntime:
                 entity_id=self.provider,
             )
 
+    def restore_success(self, last_success_at):
+        """Restore healthy runtime state from a persisted provider observation."""
+        with self._lock:
+            if self._status == "STARTING":
+                self._status = "OK"
+                self._last_error = None
+                self._last_success_at = last_success_at
+
     def enter_cooldown(self, status, label, detail, cooldown_seconds, event_type, severity):
         with self._lock:
             previous = self._status
@@ -216,7 +262,7 @@ class ProviderRuntime:
                 entity_type="PROVIDER",
                 entity_id=self.provider,
                 severity=severity,
-                payload={"detail": detail, "cooldown_seconds": cooldown_seconds},
+                payload={"cooldown_seconds": cooldown_seconds},
             )
 
     def transient_error(self, detail, backoff_seconds):
@@ -230,12 +276,12 @@ class ProviderRuntime:
         if previous != "ERROR":
             write_audit(
                 SERVICE_NAME,
-                "PROVIDER_FETCH_FAILED",
+                "PROVIDER_UNAVAILABLE",
                 f"{self.provider} request failed — retrying in {backoff_seconds}s",
                 entity_type="PROVIDER",
                 entity_id=self.provider,
                 severity="WARNING",
-                payload={"detail": detail, "backoff_seconds": backoff_seconds},
+                payload={"backoff_seconds": backoff_seconds},
             )
 
     def snapshot(self, active_symbols):
@@ -265,6 +311,9 @@ class ProviderRuntime:
                 budget["usage_percent"] = PROVIDER_BUDGET_USAGE_PERCENT
             if "daily_budget" in budget:
                 budget["active_window_hours"] = PROVIDER_ACTIVE_WINDOW_HOURS
+        if self._min_request_interval_seconds is not None:
+            budget["min_request_interval_seconds"] = self._min_request_interval_seconds
+            budget["next_request_seconds"] = self.budget_wait_seconds()
         return {
             **state,
             "keyless": self.keyless,

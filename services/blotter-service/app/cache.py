@@ -10,7 +10,8 @@ class Trade:
                  close_price=None, close_reason=None, market_data_provider=None,
                  entry_price_timestamp=None, entry_snapshot_id=None,
                  close_price_timestamp=None, close_snapshot_id=None,
-                 client_seen_price=None, terms=None):
+                 client_seen_price=None, source=None, created_by_service=None,
+                 terms=None):
         self.trade_id = trade_id
         self.book_id = book_id
         self.asset_class = asset_class
@@ -30,6 +31,8 @@ class Trade:
         self.close_price_timestamp = close_price_timestamp
         self.close_snapshot_id = close_snapshot_id
         self.client_seen_price = client_seen_price
+        self.source = source
+        self.created_by_service = created_by_service
         self.terms = terms
 
 

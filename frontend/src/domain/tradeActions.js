@@ -116,6 +116,7 @@ export function providerQuotesOf({ instrument, feed, side, now }) {
       atMs: quote.providerTimestampMs,
       providerTimestamp: quote.providerTimestamp,
       receivedAt: quote.receivedAt,
+      grade: quote.grade,
       tradeable: TRADEABLE_STATES.includes(state) && Number.isFinite(price) && price > 0,
     }
   })
@@ -176,7 +177,7 @@ export function buildOpenTradeIntent({
     currency: quote.currency ?? 'USD',
     market_data_provider: quote.provider,
     client_seen_price: String(quote.price),
-    source: 'MANUAL',
+    source: 'TRADING_TICKET',
   }
 }
 
@@ -190,6 +191,7 @@ export function buildCurveTradeIntent({
   currency,
   provider,
   previewPrice,
+  staleCurveAcknowledged = false,
 }) {
   return {
     action_type: 'OPEN_TRADE',
@@ -202,7 +204,8 @@ export function buildCurveTradeIntent({
     currency: currency ?? undefined,
     market_data_provider: provider || undefined,
     client_seen_price: String(previewPrice),
-    source: 'MANUAL',
+    source: 'TRADING_TICKET',
+    stale_curve_acknowledged: staleCurveAcknowledged,
   }
 }
 

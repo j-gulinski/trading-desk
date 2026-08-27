@@ -212,7 +212,11 @@ export default function MarketData() {
           sub={`${summary.rows} provider ${summary.rows === 1 ? 'quote' : 'quotes'}`}
         />
         <StatCard label="LIVE" value={summary.live} sub="inside freshness budget" tone="info" />
-        <StatCard label="CLOSED" value={summary.closed} sub="latest session quote" />
+        <StatCard
+          label="EOD"
+          value={summary.eod + summary.closed}
+          sub="latest accepted close"
+        />
         <StatCard
           label="STALE"
           value={summary.stale}

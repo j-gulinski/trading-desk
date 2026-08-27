@@ -14,7 +14,7 @@ export const ROUTES = [
 
   { path: 'business-overview', label: 'Business Overview', subtitle: 'top-level PnL, book risk & valuation freshness', group: 'TRADING', component: BusinessOverview },
   { path: 'market-data', label: 'Market Data', subtitle: 'provider watchlist and live quotes', group: 'TRADING', component: MarketData },
-  { path: 'valuations', label: 'Valuations & Risk', subtitle: 'fair value, PnL, alpha & beta', group: 'TRADING', component: Valuations },
+  { path: 'valuations', label: 'Valuations & Risk', subtitle: 'position value, PnL, alpha & beta', group: 'TRADING', component: Valuations },
   { path: 'books', label: 'Books', subtitle: 'manage trading books', group: 'TRADING', component: Books },
   { path: 'trades', label: 'Trades & PnL', subtitle: 'operational blotter — trades, valuations & audit', group: 'TRADING', component: Trades },
 ]

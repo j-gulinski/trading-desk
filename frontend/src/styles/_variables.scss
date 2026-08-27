@@ -40,10 +40,13 @@
   --radius-sm: 6px;
   --radius-md: 10px;
 
-  --sidebar-width: 210px;
-  --sidebar-width-collapsed: 60px;
+  --sidebar-width: 196px;
+  --sidebar-width-collapsed: 52px;
 
-  --panel-width: 440px;
-  --panel-width-wide: 620px;
-  --panel-width-roomy: clamp(620px, 48vw, 720px);
+  --panel-width: 420px;
+  --panel-width-wide: 600px;
+  --panel-width-roomy: clamp(600px, 46vw, 680px);
+
+  --page-gutter: 24px;
+  --control-height: 30px;
 }

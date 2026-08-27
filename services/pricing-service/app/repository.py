@@ -4,16 +4,21 @@ import datetime
 import uuid
 from decimal import Decimal
 
-from app.config import SERVICE_NAME
+from app.config import SERVICE_NAME, VALUATION_WRITE_INTERVAL_SECONDS
 from app.pnl import signed_quantity
 from shared.db import session_scope
 from shared.functions import get_iso_timestamp, utcnow
 from shared.logging_config import get_logger
+from shared.audit import write_audit
 from sqlalchemy import and_, func
 
 from shared.models import Book, Trade, Valuation
 
 log = get_logger(SERVICE_NAME)
+
+VALUATION_PERSISTED = "PERSISTED"
+VALUATION_THROTTLED = "THROTTLED"
+VALUATION_PERSIST_BLOCKED = "BLOCKED"
 
 CURVE_PROVENANCE_FIELDS = (
     "discount_curve",
@@ -67,6 +72,7 @@ def _parse_timestamp(value):
 def save_valuation(valuation):
     try:
         with session_scope() as session:
+            now = utcnow()
             active_trade = (
                 session.query(Trade.trade_id, Trade.book_id)
                 .filter(
@@ -81,7 +87,7 @@ def save_valuation(valuation):
                     "valuation_persist_skipped_closed_trade",
                     trade_id=valuation.get("trade_id"),
                 )
-                return False
+                return VALUATION_PERSIST_BLOCKED
             if str(active_trade.book_id) != str(valuation.get("book_id")):
                 log.debug(
                     "valuation_persist_skipped_reassigned_trade",
@@ -89,14 +95,23 @@ def save_valuation(valuation):
                     valued_book_id=valuation.get("book_id"),
                     current_book_id=str(active_trade.book_id),
                 )
-                return False
+                return VALUATION_PERSIST_BLOCKED
+            latest_time = (
+                session.query(func.max(Valuation.valuation_time))
+                .filter(Valuation.trade_id == active_trade.trade_id)
+                .scalar()
+            )
+            if latest_time is not None and (
+                now - latest_time
+            ).total_seconds() < VALUATION_WRITE_INTERVAL_SECONDS:
+                return VALUATION_THROTTLED
             session.add(
                 Valuation(
                     valuation_id=uuid.uuid4(),
                     trade_id=uuid.UUID(valuation["trade_id"]),
                     book_id=uuid.UUID(valuation["book_id"]),
                     asset_class=valuation["asset_class"],
-                    valuation_time=utcnow(),
+                    valuation_time=now,
                     fair_value=valuation["fair_value"],
                     market_value=valuation.get("market_value"),
                     unrealized_pnl=valuation["unrealized_pnl"],
@@ -108,13 +123,29 @@ def save_valuation(valuation):
                         valuation.get("market_data_timestamp")
                     ),
                     valuation_payload=valuation.get("valuation_payload"),
-                    created_at=utcnow(),
+                    created_at=now,
                 )
             )
-        return True
+            write_audit(
+                SERVICE_NAME,
+                "VALUATION_UPDATED",
+                "Sampled valuation persisted",
+                entity_type="TRADE",
+                entity_id=valuation["trade_id"],
+                payload={
+                    "fair_value": str(valuation["fair_value"]),
+                    "unrealized_pnl": str(valuation["unrealized_pnl"]),
+                    "currency": valuation["currency"],
+                    "market_data_provider": valuation.get("market_data_provider"),
+                    "market_data_timestamp": valuation.get("market_data_timestamp"),
+                    "write_interval_seconds": VALUATION_WRITE_INTERVAL_SECONDS,
+                },
+                session=session,
+            )
+        return VALUATION_PERSISTED
     except Exception:
         log.exception("valuation_persist_failed", trade_id=valuation.get("trade_id"))
-        return False
+        return VALUATION_PERSIST_BLOCKED
 
 
 def load_terminal_valuations():

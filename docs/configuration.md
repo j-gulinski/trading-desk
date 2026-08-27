@@ -42,9 +42,10 @@ join this table then.
 | --- | --- | --- |
 | `FINNHUB_API_KEY` | finnhub.io | Real-time US equities/ETF, 60 req/min free tier; the first provider wired in. |
 | `TWELVE_DATA_API_KEY` | twelvedata.com | Batch quotes; the binding free-tier constraint is 800 credits/day; also the XAU/USD (metals) source. |
-| `FRED_API_KEY` | fred.stlouisfed.org | Free instant key, 120 req/min; USD Treasury series and the OECD Poland anchors. |
+| `ALPHA_VANTAGE_API_KEY` | alphavantage.co | US equity/ETF EOD marks and FX exchange-rate quotes; free service is guarded at 22 of 25 calls/day. |
+| `FRED_API_KEY` | fred.stlouisfed.org | Free instant key, 120 req/min; USD Treasury series. |
 
-NBP, ECB and EIOPA require no key. Alpha Vantage is not a Phase 5 runtime dependency.
+NBP, ECB and EIOPA require no key.
 
 ## Market data — Finnhub
 
@@ -67,7 +68,7 @@ prefixes. Thus the NBP/ECB publication windows are source-specific, while the co
 5-min retry, hourly confirmation, universe refresh and 4-hour freshness grace are application
 policy shared by both fixing feeds—not provider-published limits. Curves are scheduled rather
 than windowed (`CURVE_REFETCH_SECONDS`, `CURVE_RETRY_SECONDS`,
-`EIOPA_CURVE_REFETCH_SECONDS`, `FRED_PLN_CURVE_REFETCH_SECONDS`). Source facts change only when
+`EIOPA_CURVE_REFETCH_SECONDS`). Source facts change only when
 a probe shows the source itself changed. `tzdata` is in
 `requirements.txt` solely so `zoneinfo` can evaluate those two source timezones inside the
 `python:slim` images, which ship no system tz database.
@@ -82,10 +83,10 @@ a probe shows the source itself changed. `tzdata` is in
 
 | Variable | Default | Read by | Why |
 | --- | --- | --- | --- |
-| `FRED_PROVIDER_LIMIT_PER_MINUTE` | `120` | market-data-service | Published FRED allowance; the shared 90% ceiling derives a 108/min bucket. Builders reserve their worst case before starting: 11 requests for Treasury and 2 for PLN. |
+| `FRED_PROVIDER_LIMIT_PER_MINUTE` | `120` | market-data-service | Published FRED allowance; the shared 90% ceiling derives a 108/min bucket. The Treasury builder reserves its 11-request worst case before starting. |
 | `EIOPA_REQUEST_BUDGET_PER_MINUTE` | `10` | market-data-service | Local application safety budget—not an EIOPA-published limit. It prevents repeated manual refreshes from hammering a public HTML/download host. Each country build reserves two calls; the downloaded archive is reused across the three builds. |
 
-| `CURVE_REFETCH_SECONDS` | `21600` | market-data-service | How often a curve is re-read when the last read succeeded. Six hours suits every daily source here: they publish once a business day, and a manual refresh covers impatience. Two curves override it — EIOPA at 24 h (a monthly release) and `PLN_REFERENCE_PROJECTION_3M` at 7 days (monthly OECD series). |
+| `CURVE_REFETCH_SECONDS` | `21600` | market-data-service | How often a daily curve is re-read when the last read succeeded. EIOPA overrides it at 24 h because its release is monthly; manual refresh covers impatience. |
 
 Fixed knobs behind these: a 15-minute retry after a failed curve read, and a 60-second
 client timeout for EIOPA alone, because the shared 10-second budget is right for a quote
@@ -99,6 +100,16 @@ and far too short for a three-megabyte archive.
 | `TWELVE_DATA_PROVIDER_LIMIT_PER_DAY` | `800` | market-data-service | Published daily allowance. The configured 90% safety ceiling derives a 720-credit ledger. Cadence spreads that ledger across `PROVIDER_ACTIVE_WINDOW_HOURS`; the hard ledger still prevents day-cap overrun. |
 | `TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE` | `8` | market-data-service | Published minute allowance. The 90% ceiling derives a 7-credit minute bucket and maximum batch size. |
 
+## Market data — Alpha Vantage
+
+| Variable | Default | Read by | Why |
+| --- | --- | --- | --- |
+| `ALPHA_VANTAGE_PROVIDER_LIMIT_PER_DAY` | `25` | market-data-service | Published standard free-service allowance; the shared 90% rule derives and persists the 22-call safe ceiling, leaving three calls of headroom. |
+| `ALPHA_VANTAGE_MIN_REQUEST_INTERVAL_SECONDS` | `15` | market-data-service | Provider-wide spacing for scheduled, manual and add-triggered calls; protects against HTTP-200 `Information` throttle bodies. |
+| `ALPHA_VANTAGE_FX_POLL_SECONDS` | `43200` | market-data-service | At most two selected FX refreshes per day so a small watchlist fits the free ledger. |
+| `ALPHA_VANTAGE_EQUITY_STALE_SECONDS` | `432000` | market-data-service | An accepted daily close remains eligible for five days while displayed as `EOD (date)`, never LIVE. |
+| `ALPHA_VANTAGE_FX_STALE_SECONDS` | `93600` | market-data-service | A twice-daily FX mark becomes stale after 26 hours rather than pretending to be an intraday feed. |
+
 ## Provider-bound trading
 
 | Variable | Default | Read by | Why |
@@ -108,6 +119,12 @@ and far too short for a three-megabyte archive.
 | `TRADE_ACTION_QUEUE_SIZE` | `1000` | trade-action-service | Bounds accepted-but-not-yet-processed intents in memory. A full queue returns 503 instead of allowing unbounded process growth. |
 | `TRADE_ACTION_BATCH_SIZE` | `100` | trade-action-service | Maximum actions accepted by one batch request; larger payloads return 413 before enqueueing. |
 | `DEFAULT_QUOTE_PROVIDER` | `FINNHUB` | pricing-service, trade-action-service | The fallback for trades written before provider binding existed. Every use logs `trade_provider_defaulted` — the compatibility path exists but can never be silent. New trades always carry an explicit provider. |
+
+## Valuation persistence
+
+| Variable | Default | Read by | Why |
+| --- | --- | --- | --- |
+| `VALUATION_WRITE_INTERVAL_SECONDS` | `60` | pricing-service | SSE still publishes every revaluation, while durable non-terminal samples are capped at one row per trade per interval. Terminal close valuation is always persisted. |
 
 ## Risk & benchmark
 

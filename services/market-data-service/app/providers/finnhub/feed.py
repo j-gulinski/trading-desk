@@ -24,7 +24,7 @@ from app.config import (
 from app.poll_schedule import PollSchedule
 from app.provider_runtime import ProviderRuntime
 from app.publisher import publish_quote
-from app.quote_audit import audit_first_quote
+from app.quote_audit import audit_quote_write
 
 log = get_logger(SERVICE_NAME)
 
@@ -84,14 +84,14 @@ def _fetch_and_publish(entry):
             current.symbol, current.asset_class, current.currency, payload, utcnow()
         )
         classifier = _classifier(current.symbol)
-        _, created, accepted = quote_store.store_quote(quote, classifier)
+        changed, created, accepted = quote_store.store_quote(quote, classifier)
         if not accepted:
             raise ProviderDataError(
                 FINNHUB,
                 f"older observation for {current.symbol} ignored; current row retained",
             )
-        if created:
-            audit_first_quote(FINNHUB, quote)
+        if changed:
+            audit_quote_write(FINNHUB, quote, created)
         tick = wire_tick(quote, classifier, current.origin(FINNHUB))
         publish_quote(tick)
     runtime.record_success()

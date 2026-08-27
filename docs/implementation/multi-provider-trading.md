@@ -300,8 +300,9 @@ flowchart LR
 ```
 
 `ProviderClient` logs once after each completed response or error. The entry includes the
-provider, public endpoint, safe symbol/search context, HTTP status, duration, result count,
-outcome and the provider body as `response_json`. The Logs view pretty-prints that JSON.
+provider, public endpoint, safe symbol/search context, HTTP status, duration, result count
+and outcome. Response bodies are deliberately excluded; the matching minimal
+`PROVIDER_FETCH_*` audit contains the same safe metadata.
 Authentication parameters are added only when constructing the URL and are never included
 in log fields.
 

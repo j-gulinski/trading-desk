@@ -5,6 +5,10 @@ function currencyPair(symbol) {
   return { base: symbol.slice(0, 3), quote: symbol.slice(3) }
 }
 
+function baseCurrencyOf(symbol) {
+  return currencyPair(symbol)?.base ?? null
+}
+
 export function formatAge(ms) {
   if (!Number.isFinite(ms)) return '—'
   const s = Math.max(0, Math.floor(ms / 1000))
@@ -47,6 +51,40 @@ export function unitLabelOf(instrument) {
     return `${pair.quote} per ${pair.base} (troy oz)`
   }
   return null
+}
+
+export function priceUnitLabelOf(instrument) {
+  if (instrument.symbol === 'XAUPLN_G') return 'PLN/g'
+  const pair = currencyPair(instrument.symbol)
+  if (pair && instrument.assetClass === 'FX') return `${pair.quote}/${pair.base}`
+  if (pair && instrument.assetClass === 'COMMODITY') return `${pair.quote}/${pair.base} oz`
+  if (instrument.assetClass === 'EQUITY') {
+    return instrument.currency ? `${instrument.currency}/sh` : '/sh'
+  }
+  if (instrument.assetClass === 'EUROPEAN_OPTION') {
+    return instrument.currency ? `${instrument.currency}/contract` : '/contract'
+  }
+  if (instrument.assetClass === 'BOND') {
+    return instrument.currency ? `${instrument.currency}/100` : '/100'
+  }
+  if (instrument.assetClass === 'IRS') {
+    return instrument.currency ? `${instrument.currency} NPV` : 'NPV'
+  }
+  return instrument.currency ?? null
+}
+
+export function quantityUnitLabelOf(instrument) {
+  if (instrument.assetClass === 'IRS') {
+    return instrument.currency ? `${instrument.currency} notional` : 'notional'
+  }
+  if (instrument.assetClass === 'BOND') {
+    return instrument.currency ? `${instrument.currency} face` : 'face'
+  }
+  if (instrument.assetClass === 'EUROPEAN_OPTION') return 'contracts'
+  if (instrument.assetClass === 'EQUITY') return 'shares'
+  if (instrument.symbol === 'XAUPLN_G') return 'grams'
+  const base = baseCurrencyOf(instrument.symbol)
+  return base ?? null
 }
 
 export function formatAsOfDate(ms) {

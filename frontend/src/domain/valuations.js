@@ -1,7 +1,9 @@
 import { VALUATION_STALE_AFTER_MS } from '../config/valuations.js'
 import { groupOptions } from './filters.js'
+import { instrumentLabelOf } from './contracts.js'
 import { formatShortId } from './formatting.js'
 import { freshnessOf } from './marketData.js'
+import { convertedValueOf } from './fx.js'
 import { sortRows } from './tableSort.js'
 import { toNum, toTime } from './values.js'
 
@@ -20,7 +22,7 @@ export function valuationOf(data) {
   const unrealizedPnl = toNum(data.unrealized_pnl)
   const notional =
     Number.isFinite(signedQuantity) && Number.isFinite(entryPrice)
-      ? Math.abs(signedQuantity) * entryPrice * multiplier
+      ? Math.abs(signedQuantity * entryPrice * multiplier)
       : null
 
   return {
@@ -51,6 +53,10 @@ export function valuationOf(data) {
     projectionCurve: payload.projection_curve ?? null,
     projectionCurveAsOf: payload.projection_curve_as_of ?? null,
     projectionCurveReceivedAtMs: toTime(payload.projection_curve_received_at),
+    faceValue: toNum(payload.face_value),
+    contractTerms: payload.contract_terms && typeof payload.contract_terms === 'object'
+      ? payload.contract_terms
+      : null,
     underlyingSymbol: payload.underlying_symbol ?? null,
     valuationTimeMs: Number.isFinite(valuationTime) ? valuationTime : null,
   }
@@ -384,28 +390,42 @@ function structuralValueOf(valuation, column) {
   if (column === 'trade') return valuation.tradeRef
   if (column === 'book') return valuation.bookName ?? valuation.bookId
   if (column === 'assetClass') return valuation.assetClass
-  if (column === 'symbol') return valuation.symbol
+  if (column === 'symbol') return instrumentLabelOf(valuation)
   if (column === 'provider') return valuation.marketDataProvider
   return undefined
 }
 
-function snapshotValueOf(row, column) {
+function snapshotValueOf(row, column, rates = null, comparisonCurrency = null) {
   const { valuation } = row
+  let value = null
   if (column === 'price') return valuation.price
-  if (column === 'fairValue') return valuation.fairValue
-  if (column === 'notional') return valuation.notional
+  if (column === 'fairValue') value = valuation.fairValue
+  else if (column === 'notional') value = valuation.notional
   if (column === 'return') return valuation.closed ? null : valuation.returnPercent
-  if (column === 'unrealized') return valuation.closed ? null : valuation.unrealizedPnl
-  if (column === 'realized') return valuation.realizedPnl
+  if (column === 'unrealized') value = valuation.closed ? null : valuation.unrealizedPnl
+  else if (column === 'realized') value = valuation.realizedPnl
   if (column === 'updated') return valuation.valuationTimeMs
   if (column === 'valuation') return STATUS_RANK[row.status] ?? null
-  return null
+  if (value == null) return null
+  return comparisonCurrency
+    ? convertedValueOf(value, valuation.currency, rates, comparisonCurrency)
+    : value
 }
 
-export function captureValuationSnapshot(rows, column) {
+export function captureValuationSnapshot(
+  rows,
+  column,
+  rates = null,
+  comparisonCurrency = null,
+) {
   const values = {}
   for (const row of rows) {
-    values[row.valuation.id] = snapshotValueOf(row, column)
+    values[row.valuation.id] = snapshotValueOf(
+      row,
+      column,
+      rates,
+      comparisonCurrency,
+    )
   }
   return values
 }

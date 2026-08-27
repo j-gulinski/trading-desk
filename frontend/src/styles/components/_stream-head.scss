@@ -6,10 +6,10 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--sp-2) var(--sp-3);
-  margin-bottom: var(--sp-4);
+  margin-bottom: var(--sp-3);
 }
 .stream-head__title {
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -18,11 +18,11 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 .stream-head__note {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
 }
 

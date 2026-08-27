@@ -11,14 +11,14 @@
 
 .service-card {
   min-width: 0;
-  min-height: 92px;
+  min-height: 78px;
   background: var(--bg-panel);
-  padding: var(--sp-4);
+  padding: var(--sp-3);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-content: space-between;
   align-items: start;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 .service-card--degraded {
   background: color-mix(in srgb, var(--warn) 3.5%, var(--bg-panel));
@@ -32,7 +32,7 @@
 .service-card__name {
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -45,11 +45,11 @@
 }
 .service-card__latency-label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 .service-card__latency-value {
   font-family: var(--font-mono);
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   line-height: 1;
   color: var(--text-primary);

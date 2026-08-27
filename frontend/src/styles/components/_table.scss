@@ -8,25 +8,25 @@
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
   // Cells inherit this so a single-class tone (.delta--pos) still wins on a td.
   color: var(--text-primary);
 
   th {
     text-align: left;
-    font-size: 11px;
+    font-size: 10px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--text-muted);
     font-weight: 500;
-    padding: var(--sp-3);
+    padding: 9px 10px;
     border-bottom: 1px solid var(--border);
   }
   th.data-table__sort-heading {
     padding: 0;
   }
   td {
-    padding: var(--sp-3);
+    padding: 9px 10px;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
   }
@@ -69,6 +69,19 @@
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+.money-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  white-space: nowrap;
+}
+.money-cell__comparison {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+}
 
 // Row tones: muted for stale/final rows, a short flash on an accepted update.
 .data-table__row--muted td {
@@ -92,12 +105,12 @@
 
 .data-table__sort {
   width: 100%;
-  min-height: 52px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 5px;
   margin: 0;
-  padding: var(--sp-3);
+  padding: 9px 10px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -146,10 +159,10 @@
 }
 
 .table-sort-status {
-  min-height: 20px;
-  margin: calc(var(--sp-2) * -1) 0 var(--sp-2);
+  min-height: 18px;
+  margin: -6px 0 6px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
   text-align: right;
 }
 
@@ -157,16 +170,16 @@
   position: relative;
 }
 .table-columns__summary {
-  min-height: 34px;
+  min-height: var(--control-height);
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
+  padding: 5px 9px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   user-select: none;
   list-style: none;
@@ -190,7 +203,7 @@
   background: var(--bg-panel-hover);
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   text-align: center;
 }
 .table-columns__menu {

@@ -26,34 +26,36 @@ export const TRADE_COLUMNS = [
   },
   {
     id: 'entry',
-    label: 'Entry',
+    label: 'Entry value',
     sortable: true,
     defaultDirection: 'desc',
     numeric: true,
+    headerNote: 'native unit',
   },
   {
     id: 'provider',
-    label: 'Provider',
+    label: 'Pricing source',
     sortable: true,
     defaultDirection: 'asc',
   },
   {
     id: 'price',
-    label: 'Mark',
+    label: 'Current value',
     sortable: true,
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerNote: 'valuation input',
+    headerNote: 'asset unit',
   },
   {
     id: 'fairValue',
-    label: 'Fair value',
+    label: 'Position value',
     required: true,
     sortable: true,
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
+    headerNote: 'native currency',
   },
   {
     id: 'pnl',
@@ -63,6 +65,7 @@ export const TRADE_COLUMNS = [
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
+    headerNote: 'native · ≈ USD sort',
   },
   {
     id: 'return',
@@ -83,7 +86,7 @@ export const TRADE_COLUMNS = [
   },
   {
     id: 'updated',
-    label: 'Updated',
+    label: 'Valued at',
     sortable: true,
     snapshot: true,
     defaultDirection: 'desc',
@@ -93,7 +96,7 @@ export const TRADE_COLUMNS = [
   },
   {
     id: 'valuation',
-    label: 'Valuation',
+    label: 'Valuation status',
     required: true,
     sortable: true,
     snapshot: true,
@@ -104,12 +107,12 @@ export const TRADE_COLUMNS = [
 export const DEFAULT_TRADE_COLUMNS = [
   'trade',
   'book',
-  'assetClass',
   'symbol',
   'side',
   'quantity',
   'entry',
   'provider',
+  'price',
   'fairValue',
   'pnl',
   'valuation',
@@ -118,3 +121,5 @@ export const DEFAULT_TRADE_COLUMNS = [
 export const DEFAULT_TRADE_SORT = { column: 'pnl', direction: 'desc' }
 
 export const TRADE_FALLBACK_SORT = { column: 'trade', direction: 'asc' }
+
+export const TRADE_CURRENCY_SORT_COLUMNS = new Set(['fairValue', 'pnl'])

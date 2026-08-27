@@ -32,6 +32,17 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
+.panel-form__label--sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .panel-form__label--hinted,
 .panel-form__info-label--hinted {
   align-self: flex-start;
@@ -111,6 +122,27 @@
   &[open] .panel-form__curve-facts {
     margin-top: 5px;
   }
+}
+.panel-form__curve-selection {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.panel-form__curve-selection-mode {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 .panel-form__curve-market {
   padding: var(--sp-2) var(--sp-3);
@@ -258,6 +290,17 @@
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.5;
+
+  p {
+    margin: 4px 0 0;
+  }
+}
+.panel-form__notice-title {
+  color: var(--warn);
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .panel-form__notice--expandable {
   padding-block: 6px;
@@ -633,7 +676,8 @@
   }
 
   .panel-form__input,
-  .panel-form__select {
+  .panel-form__select,
+  .panel-form__curve-selection {
     min-height: 32px;
     padding: 6px 10px;
   }
@@ -733,6 +777,12 @@
     .quote-options,
     .panel-form__info {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .panel-form__input,
+    .panel-form__select,
+    .panel-form__curve-selection {
+      min-height: 36px;
     }
   }
 

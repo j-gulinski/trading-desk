@@ -1,7 +1,7 @@
 .provider-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 .provider-grid--official {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -11,7 +11,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-panel);
-  padding: var(--sp-3);
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -135,7 +135,7 @@
 }
 
 .provider-group + .provider-group {
-  margin-top: var(--sp-4);
+  margin-top: var(--sp-3);
 }
 .provider-group__title {
   margin: 0 0 var(--sp-2);

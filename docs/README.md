@@ -6,10 +6,9 @@ where explanations live. Everything else is a **lean reference sheet** carrying 
 current facts a session needs for context; a reference sheet states what is, never argues
 why.
 
-**Working on the next phase?** Read [`../AGENTS.md`](../AGENTS.md) for the house rules,
-then [implementation-roadmap.md](implementation-roadmap.md) §6 — the standing phase
-template and the task-level plans. The roadmap is a working plan, not a contract: each
-phase re-derives its decisions and ends by adding its report to `phase-reports/`.
+**Working on the project?** Read [`../AGENTS.md`](../AGENTS.md) for the house rules.
+Phase 6 is the final shipped boundary; the optional section of
+[implementation-roadmap.md](implementation-roadmap.md) is a backlog, not required work.
 
 ## Reference sheets
 
@@ -23,8 +22,11 @@ phase re-derives its decisions and ends by adding its report to `phase-reports/`
 5. [validation-runbook.md](validation-runbook.md) with
    [provider-trading.http](../scenarios/provider-trading.http),
    [reference-fx.http](../scenarios/reference-fx.http) and
-   [curves.http](../scenarios/curves.http) — the review procedure and the
+   [curves.http](../scenarios/curves.http), with the integrated
+   [full-provider-flow.http](../scenarios/full-provider-flow.http) — the review procedure and the
    executable API paths.
+6. [performance.md](performance.md) — repeatable bounded idempotency, SSE fan-out,
+   board-read and valuation-growth checks with the latest measured sample.
 
 ## Phase reports — the detailed record
 
@@ -42,10 +44,12 @@ phase re-derives its decisions and ends by adding its report to `phase-reports/`
     Polish: Part I teaches the domain (what each curve is, how it is built, what the two
     curve roles mean, every number worked through), Part II walks the code process by
     process for a review
+- [phase-6](phase-reports/phase-6.md) — Alpha Vantage, persisted budget controls,
+  complete provenance/audit guarantees, bounded valuation persistence, reconciled
+  portfolio summaries and the final acceptance evidence
 
 ## The plan
 
-[implementation-roadmap.md](implementation-roadmap.md) — the working plan: the standing
-phase template, the single remaining Phase 6, and optional post-acceptance extensions. Forward-looking
-by design; for implemented behavior the phase reports and reference sheets above are
-authoritative.
+[implementation-roadmap.md](implementation-roadmap.md) — the historical phase plan and
+optional post-acceptance extensions. For implemented behavior the phase reports and
+reference sheets above are authoritative.

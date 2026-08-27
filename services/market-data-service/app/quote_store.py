@@ -144,6 +144,19 @@ def quote_history(provider, symbol, limit, include_raw=False):
         }
 
 
+def quote_clocks(provider, symbol):
+    with session_scope() as session:
+        row = (
+            session.query(
+                MarketDataSpotPrice.provider_timestamp,
+                MarketDataSpotPrice.received_at,
+            )
+            .filter_by(provider=provider, symbol=symbol)
+            .one_or_none()
+        )
+        return tuple(row) if row is not None else (None, None)
+
+
 def delete_board_rows(symbol, providers=None):
     with session_scope() as session:
         query = session.query(MarketDataSpotPrice).filter_by(symbol=symbol)

@@ -29,6 +29,8 @@ def _to_cached_trade(row: Trade) -> CachedTrade:
         close_price_timestamp=row.close_price_timestamp,
         close_snapshot_id=str(row.close_snapshot_id) if row.close_snapshot_id else None,
         client_seen_price=row.client_seen_price,
+        source=row.source,
+        created_by_service=row.created_by_service,
         terms=row.trade_metadata,
     )
 

@@ -21,11 +21,11 @@ def audit_curve_set(curve_set, created):
     )
 
 
-def audit_first_quote(provider, quote):
+def audit_quote_write(provider, quote, created):
     write_audit(
         SERVICE_NAME,
         "QUOTE_WRITTEN",
-        f"{provider} began quoting {quote.symbol}",
+        f"{provider} {'began quoting' if created else 'updated'} {quote.symbol}",
         entity_type="QUOTE",
         entity_id=f"{provider}:{quote.symbol}",
         payload={
@@ -37,5 +37,6 @@ def audit_first_quote(provider, quote):
             "quote_grade": quote.quote_grade.value,
             "provider_timestamp": quote.provider_timestamp.isoformat()
             if quote.provider_timestamp else None,
+            "created": created,
         },
     )
