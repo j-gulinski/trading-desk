@@ -290,6 +290,12 @@ export function freshnessOf(instrument, now) {
   const polledAt = Number.isFinite(instrument.polledAtMs) ? instrument.polledAtMs : null
   const hasProviderTime = Number.isFinite(instrument.providerTimestampMs)
   if (!hasProviderTime && polledAt == null) return 'MISSING'
+  if (instrument.grade === 'EOD') {
+    if (!hasProviderTime || !Number.isFinite(instrument.staleAfterMs)) return 'MISSING'
+    return now - instrument.providerTimestampMs <= instrument.staleAfterMs
+      ? 'EOD'
+      : 'STALE'
+  }
   if (
     instrument.marketOpen === false &&
     polledAt != null &&
@@ -308,7 +314,9 @@ export function freshnessOf(instrument, now) {
 export function marketRowsOf(instruments, now) {
   return instruments.map((instrument) => {
     const todayChange = todayChangeOf(instrument)
-    const tickChange = tickChangeOf(instrument)
+    const tickChange = instrument.grade === 'EOD'
+      ? { delta: null, percent: null }
+      : tickChangeOf(instrument)
     const state = freshnessOf(instrument, now)
     return {
       instrument,
@@ -336,8 +344,8 @@ export function summarizeFeed(instruments, now) {
   }
   for (const instrument of instruments) {
     const state = freshnessOf(instrument, now)
-    if (state === 'LIVE' && instrument.grade === 'EOD') summary.eod += 1
-    else if (state === 'LIVE') summary.live += 1
+    if (state === 'LIVE') summary.live += 1
+    else if (state === 'EOD') summary.eod += 1
     else if (state === 'CLOSED') summary.closed += 1
     else if (state === 'MISSING') summary.missing += 1
     else summary.stale += 1

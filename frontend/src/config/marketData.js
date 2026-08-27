@@ -91,6 +91,7 @@ export const DEFAULT_SORT_CURRENCY = 'USD'
 
 export const FRESHNESS_PILL_LEVELS = {
   LIVE: 'info',
+  EOD: 'closed',
   STALE: 'stale',
   CLOSED: 'closed',
   MISSING: 'degraded',
@@ -104,6 +105,7 @@ export function freshnessPillLevelOf(state, grade) {
 
 const FRESHNESS_LABELS = {
   LIVE: 'LIVE',
+  EOD: 'EOD',
   STALE: 'STALE',
   CLOSED: 'EOD',
   MISSING: 'NO DATA',
@@ -112,6 +114,7 @@ const FRESHNESS_LABELS = {
 
 export const FRESHNESS_HINTS = {
   LIVE: 'Provider timestamp is inside this feed’s freshness budget',
+  EOD: 'End-of-day close from the provider — this is not a live quote',
   STALE: 'Older than the freshness budget — the provider has not moved this price',
   CLOSED: 'Latest accepted end-of-day close; the market is closed',
   MISSING: 'Watched, but this provider has not returned a quote yet',
@@ -119,7 +122,7 @@ export const FRESHNESS_HINTS = {
 }
 
 export function freshnessLabelOf(state, grade, providerTimestamp = null) {
-  if (state === 'CLOSED' || (grade === 'EOD' && state === 'LIVE')) {
+  if (state === 'CLOSED' || state === 'EOD' || (grade === 'EOD' && state === 'LIVE')) {
     const date = typeof providerTimestamp === 'string'
       ? providerTimestamp.slice(0, 10)
       : null
