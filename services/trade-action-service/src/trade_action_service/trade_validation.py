@@ -12,6 +12,7 @@ from desk_domain.freshness import FreshnessState
 from desk_pricing.bond import bond_pv
 from desk_pricing.european_option import european_option_pv
 from desk_pricing.irs import irs_pv
+from desk_pricing.provenance import pricing_provenance
 from desk_domain.providers import supports_quotes
 from desk_domain.symbols import (
     CURVE_PRICED_ASSET_CLASSES,
@@ -167,6 +168,11 @@ def _freeze_curve_provenance(terms, curves):
     for field, curve in curves.items():
         terms[f"{field}_provider"] = curve["provider"]
         terms[f"{field}_as_of"] = curve["as_of_date"]
+    terms["pricing_provenance"] = pricing_provenance(
+        terms["asset_class"],
+        curves["discount_curve"],
+        curves.get("projection_curve"),
+    )
 
 
 def _stale_curve_names(curves):
@@ -335,6 +341,11 @@ def _validate_curve_close(session, intent, trade):
     for field, curve in curves.items():
         close_provenance[f"close_{field}_provider"] = curve["provider"]
         close_provenance[f"close_{field}_as_of"] = curve["as_of_date"]
+    close_provenance["close_pricing_provenance"] = pricing_provenance(
+        terms["asset_class"],
+        curves["discount_curve"],
+        curves.get("projection_curve"),
+    )
     if underlying_quote is not None:
         quote = market_state.ModelQuote(
             trade.trade_currency,

@@ -31,6 +31,8 @@ CURVE_PROVENANCE_FIELDS = (
     "close_discount_curve_as_of",
     "close_projection_curve_provider",
     "close_projection_curve_as_of",
+    "pricing_provenance",
+    "close_pricing_provenance",
 )
 
 

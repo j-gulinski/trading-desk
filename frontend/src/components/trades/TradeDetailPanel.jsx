@@ -41,6 +41,8 @@ const HIDDEN_TERMS = new Set([
   'direction',
   'face_value',
   'notional',
+  'pricing_provenance',
+  'close_pricing_provenance',
   'projection_curve_tracks_index',
 ])
 const TERM_LABELS = {

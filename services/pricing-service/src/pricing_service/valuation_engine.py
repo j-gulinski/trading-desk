@@ -8,6 +8,7 @@ from pricing_service.pnl import compute_pnl, signed_quantity
 from pricing_service.pricers.registry import market_inputs, price_from_inputs
 from pricing_service.valuation_publisher import publish_valuation
 from pricing_service.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
+from desk_pricing.provenance import pricing_provenance
 from desk_runtime.functions import get_iso_timestamp
 from desk_runtime.logging_config import get_logger
 from desk_domain.audit import write_audit
@@ -59,6 +60,11 @@ def value_trade(trade):
     spot = inputs.get("spot") or {}
     curve = inputs.get("curve") or {}
     projection = inputs.get("projection_curve") or {}
+    provenance = pricing_provenance(
+        trade["asset_class"],
+        curve,
+        projection,
+    )
     quantity = trade["quantity"]
     fair_value = price * quantity * multiplier
     unrealized, realized, total = compute_pnl(
@@ -97,6 +103,7 @@ def value_trade(trade):
                if meta.get("underlying_symbol") else {}),
             **({"face_value": meta["face_value"]}
                if meta.get("face_value") else {}),
+            **({"pricing_provenance": provenance} if provenance else {}),
             "contract_terms": {
                 key: meta[key]
                 for key in (

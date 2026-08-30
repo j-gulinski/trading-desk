@@ -2,6 +2,7 @@ import threading
 import time
 
 from desk_domain.curves import curve_metadata, curve_trade_roles, curve_trade_uses
+from desk_pricing.curves import curve_convention
 from desk_runtime.logging_config import get_logger
 from market_data_service import curve_store
 from market_data_service.config import (
@@ -49,6 +50,7 @@ def wire_curve(entry):
         "points": points,
         "tenors": [float(point["tenor_years"]) for point in points],
         "rates": [float(point["rate"]) / 100.0 for point in points],
+        **curve_convention(),
         **({"raw_payload": entry["raw_payload"]} if "raw_payload" in entry else {}),
     }
 

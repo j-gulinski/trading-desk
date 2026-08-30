@@ -9,6 +9,7 @@ from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from pricing_service.schemas import ScenarioRequest
 from pricing_service.valuation_publisher import STREAM_OVERFLOW
 from desk_domain.curve_registry import latest_curve_sets
+from desk_pricing.provenance import pricing_provenance
 from desk_runtime.db import session_scope
 from desk_domain.active_set import load_active_set
 from desk_domain.symbols import (
@@ -149,6 +150,11 @@ def price_preview():
         terms["asset_class"] in SPOT_ASSET_CLASSES
         or terms["asset_class"] == "EUROPEAN_OPTION"
     )
+    provenance = pricing_provenance(
+        terms["asset_class"],
+        inputs.get("curve"),
+        inputs.get("projection_curve"),
+    )
     log.info("price_preview", symbol=symbol, asset_class=terms["asset_class"],
              provider=provider, price=str(price))
     return to_json({
@@ -159,6 +165,7 @@ def price_preview():
         "price": price,
         "multiplier": multiplier,
         "market_revisions": revisions,
+        **({"pricing_provenance": provenance} if provenance else {}),
         **price_details(terms["asset_class"], terms, inputs),
     })
 
