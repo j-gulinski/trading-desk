@@ -1,5 +1,3 @@
-"""Build the two ECB euro-area government-bond curves from YC csvdata."""
-
 from datetime import datetime
 from decimal import Decimal
 

@@ -1,5 +1,3 @@
-"""Translate Twelve Data response fields and symbols into desk contracts."""
-
 from datetime import datetime, timezone
 
 from market_data_service.providers.base import ProviderDataError

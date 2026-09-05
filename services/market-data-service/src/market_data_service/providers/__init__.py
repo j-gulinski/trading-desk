@@ -1,4 +1,3 @@
-"""Provider packages and their common registration contract."""
 
 from market_data_service.providers.alpha_vantage import registration as alpha_vantage
 from market_data_service.providers.ecb import registration as ecb

@@ -1,5 +1,3 @@
-"""HTTP transport and typed failures shared by all provider packages."""
-
 from abc import ABC, abstractmethod
 import json
 import time

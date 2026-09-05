@@ -1,5 +1,3 @@
-"""FRED runtime wiring: credentials, budget and the curves built from its series."""
-
 from market_data_service.config import (
     FRED_API_KEY,
     FRED_BUDGET_PER_MINUTE,

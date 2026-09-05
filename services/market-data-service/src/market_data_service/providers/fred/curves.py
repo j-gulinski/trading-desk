@@ -1,5 +1,3 @@
-"""Build the FRED-backed USD government curve."""
-
 from datetime import datetime
 from decimal import Decimal
 

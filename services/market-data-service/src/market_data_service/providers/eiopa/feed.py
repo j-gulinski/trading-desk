@@ -1,5 +1,3 @@
-"""EIOPA runtime wiring: monthly archive client and three risk-free curves."""
-
 from market_data_service.config import (
     EIOPA_CURVE_REFETCH_SECONDS,
     EIOPA_REQUEST_BUDGET_PER_MINUTE,

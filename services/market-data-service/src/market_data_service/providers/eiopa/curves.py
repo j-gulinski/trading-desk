@@ -1,5 +1,3 @@
-"""Build EIOPA risk-free curves from the provider's monthly workbook release."""
-
 import re
 from decimal import Decimal
 

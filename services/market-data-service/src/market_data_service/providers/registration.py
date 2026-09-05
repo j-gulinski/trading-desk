@@ -1,5 +1,3 @@
-"""One capability contract used to register every market-data provider."""
-
 from dataclasses import dataclass
 from typing import Callable, Literal, Protocol
 

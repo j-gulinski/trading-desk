@@ -1,5 +1,3 @@
-"""Minimal reader for the EIOPA term-structure workbook inside its ZIP release."""
-
 import io
 import re
 import zipfile
