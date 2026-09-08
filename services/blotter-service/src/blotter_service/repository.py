@@ -3,8 +3,9 @@ from decimal import Decimal
 
 from sqlalchemy import func
 
+from desk_domain.contract_data import trade_terms
 from desk_runtime.db import session_scope
-from desk_domain.models import Trade, Valuation, AuditLog, Book
+from desk_domain.models import Trade, Valuation, AuditLog, Book, Instrument
 from blotter_service.cache import Trade as CachedTrade
 
 
@@ -12,8 +13,8 @@ def _to_cached_trade(row: Trade) -> CachedTrade:
     return CachedTrade(
         trade_id=str(row.trade_id),
         book_id=str(row.book_id),
-        asset_class=row.asset_class,
-        symbol=row.symbol,
+        asset_class=row.instrument.asset_class,
+        symbol=row.instrument.symbol,
         side=row.side,
         status=row.status,
         quantity=row.quantity,
@@ -31,7 +32,7 @@ def _to_cached_trade(row: Trade) -> CachedTrade:
         client_seen_price=row.client_seen_price,
         source=row.source,
         created_by_service=row.created_by_service,
-        terms=row.trade_metadata,
+        terms=trade_terms(row),
     )
 
 
@@ -50,17 +51,17 @@ def get_trade(trade_id: str) -> CachedTrade | None:
 def list_trades(*, book_id=None, asset_class=None, status=None, symbol=None,
                 exclude_active=False, limit: int = 100, offset: int = 0) -> list[CachedTrade]:
     with session_scope() as session:
-        q = session.query(Trade)
+        q = session.query(Trade).join(Instrument, Trade.instrument_id == Instrument.instrument_id)
         if book_id is not None:
             q = q.filter(Trade.book_id == uuid.UUID(book_id))
         if asset_class is not None:
-            q = q.filter(Trade.asset_class == asset_class)
+            q = q.filter(Instrument.asset_class == asset_class)
         if status is not None:
             q = q.filter(Trade.status == status)
         elif exclude_active:
             q = q.filter(Trade.status != "ACTIVE")
         if symbol is not None:
-            q = q.filter(Trade.symbol == symbol)
+            q = q.filter(Instrument.symbol == symbol)
         rows = (
             q.order_by(Trade.opened_at.desc())
             .limit(limit)
@@ -100,7 +101,7 @@ def realized_pnl_by_book() -> dict[str, dict[str, object]]:
         for t in rows:
             if t.close_price is None:
                 continue
-            multiplier = int((t.trade_metadata or {}).get("multiplier", 1))
+            multiplier = int(trade_terms(t).get("multiplier", 1))
             if t.side == "SELL":
                 realized = (t.trade_price - t.close_price) * t.quantity * multiplier
             else:

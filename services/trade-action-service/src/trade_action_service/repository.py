@@ -3,6 +3,8 @@ import uuid
 from sqlalchemy import update
 
 from desk_domain.models import Trade, Book
+from desk_domain.contract_data import split_terms
+from desk_domain.instruments import ensure_instrument, lock_instrument, require_watched_source
 from desk_runtime.functions import utcnow
 from desk_domain.symbols import CURVE_PRICED_ASSET_CLASSES
 from trade_action_service.config import SERVICE_NAME
@@ -27,31 +29,43 @@ def insert_trade(session, intent, terms, market_data_provider, executed_price, q
     now = utcnow()
     symbol = intent.get("symbol")
     trade_id = uuid.UUID(intent["trade_id"])
+    asset_class = intent["asset_class"]
+    currency = quote.currency or terms["currency"]
+    data = split_terms(asset_class, terms)
+    if asset_class in CURVE_PRICED_ASSET_CLASSES:
+        underlying = None
+        if asset_class == "EUROPEAN_OPTION":
+            underlying = lock_instrument(session, terms["underlying_symbol"])
+            require_watched_source(session, underlying, market_data_provider)
+            if underlying.asset_class != "EQUITY" or underlying.currency != currency:
+                raise ValueError("option underlying must be an equity in the contract currency")
+        instrument = ensure_instrument(
+            session, symbol, asset_class, currency, terms=data.terms,
+            underlying_id=underlying.instrument_id if underlying else None,
+        )
+    else:
+        instrument = lock_instrument(session, symbol)
+        require_watched_source(session, instrument, market_data_provider)
+        if instrument.asset_class != asset_class or instrument.currency != currency:
+            raise ValueError("execution does not match instrument identity")
     trade = Trade(
         trade_id=trade_id,
         book_id=uuid.UUID(intent["book_id"]),
-        asset_class=intent.get("asset_class"),
-        instrument_id=(
-            str(trade_id)
-            if intent.get("asset_class") in CURVE_PRICED_ASSET_CLASSES
-            else symbol
-        ),
-        symbol=symbol,
+        instrument_id=instrument.instrument_id,
         side=intent.get("side"),
         quantity=intent.get("quantity"),
         trade_price=executed_price,
-        trade_currency=quote.currency or intent.get("currency") or "USD",
+        trade_currency=currency,
         market_data_provider=market_data_provider,
         entry_price_timestamp=quote.provider_timestamp,
         entry_snapshot_id=quote.snapshot_id,
         client_seen_price=intent.get("client_seen_price"),
         created_by_service=SERVICE_NAME,
-        trade_date=now,
         status="ACTIVE",
         opened_at=now,
         source=intent.get("source") or "MANUAL",
         client_request_id=intent.get("client_request_id"),
-        trade_metadata=terms,
+        trade_metadata=data.metadata(),
         created_at=now,
         updated_at=now,
     )

@@ -4,6 +4,9 @@ from desk_pricing.curves import curve_convention
 
 
 MODEL_NAMES = {
+    "EQUITY": "SPOT",
+    "FX": "SPOT",
+    "COMMODITY": "SPOT",
     "BOND": "BOND_DCF",
     "EUROPEAN_OPTION": "BLACK_SCHOLES",
     "IRS": "IRS_SINGLE_CURVE",

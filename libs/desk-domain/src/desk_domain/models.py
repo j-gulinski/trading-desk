@@ -1,6 +1,7 @@
 from sqlalchemy import (
     Boolean,
     Column,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -12,7 +13,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 class Base(DeclarativeBase):
@@ -33,25 +34,59 @@ class Book(Base):
     updated_by = Column(Text, nullable=True)
 
 
+class Instrument(Base):
+    __tablename__ = "instruments"
+    __table_args__ = (
+        CheckConstraint(
+            "underlying_instrument_id <> instrument_id",
+            name="ck_instruments_not_self_underlying",
+        ),
+        CheckConstraint("jsonb_typeof(terms) = 'object'", name="ck_instruments_terms_object"),
+        CheckConstraint(
+            "(asset_class = 'EUROPEAN_OPTION') = (underlying_instrument_id IS NOT NULL)",
+            name="ck_instruments_underlying_required",
+        ),
+        Index("ix_instruments_underlying_instrument_id", "underlying_instrument_id"),
+        Index("ix_instruments_asset_class", "asset_class"),
+    )
+
+    instrument_id = Column(UUID(as_uuid=True), primary_key=True)
+    symbol = Column(Text, nullable=False, unique=True)
+    name = Column(Text, nullable=True)
+    asset_class = Column(Text, nullable=False)
+    currency = Column(Text, nullable=False)
+    market = Column(Text, nullable=True)
+    terms = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    underlying_instrument_id = Column(
+        UUID(as_uuid=True), ForeignKey("instruments.instrument_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    retired_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    underlying = relationship(
+        "Instrument", remote_side=[instrument_id], lazy="joined", join_depth=1,
+    )
+
+
 class Trade(Base):
     __tablename__ = "trades"
     __table_args__ = (
         Index("ix_trades_status", "status"),
         Index("ix_trades_book_id", "book_id"),
-        Index("ix_trades_symbol", "symbol"),
-        Index("ix_trades_asset_class", "asset_class"),
+        Index("ix_trades_instrument_id", "instrument_id"),
     )
 
     trade_id = Column(UUID(as_uuid=True), primary_key=True)
     book_id = Column(UUID(as_uuid=True), ForeignKey("books.book_id"), nullable=False)
-    asset_class = Column(Text, nullable=False)
-    instrument_id = Column(Text, nullable=False)
-    symbol = Column(Text, nullable=False)
+    instrument_id = Column(
+        UUID(as_uuid=True), ForeignKey("instruments.instrument_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    instrument = relationship(Instrument, lazy="joined", innerjoin=True)
     side = Column(Text, nullable=False)
     quantity = Column(Numeric, nullable=False)
     trade_price = Column(Numeric, nullable=False)
     trade_currency = Column(Text, nullable=False)
-    trade_date = Column(DateTime(timezone=True), nullable=False)
     status = Column(Text, nullable=False)
     opened_at = Column(DateTime(timezone=True), nullable=False)
     closed_at = Column(DateTime(timezone=True), nullable=True)
@@ -84,11 +119,8 @@ class Valuation(Base):
 
     valuation_id = Column(UUID(as_uuid=True), primary_key=True)
     trade_id = Column(UUID(as_uuid=True), ForeignKey("trades.trade_id"), nullable=False)
-    book_id = Column(UUID(as_uuid=True), ForeignKey("books.book_id"), nullable=False)
-    asset_class = Column(Text, nullable=False)
     valuation_time = Column(DateTime(timezone=True), nullable=False)
     fair_value = Column(Numeric, nullable=False)
-    market_value = Column(Numeric, nullable=True)
     unrealized_pnl = Column(Numeric, nullable=False, server_default="0")
     realized_pnl = Column(Numeric, nullable=False, server_default="0")
     total_pnl = Column(Numeric, nullable=False, server_default="0")
@@ -204,11 +236,10 @@ class MarketDataCurvePoint(Base):
 class WatchlistItem(Base):
     __tablename__ = "watchlist_items"
 
-    symbol = Column(Text, primary_key=True)
-    name = Column(Text, nullable=True)
-    asset_class = Column(Text, nullable=False)
-    currency = Column(Text, nullable=False)
-    market = Column(Text, nullable=True)
+    instrument_id = Column(
+        UUID(as_uuid=True), ForeignKey("instruments.instrument_id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
     providers = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
 

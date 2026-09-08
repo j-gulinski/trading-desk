@@ -1,7 +1,7 @@
 import re
 import uuid
 
-from desk_domain.models import WatchlistItem
+from desk_domain.models import Instrument, WatchlistItem
 from desk_domain.providers import capable_providers
 
 SPOT_ASSET_CLASSES = ("EQUITY", "FX", "COMMODITY")
@@ -35,7 +35,13 @@ def model_contract_symbol(asset_class, trade_id):
 
 
 def watchlist_items(session):
-    return session.query(WatchlistItem).order_by(WatchlistItem.symbol).all()
+    return (
+        session.query(Instrument.instrument_id, Instrument.symbol, Instrument.name,
+                      Instrument.asset_class, Instrument.currency, Instrument.market,
+                      Instrument.retired_at, WatchlistItem.providers, WatchlistItem.created_at)
+        .join(WatchlistItem, WatchlistItem.instrument_id == Instrument.instrument_id)
+        .order_by(Instrument.symbol).all()
+    )
 
 
 def watched_providers(asset_class, providers):
@@ -48,7 +54,7 @@ def watchlist_option_underlying_symbols(session):
     return [
         item.symbol
         for item in watchlist_items(session)
-        if item.asset_class in OPTION_UNDERLYING_ASSET_CLASSES
+        if item.asset_class in OPTION_UNDERLYING_ASSET_CLASSES and item.retired_at is None
     ]
 
 

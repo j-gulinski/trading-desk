@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 from desk_runtime.config import BENCHMARK_PROVIDER, BENCHMARK_SYMBOL, DEFAULT_QUOTE_PROVIDER
 from desk_runtime.db import session_scope
-from desk_domain.models import Trade
+from desk_domain.models import Instrument, Trade
+from sqlalchemy.orm import aliased
 from desk_domain.providers import supports_quotes
 from desk_domain.symbols import watched_providers, watchlist_items
 
@@ -18,6 +19,7 @@ class ActiveSymbol:
     watched_by: frozenset = EMPTY
     held_by: frozenset = EMPTY
     benchmark_by: frozenset = EMPTY
+    retired: bool = False
 
     @property
     def providers(self):
@@ -30,10 +32,10 @@ class ActiveSymbol:
         A held-only symbol remains pollable so its open position can be valued, but
         removing it from the watchlist removes it from the new-trade catalog.
         """
-        return bool(self.watched_by)
+        return bool(self.watched_by) and not self.retired
 
     def serves_open(self, provider):
-        return provider in self.watched_by and supports_quotes(provider, self.asset_class)
+        return self.tradeable and provider in self.watched_by and supports_quotes(provider, self.asset_class)
 
     def serves(self, provider):
         return provider in self.providers and supports_quotes(provider, self.asset_class)
@@ -49,12 +51,16 @@ class ActiveSymbol:
 def _read(session):
     watched = [
         (item.symbol, item.asset_class, item.currency,
-         watched_providers(item.asset_class, item.providers))
+         watched_providers(item.asset_class, item.providers), item.retired_at is not None)
         for item in watchlist_items(session)
     ]
+    underlying = aliased(Instrument)
     open_rows = (
-        session.query(Trade.symbol, Trade.asset_class, Trade.trade_currency,
-                      Trade.market_data_provider, Trade.trade_metadata)
+        session.query(Instrument.symbol, Instrument.asset_class, Instrument.currency,
+                      Trade.market_data_provider, underlying.symbol,
+                      underlying.asset_class, underlying.currency)
+        .join(Instrument, Trade.instrument_id == Instrument.instrument_id)
+        .outerjoin(underlying, Instrument.underlying_instrument_id == underlying.instrument_id)
         .filter(Trade.status == "ACTIVE")
         .distinct()
         .all()
@@ -71,14 +77,9 @@ def load_active_set(session=None):
 
     held = {}
     holders = {}
-    watched_terms = {
-        symbol: (asset_class, currency)
-        for symbol, asset_class, currency, _ in watched
-    }
-    for symbol, asset_class, currency, provider, metadata in open_rows:
-        if asset_class == "EUROPEAN_OPTION" and (metadata or {}).get("underlying_symbol"):
-            symbol = metadata["underlying_symbol"]
-            asset_class, currency = watched_terms.get(symbol, ("EQUITY", currency))
+    for symbol, asset_class, currency, provider, underlying, underlying_class, underlying_currency in open_rows:
+        if asset_class == "EUROPEAN_OPTION":
+            symbol, asset_class, currency = underlying, underlying_class, underlying_currency
         elif asset_class in ("BOND", "IRS"):
             continue
         held[symbol] = (asset_class, currency)
@@ -90,13 +91,14 @@ def load_active_set(session=None):
             symbol, asset_class, currency, 1,
             held_by=frozenset(holders[symbol]),
         )
-    for symbol, asset_class, currency, chosen in watched:
+    for symbol, asset_class, currency, chosen, retired in watched:
         current = entries.get(symbol)
         entries[symbol] = ActiveSymbol(
             symbol, asset_class, currency,
             1 if current is not None or symbol == BENCHMARK_SYMBOL else 2,
             watched_by=chosen,
             held_by=current.held_by if current else EMPTY,
+            retired=retired,
         )
 
     benchmark = entries.get(BENCHMARK_SYMBOL)
@@ -108,5 +110,6 @@ def load_active_set(session=None):
         watched_by=benchmark.watched_by if benchmark else EMPTY,
         held_by=benchmark.held_by if benchmark else EMPTY,
         benchmark_by=frozenset({BENCHMARK_PROVIDER}),
+        retired=benchmark.retired if benchmark else False,
     )
     return entries

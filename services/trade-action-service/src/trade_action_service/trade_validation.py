@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from trade_action_service import market_state, repository
 from trade_action_service.config import QUOTE_PROVIDER_CHOICES, TRADE_PRICE_TOLERANCE_PCT
+from desk_domain.contract_data import trade_terms
 from desk_domain.active_set import load_active_set
 from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from desk_domain.curve_registry import latest_curve_sets, load_curve
@@ -314,14 +315,13 @@ def validate_open(session, intent):
 
 
 def _validate_curve_close(session, intent, trade):
-    terms = dict(trade.trade_metadata or {})
-    terms.setdefault("asset_class", trade.asset_class)
+    terms = trade_terms(trade)
     curves, curve_error = _load_terms_curves(terms)
     if curve_error is not None:
         return None, curve_error
     provider = None
     underlying_quote = None
-    if trade.asset_class == "EUROPEAN_OPTION":
+    if trade.instrument.asset_class == "EUROPEAN_OPTION":
         provider = trade.market_data_provider or DEFAULT_QUOTE_PROVIDER
         underlying = terms.get("underlying_symbol")
         underlying_quote, state = market_state.current_quote(session, provider, underlying)
@@ -380,16 +380,16 @@ def validate_close(session, intent, require_seen=True):
         return None, "client_seen_price must be a finite number"
     if (
         require_seen
-        and trade.asset_class != "IRS"
+        and trade.instrument.asset_class != "IRS"
         and not market_state.is_positive_price(seen_price)
     ):
         return None, "client_seen_price must be greater than zero"
-    if trade.asset_class in CURVE_PRICED_ASSET_CLASSES:
+    if trade.instrument.asset_class in CURVE_PRICED_ASSET_CLASSES:
         return _validate_curve_close(session, intent, trade)
     provider = trade.market_data_provider or DEFAULT_QUOTE_PROVIDER
     quote, price, error = _resolve_execution(
         session,
-        {**intent, "symbol": trade.symbol},
+        {**intent, "symbol": trade.instrument.symbol},
         provider,
         CLOSING_SIDE.get(trade.side, "SELL"),
         allow_stale=True,

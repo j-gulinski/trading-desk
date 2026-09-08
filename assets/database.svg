@@ -1,0 +1,704 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1179" viewBox="0 0 2280 1680" role="img" aria-labelledby="title description">
+<title id="title">Database schema</title>
+<desc id="description">Proposed eleven-table database schema. Editable tables, column names, keys and foreign-key relationships.</desc>
+<!-- EDITING: Each table is a named group with a translate(x,y) transform. Column rows are nested named groups. Edit native text elements; resize the table background when adding rows. Relationship paths live in the relationships group, independently of the table groups. Update paths and the viewBox after moving or extending tables. All text remains editable; no external images, fonts, scripts or dependencies. -->
+<rect width="2280" height="1680" fill="#f5f7fb"/>
+<g id="relationships">
+<g id="fk-watchlist-instrument">
+<polyline points="625,608 555,608 555,138 625,138" fill="none" stroke="#668198" stroke-width="2"/>
+<polygon points="625,138 615,133 615,143" fill="#668198"/>
+</g>
+<g id="fk-instrument-underlying">
+<polyline points="625,313 590,313 590,144 625,144" fill="none" stroke="#668198" stroke-width="2"/>
+<polygon points="625,144 615,139 615,149" fill="#668198"/>
+</g>
+<g id="fk-trades-instrument">
+<polyline points="1200,188 1160,188 1160,138 1085,138" fill="none" stroke="#668198" stroke-width="2"/>
+<polygon points="1085,138 1095,133 1095,143" fill="#668198"/>
+</g>
+<g id="fk-curve_points-curve">
+<polyline points="625,1423 590,1423 590,948 625,948" fill="none" stroke="#668198" stroke-width="2"/>
+<polygon points="625,948 615,943 615,953" fill="#668198"/>
+</g>
+<g id="fk-spot-latest_snapshot">
+<polyline points="50,563 25,563 25,898 50,898" fill="none" stroke="#668198" stroke-width="2"/>
+<polygon points="50,898 40,893 40,903" fill="#668198"/>
+</g>
+<g id="fk-trades-book">
+<polyline points="1660,163 1710,163 1710,138 1775,138" fill="none" stroke="#668198" stroke-width="2"/>
+<polygon points="1775,138 1765,133 1765,143" fill="#668198"/>
+</g>
+<g id="fk-trades-close_snapshot_id">
+<polyline points="1200,438 1120,438 1120,725 565,725 565,893 510,893" fill="none" stroke="#668198" stroke-width="2"/>
+<polygon points="510,893 520,888 520,898" fill="#668198"/>
+</g>
+<g id="fk-trades-entry_snapshot_id">
+<polyline points="1200,613 1150,613 1150,765 545,765 545,903 510,903" fill="none" stroke="#668198" stroke-width="2"/>
+<polygon points="510,903 520,898 520,908" fill="#668198"/>
+</g>
+<g id="fk-valuations-trade">
+<polyline points="1775,773 1740,773 1740,138 1660,138" fill="none" stroke="#668198" stroke-width="2"/>
+<polygon points="1660,138 1670,133 1670,143" fill="#668198"/>
+</g>
+</g>
+<g id="table-market_data_spot_prices" transform="translate(50,40)">
+<rect x="0" y="0" width="460" height="610" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">market_data_spot_prices</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-market_data_spot_prices-market_data_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">market_data_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-market_data_spot_prices-provider">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">provider</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-symbol">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">symbol</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-asset_class">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">asset_class</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-currency">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">currency</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-bid">
+<rect x="1" y="210" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="229.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">bid</text>
+<text x="390" y="227.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-ask">
+<text x="18" y="254.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">ask</text>
+<text x="390" y="252.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-last">
+<rect x="1" y="260" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="279.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">last</text>
+<text x="390" y="277.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-mid">
+<text x="18" y="304.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">mid</text>
+<text x="390" y="302.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-price_basis">
+<rect x="1" y="310" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="329.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">price_basis</text>
+<text x="390" y="327.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-quote_grade">
+<text x="18" y="354.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">quote_grade</text>
+<text x="390" y="352.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-previous_close">
+<rect x="1" y="360" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="379.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">previous_close</text>
+<text x="390" y="377.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-provider_timestamp">
+<text x="18" y="404.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">provider_timestamp</text>
+<text x="390" y="402.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-received_at">
+<rect x="1" y="410" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="429.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">received_at</text>
+<text x="390" y="427.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-stale_after_seconds">
+<text x="18" y="454.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">stale_after_seconds</text>
+<text x="390" y="452.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-closed_stale_after_seconds">
+<rect x="1" y="460" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="479.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">closed_stale_after_seconds</text>
+<text x="390" y="477.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-market_open">
+<text x="18" y="504.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">market_open</text>
+<text x="390" y="502.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_spot_prices-latest_snapshot_id">
+<rect x="1" y="510" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="529.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">latest_snapshot_id</text>
+<text x="390" y="527.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">FK</text>
+</g>
+<g id="column-market_data_spot_prices-created_at">
+<text x="18" y="554.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="552.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<rect x="1" y="568" width="458" height="1" fill="#dce3eb"/>
+<text x="18" y="589.94" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#5c6e83">UQ (provider, symbol)</text>
+</g>
+<g id="table-market_data_snapshots" transform="translate(50,800)">
+<rect x="0" y="0" width="460" height="485" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">market_data_snapshots</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-market_data_snapshots-snapshot_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">snapshot_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-market_data_snapshots-provider">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">provider</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-symbol">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">symbol</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-asset_class">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">asset_class</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-currency">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">currency</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-bid">
+<rect x="1" y="210" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="229.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">bid</text>
+<text x="390" y="227.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-ask">
+<text x="18" y="254.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">ask</text>
+<text x="390" y="252.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-last">
+<rect x="1" y="260" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="279.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">last</text>
+<text x="390" y="277.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-mid">
+<text x="18" y="304.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">mid</text>
+<text x="390" y="302.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-price_basis">
+<rect x="1" y="310" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="329.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">price_basis</text>
+<text x="390" y="327.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-quote_grade">
+<text x="18" y="354.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">quote_grade</text>
+<text x="390" y="352.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-provider_timestamp">
+<rect x="1" y="360" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="379.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">provider_timestamp</text>
+<text x="390" y="377.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-received_at">
+<text x="18" y="404.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">received_at</text>
+<text x="390" y="402.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-created_at">
+<rect x="1" y="410" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="429.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="427.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_snapshots-raw_payload">
+<text x="18" y="454.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">raw_payload</text>
+<text x="390" y="452.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+</g>
+<g id="table-provider_request_ledgers" transform="translate(50,1390)">
+<rect x="0" y="0" width="460" height="260" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">provider_request_ledgers</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-provider_request_ledgers-provider">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">provider</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-provider_request_ledgers-usage_date">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">usage_date</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-provider_request_ledgers-requests">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">requests</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-provider_request_ledgers-credits">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">credits</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-provider_request_ledgers-updated_at">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">updated_at</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<rect x="1" y="218" width="458" height="1" fill="#dce3eb"/>
+<text x="18" y="239.94" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#5c6e83">PK (provider, usage_date)</text>
+</g>
+<g id="table-instruments" transform="translate(625,40)">
+<rect x="0" y="0" width="460" height="360" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">instruments</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-instruments-instrument_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">instrument_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-instruments-symbol">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">symbol</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">UQ</text>
+</g>
+<g id="column-instruments-name">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">name</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-instruments-asset_class">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">asset_class</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-instruments-currency">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">currency</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-instruments-market">
+<rect x="1" y="210" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="229.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">market</text>
+<text x="390" y="227.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-instruments-terms">
+<text x="18" y="254.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">terms</text>
+<text x="390" y="252.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-instruments-underlying_instrument_id">
+<rect x="1" y="260" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="279.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">underlying_instrument_id</text>
+<text x="390" y="277.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">FK</text>
+</g>
+<g id="column-instruments-retired_at">
+<text x="18" y="304.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">retired_at</text>
+<text x="390" y="302.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-instruments-created_at">
+<rect x="1" y="310" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="329.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="327.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+</g>
+<g id="table-watchlist_items" transform="translate(625,510)">
+<rect x="0" y="0" width="460" height="185" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">watchlist_items</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-watchlist_items-instrument_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">instrument_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK/FK</text>
+</g>
+<g id="column-watchlist_items-providers">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">providers</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-watchlist_items-created_at">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+</g>
+<g id="table-market_data_curves" transform="translate(625,850)">
+<rect x="0" y="0" width="460" height="385" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">market_data_curves</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-market_data_curves-curve_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">curve_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-market_data_curves-provider">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">provider</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curves-curve_name">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">curve_name</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curves-curve_basis">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">curve_basis</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curves-currency">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">currency</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curves-index_tenor">
+<rect x="1" y="210" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="229.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">index_tenor</text>
+<text x="390" y="227.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curves-as_of_date">
+<text x="18" y="254.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">as_of_date</text>
+<text x="390" y="252.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curves-received_at">
+<rect x="1" y="260" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="279.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">received_at</text>
+<text x="390" y="277.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curves-created_at">
+<text x="18" y="304.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="302.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curves-raw_payload">
+<rect x="1" y="310" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="329.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">raw_payload</text>
+<text x="390" y="327.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<rect x="1" y="343" width="458" height="1" fill="#dce3eb"/>
+<text x="18" y="364.94" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#5c6e83">UQ (provider, curve_name, as_of_date)</text>
+</g>
+<g id="table-market_data_curve_points" transform="translate(625,1300)">
+<rect x="0" y="0" width="460" height="335" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">market_data_curve_points</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-market_data_curve_points-curve_point_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">curve_point_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-market_data_curve_points-curve_id">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">curve_id</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">FK</text>
+</g>
+<g id="column-market_data_curve_points-tenor_label">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">tenor_label</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curve_points-tenor_years">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">tenor_years</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curve_points-rate">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">rate</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curve_points-source_series">
+<rect x="1" y="210" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="229.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">source_series</text>
+<text x="390" y="227.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curve_points-source_as_of">
+<text x="18" y="254.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">source_as_of</text>
+<text x="390" y="252.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-market_data_curve_points-created_at">
+<rect x="1" y="260" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="279.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="277.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<rect x="1" y="293" width="458" height="1" fill="#dce3eb"/>
+<text x="18" y="314.94" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#5c6e83">UQ (curve_id, tenor_label)</text>
+</g>
+<g id="table-trades" transform="translate(1200,40)">
+<rect x="0" y="0" width="460" height="735" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">trades</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-trades-trade_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">trade_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-trades-book_id">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">book_id</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">FK</text>
+</g>
+<g id="column-trades-instrument_id">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">instrument_id</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">FK</text>
+</g>
+<g id="column-trades-side">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">side</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-quantity">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">quantity</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-trade_price">
+<rect x="1" y="210" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="229.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">trade_price</text>
+<text x="390" y="227.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-trade_currency">
+<text x="18" y="254.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">trade_currency</text>
+<text x="390" y="252.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-status">
+<rect x="1" y="260" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="279.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">status</text>
+<text x="390" y="277.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-opened_at">
+<text x="18" y="304.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">opened_at</text>
+<text x="390" y="302.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-closed_at">
+<rect x="1" y="310" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="329.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">closed_at</text>
+<text x="390" y="327.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-close_price">
+<text x="18" y="354.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">close_price</text>
+<text x="390" y="352.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-close_price_timestamp">
+<rect x="1" y="360" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="379.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">close_price_timestamp</text>
+<text x="390" y="377.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-close_snapshot_id">
+<text x="18" y="404.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">close_snapshot_id</text>
+<text x="390" y="402.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">FK</text>
+</g>
+<g id="column-trades-close_reason">
+<rect x="1" y="410" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="429.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">close_reason</text>
+<text x="390" y="427.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-source">
+<text x="18" y="454.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">source</text>
+<text x="390" y="452.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-client_request_id">
+<rect x="1" y="460" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="479.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">client_request_id</text>
+<text x="390" y="477.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">UQ</text>
+</g>
+<g id="column-trades-valuation_finalized">
+<text x="18" y="504.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">valuation_finalized</text>
+<text x="390" y="502.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-market_data_provider">
+<rect x="1" y="510" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="529.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">market_data_provider</text>
+<text x="390" y="527.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-entry_price_timestamp">
+<text x="18" y="554.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">entry_price_timestamp</text>
+<text x="390" y="552.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-entry_snapshot_id">
+<rect x="1" y="560" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="579.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">entry_snapshot_id</text>
+<text x="390" y="577.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">FK</text>
+</g>
+<g id="column-trades-client_seen_price">
+<text x="18" y="604.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">client_seen_price</text>
+<text x="390" y="602.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-created_by_service">
+<rect x="1" y="610" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="629.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_by_service</text>
+<text x="390" y="627.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-metadata">
+<text x="18" y="654.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">metadata</text>
+<text x="390" y="652.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-created_at">
+<rect x="1" y="660" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="679.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="677.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-trades-updated_at">
+<text x="18" y="704.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">updated_at</text>
+<text x="390" y="702.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+</g>
+<g id="table-audit_logs" transform="translate(1200,1040)">
+<rect x="0" y="0" width="460" height="360" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">audit_logs</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-audit_logs-audit_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">audit_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-audit_logs-service_name">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">service_name</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-audit_logs-event_type">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">event_type</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-audit_logs-entity_type">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">entity_type</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-audit_logs-entity_id">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">entity_id</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-audit_logs-correlation_id">
+<rect x="1" y="210" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="229.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">correlation_id</text>
+<text x="390" y="227.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-audit_logs-severity">
+<text x="18" y="254.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">severity</text>
+<text x="390" y="252.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-audit_logs-message">
+<rect x="1" y="260" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="279.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">message</text>
+<text x="390" y="277.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-audit_logs-payload">
+<text x="18" y="304.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">payload</text>
+<text x="390" y="302.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-audit_logs-created_at">
+<rect x="1" y="310" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="329.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="327.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+</g>
+<g id="table-books" transform="translate(1775,40)">
+<rect x="0" y="0" width="460" height="335" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">books</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-books-book_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">book_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-books-name">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">name</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">UQ</text>
+</g>
+<g id="column-books-description">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">description</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-books-expected_asset_class">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">expected_asset_class</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-books-is_active">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">is_active</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-books-created_at">
+<rect x="1" y="210" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="229.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="227.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-books-updated_at">
+<text x="18" y="254.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">updated_at</text>
+<text x="390" y="252.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-books-created_by">
+<rect x="1" y="260" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="279.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_by</text>
+<text x="390" y="277.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-books-updated_by">
+<text x="18" y="304.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">updated_by</text>
+<text x="390" y="302.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+</g>
+<g id="table-valuations" transform="translate(1775,650)">
+<rect x="0" y="0" width="460" height="410" fill="#fff" stroke="#bdcbd9"/>
+<rect x="0" y="0" width="460" height="49" fill="#e5edf4"/>
+<text x="18" y="34.50" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#314c67">valuations</text>
+<rect x="0" y="49" width="460" height="29" fill="#eff3f8"/>
+<text x="18" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">COLUMN</text>
+<text x="390" y="68.30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#66778a">KEY</text>
+<g id="column-valuations-valuation_id">
+<text x="18" y="104.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">valuation_id</text>
+<text x="390" y="102.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">PK</text>
+</g>
+<g id="column-valuations-trade_id">
+<rect x="1" y="110" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="129.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">trade_id</text>
+<text x="390" y="127.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#314c67">FK</text>
+</g>
+<g id="column-valuations-valuation_time">
+<text x="18" y="154.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">valuation_time</text>
+<text x="390" y="152.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-valuations-fair_value">
+<rect x="1" y="160" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="179.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">fair_value</text>
+<text x="390" y="177.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-valuations-unrealized_pnl">
+<text x="18" y="204.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">unrealized_pnl</text>
+<text x="390" y="202.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-valuations-realized_pnl">
+<rect x="1" y="210" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="229.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">realized_pnl</text>
+<text x="390" y="227.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-valuations-total_pnl">
+<text x="18" y="254.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">total_pnl</text>
+<text x="390" y="252.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-valuations-currency">
+<rect x="1" y="260" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="279.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">currency</text>
+<text x="390" y="277.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-valuations-market_data_provider">
+<text x="18" y="304.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">market_data_provider</text>
+<text x="390" y="302.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-valuations-market_data_timestamp">
+<rect x="1" y="310" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="329.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">market_data_timestamp</text>
+<text x="390" y="327.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-valuations-valuation_payload">
+<text x="18" y="354.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">valuation_payload</text>
+<text x="390" y="352.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+<g id="column-valuations-created_at">
+<rect x="1" y="360" width="458" height="25" fill="#f7f9fc"/>
+<text x="18" y="379.58" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#26374e">created_at</text>
+<text x="390" y="377.12" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#314c67"></text>
+</g>
+</g>
+</svg>

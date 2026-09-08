@@ -12,6 +12,7 @@ from desk_pricing.provenance import pricing_provenance
 from desk_runtime.functions import get_iso_timestamp
 from desk_runtime.logging_config import get_logger
 from desk_domain.audit import write_audit
+from desk_domain.contract_data import split_terms
 
 log = get_logger(SERVICE_NAME)
 _blocked_lock = threading.Lock()
@@ -92,6 +93,10 @@ def value_trade(trade):
         "valuation_payload": {
             "current_price": str(price),
             "multiplier": multiplier,
+            "pricing": split_terms(trade["asset_class"], meta).pricing,
+            "spot_source": {
+                key: spot.get(key) for key in ("provider", "provider_timestamp", "received_at")
+            } if spot else None,
             **({"discount_curve": curve.get("curve_name"),
                 "curve_as_of": curve.get("as_of_date"),
                 "curve_received_at": curve.get("received_at")} if curve else {}),
@@ -104,18 +109,6 @@ def value_trade(trade):
             **({"face_value": meta["face_value"]}
                if meta.get("face_value") else {}),
             **({"pricing_provenance": provenance} if provenance else {}),
-            "contract_terms": {
-                key: meta[key]
-                for key in (
-                    "coupon_rate",
-                    "fixed_rate",
-                    "maturity_years",
-                    "option_type",
-                    "strike",
-                    "underlying_symbol",
-                )
-                if meta.get(key) is not None
-            },
         },
     }
 

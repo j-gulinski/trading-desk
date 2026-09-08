@@ -17,7 +17,7 @@ PORTFOLIO_NAME = "All books"
 
 
 class BookRiskEngine:
-    """Rolling alpha/beta per book against the benchmark. See docs/alpha-beta.md.
+    """Rolling alpha/beta per book against the benchmark.
 
     Samples are stored in dollar space — (ΔPnL, benchmark return) pairs — and the
     capital base divides in only at publish time, so a config change rescales output

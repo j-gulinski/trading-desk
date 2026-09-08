@@ -3,6 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from trade_action_service import action_queue, repository
 from trade_action_service.config import SERVICE_NAME
 from trade_action_service.trade_validation import parse_uuid, validate_close, validate_open
+from desk_domain.contract_data import with_close_metadata
 from desk_domain.audit import write_audit
 from desk_runtime.db import session_scope
 from desk_runtime.logging_config import get_logger
@@ -101,6 +102,10 @@ def open_trade(intent):
             executed_price=str(price),
         )
         action_queue.incr("created")
+    except ValueError as exc:
+        with session_scope() as session:
+            audit_rejection(session, intent, str(exc))
+        action_queue.incr("rejected")
     except IntegrityError:
         log.warning("duplicate_intent", trade_id=intent.get("trade_id"))
         action_queue.incr("duplicates")
@@ -113,8 +118,9 @@ def close_trade(intent):
             audit_rejection(session, intent, error)
             return action_queue.incr("rejected")
         quote, price = plan["quote"], plan["price"]
-        close_metadata = dict(plan["trade"].trade_metadata or {})
-        close_metadata.update(plan.get("close_provenance") or {})
+        close_metadata = with_close_metadata(
+            plan["trade"].trade_metadata, plan.get("close_provenance") or {}
+        )
         repository.close_trade(
             session,
             plan["trade"].trade_id,
@@ -130,7 +136,7 @@ def close_trade(intent):
             intent,
             payload={
                 "provider": plan["provider"],
-                "symbol": plan["trade"].symbol,
+                "symbol": plan["trade"].instrument.symbol,
                 "freshness": quote.state.value,
                 "close_price": str(price),
                 "client_seen_price": intent.get("client_seen_price"),
@@ -166,8 +172,9 @@ def close_all_trades(intent):
             if error is not None:
                 skipped.append((str(trade.trade_id), error))
                 continue
-            close_metadata = dict(plan["trade"].trade_metadata or {})
-            close_metadata.update(plan.get("close_provenance") or {})
+            close_metadata = with_close_metadata(
+                plan["trade"].trade_metadata, plan.get("close_provenance") or {}
+            )
             repository.close_trade(
                 session,
                 trade.trade_id,

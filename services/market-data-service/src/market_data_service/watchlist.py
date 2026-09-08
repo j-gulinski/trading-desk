@@ -7,6 +7,7 @@ from desk_domain.audit import write_audit
 from desk_runtime.db import session_scope
 from desk_runtime.functions import utcnow
 from desk_domain.models import WatchlistItem
+from desk_domain.instruments import active_source_dependency, ensure_instrument, lock_instrument
 from desk_domain.providers import supports_quotes
 from desk_domain.symbols import (
     SPOT_ASSET_CLASSES,
@@ -135,50 +136,37 @@ def _add_item(symbol, asset_class, currency, quote_providers, requested_provider
         return None, f"no wired provider can quote {asset_class}", 422
 
     with session_scope() as session:
-        row = session.get(WatchlistItem, symbol)
+        instrument = ensure_instrument(
+            session, symbol, asset_class, currency, name=name, market=market,
+        )
+        row = session.get(WatchlistItem, instrument.instrument_id)
         if row is not None:
-            if row.asset_class != asset_class:
-                return None, f"{symbol} is already watched as {row.asset_class}", 409
-            if row.currency != currency:
-                return None, (
-                    f"{symbol} is already watched in {row.currency}, not {currency}"
-                ), 409
-            current = watched_providers(row.asset_class, row.providers)
+            current = watched_providers(asset_class, row.providers)
             added = chosen - current
             if not added:
                 return None, f"{symbol} is already watched on {', '.join(sorted(chosen))}", 409
             merged = current | added
             row.providers = {provider: True for provider in sorted(merged)}
-            if name is not None:
-                row.name = name
-            if market is not None:
-                row.market = market
-            name = row.name
-            market = row.market
             event, message = "WATCHLIST_PROVIDER_ADDED", (
                 f"{symbol} watched on {', '.join(sorted(added))}"
             )
         else:
-            added = chosen
             if session.query(WatchlistItem).count() >= MAX_ACTIVE_SYMBOLS:
-                return None, (
-                    f"the watchlist is full ({MAX_ACTIVE_SYMBOLS} symbols) — "
-                    "remove one before adding another"
-                ), 409
-            merged = chosen
+                return None, f"the watchlist is full ({MAX_ACTIVE_SYMBOLS} symbols)", 409
+            added = merged = chosen
             session.add(WatchlistItem(
-                symbol=symbol,
-                name=name,
-                asset_class=asset_class,
-                currency=currency,
-                market=market,
+                instrument_id=instrument.instrument_id,
                 providers={provider: True for provider in sorted(merged)},
                 created_at=utcnow(),
             ))
             event, message = "WATCHLIST_SYMBOL_ADDED", (
-                f"{symbol} ({asset_class}, {currency}) watched on "
-                f"{', '.join(sorted(merged))}"
+                f"{symbol} ({asset_class}, {currency}) watched on {', '.join(sorted(merged))}"
             )
+        if name is not None:
+            instrument.name = name
+        if instrument.market is None and market is not None:
+            instrument.market = market
+        name, market = instrument.name, instrument.market
         write_audit(
             SERVICE_NAME, event, message,
             entity_type="SYMBOL", entity_id=symbol,
@@ -205,6 +193,8 @@ def add_item(symbol, asset_class, currency, quote_providers, requested_providers
                 name,
                 market,
             )
+        except ValueError as exc:
+            return None, str(exc), 409
         except IntegrityError:
             return None, "the watchlist changed concurrently; retry the request", 409
 
@@ -213,13 +203,16 @@ def _remove_item(symbol, provider=None):
     symbol = (symbol or "").strip().upper()
     provider = (provider or "").strip().upper() or None
     with session_scope() as session:
-        row = session.get(WatchlistItem, symbol)
+        instrument = lock_instrument(session, symbol)
+        row = session.get(WatchlistItem, instrument.instrument_id) if instrument else None
         if row is None:
             return None, f"{symbol} is not on the watchlist", 404
-        current = watched_providers(row.asset_class, row.providers)
+        current = watched_providers(instrument.asset_class, row.providers)
         if provider is not None and provider not in current:
             return None, f"{symbol} is not watched on {provider}", 404
         remaining = current - {provider} if provider is not None else set()
+        if active_source_dependency(session, instrument.instrument_id, current - remaining):
+            return None, f"{symbol} source is required by an active trade", 409
         if remaining:
             row.providers = {name: True for name in sorted(remaining)}
             event = "WATCHLIST_PROVIDER_REMOVED"
@@ -246,5 +239,7 @@ def remove_item(symbol, provider=None):
     with _mutation_lock:
         try:
             return _remove_item(symbol, provider)
+        except ValueError as exc:
+            return None, str(exc), 409
         except IntegrityError:
             return None, "the watchlist changed concurrently; retry the request", 409

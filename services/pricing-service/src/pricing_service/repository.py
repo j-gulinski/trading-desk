@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from pricing_service.config import SERVICE_NAME, VALUATION_WRITE_INTERVAL_SECONDS
 from pricing_service.pnl import signed_quantity
+from desk_domain.contract_data import trade_terms
 from desk_runtime.db import session_scope
 from desk_runtime.functions import get_iso_timestamp, utcnow
 from desk_runtime.logging_config import get_logger
@@ -50,14 +51,14 @@ def load_active_trades():
                 "trade_id": str(trade.trade_id),
                 "book_id": str(trade.book_id),
                 "book_name": book_name,
-                "asset_class": trade.asset_class,
-                "symbol": trade.symbol,
+                "asset_class": trade.instrument.asset_class,
+                "symbol": trade.instrument.symbol,
                 "side": trade.side,
                 "quantity": trade.quantity,
                 "trade_price": trade.trade_price,
                 "currency": trade.trade_currency,
                 "market_data_provider": trade.market_data_provider,
-                "metadata": trade.trade_metadata or {},
+                "metadata": trade_terms(trade),
             }
     return active
 
@@ -111,11 +112,8 @@ def save_valuation(valuation):
                 Valuation(
                     valuation_id=uuid.uuid4(),
                     trade_id=uuid.UUID(valuation["trade_id"]),
-                    book_id=uuid.UUID(valuation["book_id"]),
-                    asset_class=valuation["asset_class"],
                     valuation_time=now,
                     fair_value=valuation["fair_value"],
-                    market_value=valuation.get("market_value"),
                     unrealized_pnl=valuation["unrealized_pnl"],
                     realized_pnl=valuation["realized_pnl"],
                     total_pnl=valuation["total_pnl"],
@@ -187,13 +185,13 @@ def load_terminal_valuations():
                 "trade_id": str(trade.trade_id),
                 "book_id": str(trade.book_id),
                 "book_name": book_name,
-                "asset_class": trade.asset_class,
-                "symbol": trade.symbol,
+                "asset_class": trade.instrument.asset_class,
+                "symbol": trade.instrument.symbol,
                 "currency": valuation.currency,
                 "quantity": signed_quantity(trade.side, trade.quantity),
                 "trade_price": trade.trade_price,
                 "fair_value": valuation.fair_value,
-                "market_value": valuation.market_value,
+                "market_value": valuation.fair_value,
                 "unrealized_pnl": valuation.unrealized_pnl,
                 "realized_pnl": valuation.realized_pnl,
                 "total_pnl": valuation.total_pnl,
@@ -218,13 +216,13 @@ def finalize_closed_trades():
             .all()
         )
         for trade, book_name in rows:
-            metadata = trade.trade_metadata or {}
+            metadata = trade_terms(trade)
             quantity = trade.quantity
             trade_price = trade.trade_price
             multiplier = int(metadata.get("multiplier", 1))
             valuation_provider = trade.market_data_provider or metadata.get(
-                "discount_curve_provider"
-            )
+                "close_discount_curve_provider"
+            ) or metadata.get("discount_curve_provider")
             curve_provenance = {
                 field: metadata[field]
                 for field in CURVE_PROVENANCE_FIELDS
@@ -267,12 +265,13 @@ def finalize_closed_trades():
                     **curve_provenance,
                 }
 
+            payload["pricing"] = trade.trade_metadata["pricing"]
             valuation = {
                 "trade_id": str(trade.trade_id),
                 "book_id": str(trade.book_id),
                 "book_name": book_name,
-                "asset_class": trade.asset_class,
-                "symbol": trade.symbol,
+                "asset_class": trade.instrument.asset_class,
+                "symbol": trade.instrument.symbol,
                 "currency": trade.trade_currency,
                 "quantity": signed_quantity(trade.side, quantity),
                 "trade_price": trade_price,
@@ -294,11 +293,8 @@ def finalize_closed_trades():
                 Valuation(
                     valuation_id=uuid.uuid4(),
                     trade_id=trade.trade_id,
-                    book_id=trade.book_id,
-                    asset_class=trade.asset_class,
                     valuation_time=utcnow(),
                     fair_value=fair_value,
-                    market_value=fair_value,
                     unrealized_pnl=Decimal("0"),
                     realized_pnl=realized,
                     total_pnl=realized,
@@ -313,7 +309,7 @@ def finalize_closed_trades():
             log.info(
                 "trade_finalized",
                 trade_id=str(trade.trade_id),
-                symbol=trade.symbol,
+                symbol=trade.instrument.symbol,
                 realized_pnl=str(realized),
                 close_price=(
                     str(trade.close_price) if trade.close_price is not None else None
