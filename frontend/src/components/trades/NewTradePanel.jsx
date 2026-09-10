@@ -28,7 +28,9 @@ import {
 import {
   ackSummaryOf,
   hasTermField,
+  isCustomTicket,
   quantityLabelOf,
+  selectedModelOf,
   submitActionOf,
   ticketErrorsOf,
   ticketValueOf,
@@ -179,7 +181,8 @@ export default function NewTradePanel({ onClose }) {
   const selectedBook = bookList.find((book) => book.id === bookId) ?? null
   const assetClass = selectedBook?.assetClass
   const schema = assetClass ? schemas[assetClass] ?? null : null
-  const modelPriced = schema?.needs_curve === true
+  const selectedModel = selectedModelOf(schema, termValues)
+  const modelPriced = isCustomTicket(schema)
   const needsQuote = schema?.needs_quote === true
   const underlyingField = schema?.underlying_field ?? null
   const options = useMemo(
@@ -197,9 +200,22 @@ export default function NewTradePanel({ onClose }) {
   const effectiveSide = sides.includes(side) ? side : sides[0]
   const fixedQuantity = schema?.fixed_quantity ?? null
   const selectedCurve = curves.find((curve) => curve.curve_name === termValues.discount_curve) ?? null
-  const selectedStaleCurves = CURVE_TERM_FIELDS
-    .map((field) => curves.find((curve) => curve.curve_name === termValues[field]))
-    .filter((curve) => curve?.stale === true)
+  const needsCurve = selectedModel?.needs_curve ?? schema?.needs_curve === true
+  const selectedStaleCurves = needsCurve
+    ? CURVE_TERM_FIELDS
+      .map((field) => curves.find((curve) => curve.curve_name === termValues[field]))
+      .filter((curve) => curve?.stale === true)
+    : []
+
+  const defaultModel = schema?.default_model
+  const schemaDefaults = schema?.defaults
+  useEffect(() => {
+    if (!isCustomTicket(schema) || !defaultModel) return
+    setTermValues((current) => {
+      if (current.model) return current
+      return { ...schemaDefaults, model: defaultModel }
+    })
+  }, [defaultModel, schema, schemaDefaults])
 
   useEffect(() => {
     if (selectedBook == null || schema == null || modelPriced || catalog == null) return
@@ -251,6 +267,7 @@ export default function NewTradePanel({ onClose }) {
       received_at: quote.receivedAt,
     } : null,
     ...Object.fromEntries(CURVE_TERM_FIELDS.map((field) => {
+      if (!needsCurve) return [field, null]
       const chosen = feedCurves?.[termValues[field]]
       return [field, chosen == null ? null : {
         curve_name: chosen.name,
@@ -295,7 +312,7 @@ export default function NewTradePanel({ onClose }) {
     setSide('BUY')
     const nextBook = bookList.find((book) => book.id === nextBookId) ?? null
     const nextSchema = nextBook ? schemas[nextBook.assetClass] ?? null : null
-    const nextOptions = nextSchema == null || nextSchema.needs_curve
+    const nextOptions = nextSchema == null || isCustomTicket(nextSchema)
       ? []
       : tradeableInstrumentsOf(catalog, nextBook.assetClass)
     setSymbol(nextOptions.length === 1 ? nextOptions[0].symbol : '')
@@ -330,15 +347,34 @@ export default function NewTradePanel({ onClose }) {
       }
       if (underlyingField && name === underlyingField) {
         delete next.settlement_currency
-        const entry = (catalog ?? []).find((item) => item.symbol === value)
-        resolveCurveFields(next, curves, entry?.currency ?? null, assetClass)
+        const modelName = next.model ?? schema?.default_model
+        const model = (schema?.models ?? []).find((item) => item.name === modelName)
+        if (model?.needs_curve) {
+          const entry = (catalog ?? []).find((item) => item.symbol === value)
+          resolveCurveFields(next, curves, entry?.currency ?? null, assetClass)
+        } else {
+          CURVE_TERM_FIELDS.forEach((field) => delete next[field])
+        }
       }
       if (name === 'settlement_currency') {
-        resolveCurveFields(next, curves, value, assetClass)
+        const modelName = next.model ?? schema?.default_model
+        const model = (schema?.models ?? []).find((item) => item.name === modelName)
+        if (model == null || model.needs_curve) {
+          resolveCurveFields(next, curves, value, assetClass)
+        }
       }
       if (name === 'floating_rate_index_tenor' && next.projection_curve) {
         const chosen = curves.find((curve) => curve.curve_name === next.projection_curve)
         if (chosen?.index_tenor && chosen.index_tenor !== value) delete next.projection_curve
+      }
+      if (name === 'model') {
+        const chosen = (schema?.models ?? []).find((model) => model.name === value)
+        if (chosen?.needs_curve) {
+          const currency = termCurrencyOf(schema, next, catalog)
+          resolveCurveFields(next, curves, currency, assetClass)
+        } else {
+          CURVE_TERM_FIELDS.forEach((field) => delete next[field])
+        }
       }
       return next
     })
@@ -437,7 +473,7 @@ export default function NewTradePanel({ onClose }) {
         currency: valueCurrency,
         unitLabel,
         quantityUnit: quantityUnitLabelOf({ symbol, assetClass, currency: valueCurrency }),
-        volatility: schema.defaults?.volatility ?? 0,
+        volatility: selectedModel?.defaults?.volatility ?? schema.defaults?.volatility ?? 0,
         now,
       })
     : null

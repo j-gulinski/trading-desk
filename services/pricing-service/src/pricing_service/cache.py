@@ -173,7 +173,10 @@ def trades_for_quote(provider, symbol):
     with data_lock:
         matches = []
         for trade in active_trades.values():
-            instrument = instrument_for(trade["asset_class"], trade["symbol"], trade.get("metadata"))
+            try:
+                instrument = instrument_for(trade["asset_class"], trade["symbol"], trade.get("metadata"))
+            except (TypeError, ValueError):
+                continue
             if instrument.quote_symbol == symbol and trade_provider(trade) == provider:
                 matches.append(trade)
         return matches

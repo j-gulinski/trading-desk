@@ -1,3 +1,4 @@
+import { ticketFieldsOf } from './ticket.js'
 import { freshnessOf, instrumentId } from './marketData.js'
 import { curveTitle } from './curves.js'
 
@@ -52,7 +53,7 @@ export function curveChoicesFor(
 
 export function termFormComplete(schema, terms) {
   if (!schema) return false
-  return schema.fields.every((field) => {
+  return ticketFieldsOf(schema, terms).every((field) => {
     const value = terms[field.name]
     return value != null && value !== ''
   })

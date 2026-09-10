@@ -33,29 +33,51 @@ def _field_choices(instrument_type, field, spot_catalog, curves, approved_only=F
     return field["choices"]
 
 
+def _public_fields(instrument_type, fields, spot_catalog, curves):
+    public = []
+    for field in fields:
+        if field["type"] != "choice":
+            public.append(field)
+            continue
+        public_field = {
+            key: value for key, value in field.items() if key != "choices_source"
+        }
+        public_field["choices"] = _field_choices(
+            instrument_type, field, spot_catalog, curves, approved_only=True,
+        )
+        if field.get("choices_source") == "CURVES":
+            public_field["choices_source"] = "CURVES"
+        public.append(public_field)
+    return public
+
+
+def _model_choice_field(models):
+    return {
+        "name": "model",
+        "label": "PRICING MODEL",
+        "type": "choice",
+        "choices": [model["name"] for model in models],
+        "labels": {model["name"]: model["label"] for model in models},
+    }
+
+
 def public_term_schemas(spot_catalog, curves=()):
     schemas = {}
     for asset_class, instrument_type in INSTRUMENT_TYPES.items():
-        fields = []
-        for field in instrument_type.term_fields:
-            if field["type"] != "choice":
-                fields.append(field)
-                continue
-            public_field = {
-                key: value for key, value in field.items() if key != "choices_source"
-            }
-            public_field["choices"] = _field_choices(
-                instrument_type, field, spot_catalog, curves, approved_only=True,
-            )
-            if field.get("choices_source") == "CURVES":
-                public_field["choices_source"] = "CURVES"
-            fields.append(public_field)
+        models = instrument_type.models
+        visible = [field for field in instrument_type.fields if not field.get("hidden")]
+        fields = _public_fields(instrument_type, visible, spot_catalog, curves)
+        if len(models) > 1:
+            fields = [_model_choice_field(models), *fields]
+        default_model = instrument_type.model
         schemas[asset_class] = {
             **type_view(instrument_type),
-            "model": instrument_type.model,
-            "customizable": bool(instrument_type.term_fields),
-            "defaults": dict(instrument_type.term_defaults),
+            "model": default_model,
+            "default_model": default_model,
+            "customizable": bool(instrument_type.fields),
+            "defaults": {**instrument_type.defaults, **({"model": default_model} if models else {})},
             "fields": fields,
+            "models": list(models),
             "needs_quote": instrument_type.needs_quote,
             "needs_curve": instrument_type.needs_curve,
             "underlying_field": instrument_type.underlying_field,
@@ -134,22 +156,40 @@ def _number(field, value):
     return number
 
 
+def _selected_model(instrument_type, raw):
+    models = instrument_type.models
+    if not models:
+        return None
+    name = raw.get("model") or instrument_type.model
+    for spec in models:
+        if spec["name"] == name:
+            return spec
+    raise ValueError(f"unsupported pricing model {name} for {instrument_type.asset_class}")
+
+
 def validate_terms(asset_class, raw, spot_catalog=None, curves=()):
     try:
         instrument_type = instrument_type_for(asset_class)
     except ValueError as exc:
         return None, str(exc)
-    if not instrument_type.term_fields:
+    if not instrument_type.fields:
         return None, f"{asset_class} does not accept custom terms"
     if not isinstance(raw, dict):
         return None, "terms must be an object"
-    if raw.get("model", instrument_type.model) != instrument_type.model:
-        return None, f"unsupported pricing model for {asset_class}"
+    try:
+        selected = _selected_model(instrument_type, raw)
+    except ValueError as exc:
+        return None, str(exc)
+    skip = set(CURVE_FIELDS) | {"volatility"} if selected and not selected["needs_curve"] else set()
 
     spot_catalog = spot_catalog or {}
-    terms = dict(instrument_type.term_defaults)
-    for field in (*instrument_type.term_fields, *instrument_type.term_settings):
+    terms = dict(instrument_type.defaults)
+    for name in skip:
+        terms.pop(name, None)
+    for field in instrument_type.fields:
         name = field["name"]
+        if name in skip:
+            continue
         value = raw.get(name, terms.get(name))
         if value is None or value == "":
             return None, f"missing term: {name}"
@@ -162,13 +202,15 @@ def validate_terms(asset_class, raw, spot_catalog=None, curves=()):
             terms[name] = _number(field, value)
         except ValueError as exc:
             return None, str(exc)
+    if selected is not None:
+        terms["model"] = selected["name"]
 
-    try:
-        terms = instrument_type.complete_terms(terms, raw)
-    except ValueError as exc:
-        return None, str(exc)
     terms["asset_class"] = asset_class
     terms["currency"] = _terms_currency(instrument_type, terms, spot_catalog)
+    try:
+        instrument_type.from_dict("", terms)
+    except (KeyError, TypeError, ValueError) as exc:
+        return None, str(exc)
 
     guard_error = _curve_guards(instrument_type, terms, curves)
     if guard_error is not None:

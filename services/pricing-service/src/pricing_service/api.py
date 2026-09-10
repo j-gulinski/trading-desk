@@ -120,7 +120,11 @@ def price_preview():
         response.status = 400
         return to_json({"error": "market_data_provider must be text"})
     provider = (raw_provider or "").strip().upper() or None
-    instrument = instrument_for(terms["asset_class"], symbol, terms)
+    try:
+        instrument = instrument_for(terms["asset_class"], symbol, terms)
+    except (TypeError, ValueError) as exc:
+        response.status = 400
+        return to_json({"error": str(exc), "symbol": symbol})
     inputs = market_inputs(instrument, provider)
     priced = instrument.price(inputs)
     if priced is None:
@@ -129,7 +133,7 @@ def price_preview():
         response.status = 503
         return to_json({
             "error": f"{provider or DEFAULT_QUOTE_PROVIDER} has no current quote for {symbol}"
-            if not instrument.needs_curve
+            if not instrument.uses_curve()
             else "the selected curve (or the underlying quote) is not available yet",
             "symbol": symbol,
         })
@@ -209,17 +213,19 @@ def post_scenario():
         response.status = 400
         return to_json({"error": str(e)})
 
-    if req.instrument.needs_curve:
+    if type(req.instrument).fields:
         with session_scope() as session:
             spot_catalog = watchlist_spot_catalog(session)
             curves = latest_curve_sets(session)
         terms, error = validate_terms(
-            req.instrument.asset_class, req.instrument.terms, spot_catalog, curves,
+            req.instrument.asset_class, req.instrument.as_terms(), spot_catalog, curves,
         )
         if terms is None:
             response.status = 400
             return to_json({"error": error})
-        req.instrument.terms = terms
+        req.instrument = instrument_for(
+            req.instrument.asset_class, req.instrument.symbol, terms,
+        )
 
     try:
         result = run_scenario(req)

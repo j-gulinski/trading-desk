@@ -9,7 +9,7 @@ from desk_domain.active_set import load_active_set
 from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from desk_domain.curve_registry import latest_curve_sets, load_curve
 from desk_domain.freshness import FreshnessState
-from desk_domain.instruments import instrument_for
+from desk_domain.instruments import instrument_for, instrument_type_for
 from desk_domain.trade_rules import validate_position
 from desk_pricing.provenance import pricing_provenance
 from desk_domain.providers import supports_quotes
@@ -27,12 +27,12 @@ def parse_uuid(value):
         return None
 
 
-def _resolve_terms(session, intent, instrument, active, curves=()):
-    asset_class = instrument.asset_class
+def _resolve_terms(session, intent, instrument_type, active, curves=()):
+    asset_class = instrument_type.asset_class
     custom = intent.get("terms")
     if custom is not None:
         return validate_terms(asset_class, custom, watchlist_spot_catalog(session), curves)
-    if instrument.needs_curve:
+    if instrument_type.fields:
         return None, f"{asset_class} requires instrument terms"
     entry = active.get(intent.get("symbol"))
     if entry is None or entry.asset_class != asset_class or not entry.tradeable:
@@ -107,14 +107,15 @@ def _model_deviation_error(instrument, price, seen):
     return None
 
 
-def _curve_execution(session, instrument, provider, seen, *, allow_stale=False, stale_ack=False):
-    terms = instrument.terms
-    name = terms["discount_curve"]
-    curve = load_curve(name, session=session)
-    if curve is None:
-        raise ValueError(f"no stored {name} curve set is available yet")
-    if curve.get("stale") and not allow_stale and not stale_ack:
-        raise ValueError(f"stale curve acknowledgement is required for {name}")
+def _model_execution(session, instrument, provider, seen, *, allow_stale=False, stale_ack=False):
+    curve = None
+    if instrument.uses_curve():
+        name = instrument.discount_curve
+        curve = load_curve(name, session=session)
+        if curve is None:
+            raise ValueError(f"no stored {name} curve set is available yet")
+        if curve.get("stale") and not allow_stale and not stale_ack:
+            raise ValueError(f"stale curve acknowledgement is required for {name}")
     underlying = instrument.quote_symbol
     underlying_quote = None
     if underlying:
@@ -130,19 +131,27 @@ def _curve_execution(session, instrument, provider, seen, *, allow_stale=False, 
     error = _model_deviation_error(instrument, price, seen)
     if error:
         raise ValueError(error)
+    if underlying_quote is not None:
+        quote_time = underlying_quote.provider_timestamp
+        quote_state = underlying_quote.state
+        snapshot_id = underlying_quote.snapshot_id
+    else:
+        quote_time = _as_of_timestamp(curve["as_of_date"])
+        quote_state = FreshnessState.LIVE
+        snapshot_id = None
     quote = market_state.ModelQuote(
-        terms["currency"], underlying_quote.state if underlying_quote else FreshnessState.LIVE,
-        provider_timestamp=(underlying_quote.provider_timestamp if underlying_quote
-                            else _as_of_timestamp(curve["as_of_date"])),
-        snapshot_id=underlying_quote.snapshot_id if underlying_quote else None,
+        instrument.currency, quote_state,
+        provider_timestamp=quote_time,
+        snapshot_id=snapshot_id,
     )
-    projection = curve if terms.get("projection_curve") else None
+    projection = curve if curve is not None and instrument.projection_curve else None
     provenance = {"pricing_provenance": pricing_provenance(instrument.model, curve, projection)}
-    for role in (("discount_curve", "projection_curve") if projection else ("discount_curve",)):
-        provenance[f"{role}_provider"] = curve["provider"]
-        provenance[f"{role}_as_of"] = curve["as_of_date"]
-    if curve.get("stale") and not allow_stale:
-        provenance["stale_curve_acknowledged"] = [name]
+    if curve is not None:
+        for role in (("discount_curve", "projection_curve") if projection else ("discount_curve",)):
+            provenance[f"{role}_provider"] = curve["provider"]
+            provenance[f"{role}_as_of"] = curve["as_of_date"]
+        if curve.get("stale") and not allow_stale:
+            provenance["stale_curve_acknowledged"] = [instrument.discount_curve]
     return price, quote, provenance
 
 
@@ -155,13 +164,13 @@ def _validate_curve_open(session, intent, active, instrument):
         if error:
             return None, error
     try:
-        price, quote, provenance = _curve_execution(
+        price, quote, provenance = _model_execution(
             session, instrument, provider, intent.get("client_seen_price"),
             stale_ack=intent.get("stale_curve_acknowledged") is True,
         )
     except (ValueError, ArithmeticError) as exc:
         return None, str(exc)
-    instrument.terms.update(provenance)
+    instrument.extras.update(provenance)
     return {"instrument": instrument, "provider": provider, "quote": quote, "price": price}, None
 
 
@@ -177,19 +186,22 @@ def validate_open(session, intent):
         )
     asset_class = intent.get("asset_class")
     try:
-        instrument = instrument_for(asset_class, intent.get("symbol"))
+        instrument_type = instrument_type_for(asset_class)
     except ValueError as exc:
         return None, str(exc)
     active = load_active_set(session)
     curves = (
         latest_curve_sets(session)
-        if instrument.needs_curve
+        if instrument_type.needs_curve
         else ()
     )
-    terms, term_error = _resolve_terms(session, intent, instrument, active, curves)
+    terms, term_error = _resolve_terms(session, intent, instrument_type, active, curves)
     if terms is None:
         return None, term_error
-    instrument.terms = terms
+    try:
+        instrument = instrument_for(asset_class, intent.get("symbol"), terms)
+    except (TypeError, ValueError) as exc:
+        return None, str(exc)
     try:
         validate_position(instrument, intent.get("side"), intent.get("quantity"),
                           intent.get("client_seen_price"))
@@ -217,7 +229,7 @@ def validate_open(session, intent):
 def _validate_curve_close(session, intent, trade, instrument):
     provider = (trade.market_data_provider or DEFAULT_QUOTE_PROVIDER) if instrument.needs_quote else None
     try:
-        price, quote, provenance = _curve_execution(
+        price, quote, provenance = _model_execution(
             session, instrument, provider, intent.get("client_seen_price"), allow_stale=True,
         )
     except (ValueError, ArithmeticError) as exc:
@@ -231,7 +243,10 @@ def validate_close(session, intent, require_seen=True):
     trade = repository.active_trade(session, trade_id) if trade_id else None
     if trade is None:
         return None, "trade is not open"
-    instrument = instrument_for(trade.instrument.asset_class, trade.instrument.symbol, trade_terms(trade))
+    try:
+        instrument = instrument_for(trade.instrument.asset_class, trade.instrument.symbol, trade_terms(trade))
+    except (TypeError, ValueError) as exc:
+        return None, str(exc)
     seen_price = intent.get("client_seen_price")
     if require_seen and not market_state.is_parseable_price(seen_price):
         return None, "client_seen_price must be a finite number"
@@ -241,7 +256,7 @@ def validate_close(session, intent, require_seen=True):
         and not market_state.is_positive_price(seen_price)
     ):
         return None, "client_seen_price must be greater than zero"
-    if instrument.needs_curve:
+    if instrument.symbol_prefix is not None:
         return _validate_curve_close(session, intent, trade, instrument)
     provider = trade.market_data_provider or DEFAULT_QUOTE_PROVIDER
     quote, price, error = _resolve_execution(

@@ -75,7 +75,7 @@ def _trade_to_dict(trade) -> dict:
         "source": trade.source,
         "created_by_service": trade.created_by_service,
         "terms": trade.terms,
-        "model_priced": instrument_type_for(trade.asset_class).needs_curve,
+        "model_priced": instrument_type_for(trade.asset_class).ticket_kind != "spot",
     }
 
 

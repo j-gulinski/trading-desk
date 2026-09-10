@@ -12,9 +12,9 @@ def _curve_revision(curve):
     }
 
 
-def pricing_provenance(model, discount_curve, projection_curve=None):
+def pricing_provenance(model, discount_curve=None, projection_curve=None):
     if not discount_curve:
-        return None
+        return {"model": model}
     curves = {"discount": _curve_revision(discount_curve)}
     if projection_curve:
         curves["projection"] = _curve_revision(projection_curve)

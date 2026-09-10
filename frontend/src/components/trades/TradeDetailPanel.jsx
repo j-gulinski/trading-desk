@@ -113,6 +113,15 @@ function termValueText(key, value) {
   if (key === 'pricing_approach' && value === 'SINGLE_CURVE_APPROXIMATION') {
     return 'Single-curve approximation'
   }
+  if (key === 'model') {
+    return {
+      BLACK_SCHOLES: 'Black–Scholes',
+      INTRINSIC: 'Intrinsic value',
+      BOND_DCF: 'Discounted cash flow',
+      IRS_SINGLE_CURVE: 'Single-curve IRS',
+      SPOT: 'Quoted spot',
+    }[value] ?? String(value)
+  }
   if (key === 'coupon_rate' || key === 'fixed_rate') return `${formatNumber(value)}%`
   if (key === 'volatility') return `${formatNumber(Number(value) * 100)}%`
   if (key === 'maturity_years') {
@@ -467,7 +476,7 @@ export default function TradeDetailPanel({
                   ? providerLabel(trade.provider ?? valuation.marketDataProvider)
                   : null}
               </DetailField>
-              <DetailField label={trade.modelPriced ? 'Curve as of' : 'Quote time'}>
+              <DetailField label={trade.terms?.discount_curve ? 'Curve as of' : 'Quote time'}>
                 {trade.entryPriceAtMs == null ? null : formatDateTime(trade.entryPriceAtMs)}
               </DetailField>
               {trade.terms != null &&

@@ -63,19 +63,27 @@ This removes the local database and cached frontend dependencies. There is no le
 Providers inherit HTTP handling from `ProviderClient`; `@runtime.guard` handles their errors
 and cooldowns. Quote feeds normalize responses, then share storage and publication in
 `quote_ingestion.py`. `desk-domain/instruments.py` is the instrument catalogue: one
-`FinancialInstrument` subclass per asset class declares its pricing model, the market inputs it
-needs, the terms a ticket supplies, the fields that identify a stored contract, its symbol prefix,
-curve roles, underlying requirements and trade rules. Term validation, the served ticket schema,
-contract storage, the active quote set, trade validation and the blotter read those declarations
-instead of branching on asset class. Each class also declares `label` and `ticket_kind`
-(`spot`, `bond`, `swap`, or `premium`); the ticket and blotter read those instead of copying
-asset-class maps. Adding an instrument is one class plus a pure pricing function in
-`desk-pricing` and approving its curves in `curves.py`. A new premium-style contract reuses
-the premium ticket. Provider response parsing stays in provider adapters. `valuation.py` shares
-position-value and P&L arithmetic. Trade actions share validation and one close operation.
-`desk-runtime` owns configuration, transactions and streams. The trade ticket reads one
-options payload for schema, tradeable instruments and curves, then shows the execution
-value, the total and its key assumptions above a compact price-source list.
+`FinancialInstrument` subclass per asset class declares the contract (ticket fields, symbol
+prefix, curve roles, underlying, trade rules). Instances hold typed attributes
+(`option.strike`, `bond.face_value`); JSON dicts exist only at the HTTP/DB edge
+(`from_dict`, `contract()`, `pricing()`, `as_terms()`). Spots, bonds and swaps call their
+formula from `_value()`. A European option stores the engine name on `option.model`
+(`BLACK_SCHOLES` or `INTRINSIC`); `_value()` looks up that function in `desk-pricing`.
+`desk-domain/pricing.py` maps those two names for the ticket picker. Term validation, the
+served ticket schema, contract storage, the active quote set, trade validation and the blotter
+read the catalogue declarations instead of branching on asset class. Each class also declares
+`label` and `ticket_kind` (`spot`, `bond`, `swap`, or `premium`); the ticket and blotter read
+those instead of copying asset-class maps. Adding an instrument is one class plus a function
+in `desk-pricing`, and approving its curves in `curves.py`. A new option engine is another
+function plus one row in `OPTION_MODELS`. A new premium-style contract reuses the premium
+ticket. Provider response parsing stays in provider adapters.
+`valuation.py` shares position-value and P&L arithmetic. Trade actions share validation and
+one close operation. `desk-runtime` owns configuration, transactions and streams. The trade
+ticket reads one options payload for schema, tradeable instruments and curves, then shows the
+execution value, the total and its key assumptions above a compact price-source list.
+
+Course architecture notes for this phase (schema, inheritance, composition) are in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Database
 
@@ -83,22 +91,29 @@ value, the total and its key assumptions above a compact price-source list.
 
 ![Database schema](assets/database.svg)
 
-- `instruments` owns identity, currency and contract terms. The normalized symbol is unique
-  within this app's supported catalogue. Options reference their underlying instrument.
-- `watchlist_items` selects providers for an instrument. Removing a source needed by an active
-  trade is blocked, including option-underlying dependencies. Open and removal coordinate on
-  the same instrument row lock. Closed trades allow unwatching; their instruments remain protected.
-- Contract fields live in `instruments.terms`; pricing settings and execution context live in
-  trade metadata. Repositories reconstruct the inputs consumed by pricing and trade details.
-- `valuations` stores calculated values, P&L and calculation context. Book and instrument identity
-  come from the trade. Quote snapshots record observed price changes per provider and symbol.
+- `instruments` is the shared identity (unique symbol, currency, JSON contract terms). Trades
+  and the watchlist used to copy `symbol` / `asset_class`; they now point at this row instead.
+  An option’s underlying is `underlying_instrument_id`, not a second copy of the ticker.
+- `watchlist_items` is membership only: which providers serve an instrument. Unwatch removes
+  that row (or one provider). It does not delete the instrument. A source still required by
+  an active trade — including an option on that underlying — cannot be removed. Open and
+  removal lock the same instrument row.
+- `trades.instrument_id` is `ON DELETE RESTRICT`. Closed trades still reference the row, so
+  history keeps a symbol. Closing is not a delete. There is no public instrument-delete API.
+- Contract fields live in `instruments.terms`; pricing settings (`model`, curve, volatility)
+  live in trade metadata. Python rebuilds a typed instrument (`from_dict`) rather than
+  mutating a terms bag. The blotter still receives one merged JSON object.
+- `valuations` stores calculated values, P&L and calculation context. Book and instrument
+  identity come from the trade. Quote snapshots record observed price changes per provider
+  and symbol.
 
 ## Scope and simplifications
 
 Execution is simulated from stored quotes or model prices. Contracts use fixed `maturity_years`;
 calendar aging, automatic expiry and contract versioning are outside the current scope.
-IRS pricing uses one curve for discounting and projection. Pricing models are fixed per instrument class
-for now. Quote history contains observations collected by this app, without vendor backfill.
+IRS pricing uses one curve for discounting and projection. European options default to
+Black–Scholes; the same contract can be valued with intrinsic payoff instead. Quote history
+contains observations collected by this app, without vendor backfill.
 Valuation history follows a trade's current book after reassignment. Exact historical replay,
 authentication, broker connectivity and durable command delivery are not implemented.
 

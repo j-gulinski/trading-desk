@@ -7,14 +7,13 @@ from pricing_service import cache
 
 
 def market_inputs(instrument: FinancialInstrument, provider=None):
-    terms = instrument.terms
     with cache.data_lock:
         inputs = {}
         if instrument.needs_quote:
             inputs["spot"] = cache.spots.get((provider or DEFAULT_QUOTE_PROVIDER, instrument.quote_symbol))
-        if instrument.needs_curve:
-            inputs["curve"] = cache.curves.get(terms.get("discount_curve"))
-        if terms.get("projection_curve"):
+        if instrument.uses_curve():
+            inputs["curve"] = cache.curves.get(instrument.discount_curve)
+        if instrument.projection_curve:
             inputs["projection_curve"] = inputs.get("curve")
         return inputs
 

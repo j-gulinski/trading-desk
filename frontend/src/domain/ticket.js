@@ -24,6 +24,24 @@ export function hasTermField(schema, name) {
   return schema?.fields?.some((field) => field.name === name) === true
 }
 
+export function isCustomTicket(schema) {
+  return schema?.customizable === true
+}
+
+export function selectedModelOf(schema, terms = {}) {
+  const name = terms.model ?? schema?.default_model ?? schema?.model
+  return (schema?.models ?? []).find((model) => model.name === name) ?? null
+}
+
+export function ticketFieldsOf(schema, terms = {}) {
+  const fields = (schema?.fields ?? []).filter((field) => field.hidden !== true)
+  const model = selectedModelOf(schema, terms)
+  if (model?.needs_curve === false) {
+    return fields.filter((field) => field.name !== 'discount_curve' && field.name !== 'projection_curve')
+  }
+  return fields
+}
+
 const SIZE_TERM_LABEL = {
   face_value: 'FACE AMOUNT',
   notional: 'NOTIONAL',
@@ -118,8 +136,34 @@ function spotValue({ assetClass, side, quantity, quote, unitLabel, quantityUnit,
   }
 }
 
-function premiumValue({ terms, quantity, preview, quote, curve, currency, volatility, now }) {
+function premiumValue({ terms, quantity, preview, quote, curve, currency, volatility, now, model }) {
   const price = preview?.price ?? null
+  const intrinsic = (model ?? terms.model) === 'INTRINSIC'
+  if (intrinsic) {
+    return {
+      label: 'INTRINSIC PREMIUM / CONTRACT',
+      hint: 'Payoff of a one-unit contract from the underlying mid and strike. A call pays max(spot − strike, 0); a put pays max(strike − spot, 0). No volatility or discount curve.',
+      value: price != null ? formatAmount(price, 2) : null,
+      unit: price != null ? currency : null,
+      tone: null,
+      pill: quotePill(quote),
+      total: price != null && Number.isFinite(quantity)
+        ? `${formatAmount(price * quantity)} ${currency ?? ''}`.trim()
+        : null,
+      totalNote: Number.isFinite(quantity)
+        ? `for ${formatNumber(quantity)} ${quantity === 1 ? 'contract' : 'contracts'}`
+        : null,
+      assumptions: [
+        quote?.price != null
+          ? {
+              label: 'Underlying',
+              value: `${terms.underlying_symbol} ${formatAmount(quote.price, 2)} ${quote.currency ?? ''} · ${quoteSourceText(quote, now)}`,
+            }
+          : null,
+        modelTime(preview),
+      ].filter(Boolean),
+    }
+  }
   const volatilityText = `${formatNumber(volatility * 100)}%`
   return {
     label: 'MODEL PREMIUM / CONTRACT',
@@ -229,8 +273,9 @@ const MODEL_VALUE_BY_KIND = {
 }
 
 export function ticketValueOf(input) {
-  if (!input.schema?.needs_curve) return spotValue(input)
-  return (MODEL_VALUE_BY_KIND[input.schema.ticket_kind] ?? modelValue)(input)
+  if (!isCustomTicket(input.schema)) return spotValue(input)
+  const model = selectedModelOf(input.schema, input.terms)?.name
+  return (MODEL_VALUE_BY_KIND[input.schema.ticket_kind] ?? modelValue)({ ...input, model })
 }
 
 export function ackSummaryOf({ schema, side, quantity, symbol, terms, currency }) {
@@ -271,7 +316,7 @@ export function ticketErrorsOf({
     }
     return errors
   }
-  const modelPriced = schema.needs_curve === true
+  const modelPriced = isCustomTicket(schema)
   if (!modelPriced && !symbol) errors.instrument = 'Pick an instrument.'
   if (modelPriced && !termsComplete) errors.terms = 'Fill in every term.'
   else if (modelPriced && staleCurves.length > 0 && !staleAcknowledged) {

@@ -1,6 +1,6 @@
 import NumberField from './NumberField.jsx'
 import { curveChoicesFor } from '../../domain/tradeActions.js'
-import { hasTermField } from '../../domain/ticket.js'
+import { hasTermField, ticketFieldsOf } from '../../domain/ticket.js'
 import {
   bondParCouponAt,
   curveBasisText,
@@ -198,6 +198,7 @@ function Field({
   visuallyHideLabel = false,
 }) {
   const isCurve = CURVE_FIELDS.includes(field.name)
+  const isModel = field.name === 'model'
   const fairRate = field.name === 'fixed_rate' && hasTermField(schema, 'floating_rate_index_tenor')
     ? irsParRateAt(
         marketCurves?.[values.discount_curve],
@@ -207,7 +208,7 @@ function Field({
       )
     : null
   return (
-    <div className={`panel-form__field${isCurve ? ' panel-form__field--wide' : ''}`}>
+    <div className={`panel-form__field${isCurve || isModel ? ' panel-form__field--wide' : ''}`}>
       <label
         id={`term-${field.name}-label`}
         className={`panel-form__label${visuallyHideLabel ? ' panel-form__label--sr-only' : ''}${
@@ -285,8 +286,9 @@ export default function TermFields({
   onChange,
   executionFields,
 }) {
-  const contract = schema.fields.filter((field) => !CURVE_FIELDS.includes(field.name))
-  const curveFields = schema.fields.filter((field) => CURVE_FIELDS.includes(field.name))
+  const fields = ticketFieldsOf(schema, values)
+  const contract = fields.filter((field) => !CURVE_FIELDS.includes(field.name))
+  const curveFields = fields.filter((field) => CURVE_FIELDS.includes(field.name))
   const compactSingleCurve = curveFields.length === 1
   const denseTerms = contract.length >= 4
 
@@ -311,31 +313,33 @@ export default function TermFields({
         </div>
       </div>
       {executionFields}
-      <div className="panel-form__group panel-form__group--curves">
-        <h3 className="panel-form__group-title">
-          {compactSingleCurve ? 'Pricing curve' : 'Curves'}
-        </h3>
-        <div
-          className={`panel-form__terms${
-            curveFields.length > 1 ? ' panel-form__terms--paired-curves' : ''
-          }`}
-        >
-          {curveFields.map((field) => (
-            <Field
-              key={field.name}
-              schema={schema}
-              field={field}
-              values={values}
-              curves={curves}
-              marketCurves={marketCurves}
-              currency={currency}
-              assetClass={assetClass}
-              onChange={onChange}
-              visuallyHideLabel={compactSingleCurve}
-            />
-          ))}
+      {curveFields.length > 0 && (
+        <div className="panel-form__group panel-form__group--curves">
+          <h3 className="panel-form__group-title">
+            {compactSingleCurve ? 'Pricing curve' : 'Curves'}
+          </h3>
+          <div
+            className={`panel-form__terms${
+              curveFields.length > 1 ? ' panel-form__terms--paired-curves' : ''
+            }`}
+          >
+            {curveFields.map((field) => (
+              <Field
+                key={field.name}
+                schema={schema}
+                field={field}
+                values={values}
+                curves={curves}
+                marketCurves={marketCurves}
+                currency={currency}
+                assetClass={assetClass}
+                onChange={onChange}
+                visuallyHideLabel={compactSingleCurve}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

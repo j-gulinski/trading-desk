@@ -8,9 +8,6 @@ from desk_domain.providers import capable_providers
 SPOT_ASSET_CLASSES = tuple(
     asset_class for asset_class, kind in INSTRUMENT_TYPES.items() if kind.symbol_prefix is None
 )
-CURVE_PRICED_ASSET_CLASSES = tuple(
-    asset_class for asset_class, kind in INSTRUMENT_TYPES.items() if kind.needs_curve
-)
 TRADE_QUANTITY_MIN = 1
 TRADE_QUANTITY_MAX = 1_000_000
 

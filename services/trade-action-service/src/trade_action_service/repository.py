@@ -29,7 +29,7 @@ def insert_trade(session, intent, instrument, market_data_provider, executed_pri
     symbol = intent.get("symbol")
     trade_id = uuid.UUID(intent["trade_id"])
     asset_class = instrument.asset_class
-    currency = quote.currency or instrument.terms["currency"]
+    currency = quote.currency or instrument.currency
     data = split_terms(instrument)
     if instrument.symbol_prefix is not None:
         underlying = None

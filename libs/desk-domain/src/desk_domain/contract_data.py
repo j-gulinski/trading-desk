@@ -18,15 +18,13 @@ class ContractData:
 
 
 def split_terms(instrument):
-    terms = instrument.terms
-    contract = {key: terms[key] for key in instrument.contract_fields if key in terms}
-    pricing = {"model": instrument.model,
-               **{key: terms[key] for key in instrument.pricing_terms if key in terms}}
-    ignored = set(contract) | set(pricing) | set(instrument.derived_terms) | {
+    contract = instrument.contract()
+    pricing = instrument.pricing()
+    ignored = set(contract) | set(pricing) | set(instrument.derived()) | {
         "asset_class", "currency", "settlement_currency", instrument.underlying_field,
     }
     opening, closing = {}, {}
-    for key, value in terms.items():
+    for key, value in instrument.extras.items():
         if key.startswith("close_"):
             closing[key.removeprefix("close_")] = value
         elif key not in ignored:
@@ -36,16 +34,23 @@ def split_terms(instrument):
 
 def effective_terms(instrument_type, currency, contract, metadata, underlying_symbol=None):
     pricing = metadata.get("pricing") or {}
-    if pricing.get("model") != instrument_type.model:
+    allowed = {spec["name"] for spec in instrument_type.models} or {instrument_type.model}
+    name = pricing.get("model") or (contract or {}).get("model") or instrument_type.model
+    if name not in allowed:
         raise ValueError(f"unsupported pricing model for {instrument_type.asset_class}")
-    terms = {**(metadata.get("open") or {}), **pricing, **contract,
-             "asset_class": instrument_type.asset_class, "currency": currency}
-    terms.update({f"close_{key}": value for key, value in (metadata.get("close") or {}).items()})
-    if instrument_type.has_term("settlement_currency"):
-        terms["settlement_currency"] = currency
+    data = {
+        **(metadata.get("open") or {}),
+        **pricing,
+        **(contract or {}),
+        "model": name,
+        "currency": currency,
+    }
+    data.update({f"close_{key}": value for key, value in (metadata.get("close") or {}).items()})
+    if instrument_type.has_field("settlement_currency"):
+        data["settlement_currency"] = currency
     if underlying_symbol is not None and instrument_type.underlying_field:
-        terms[instrument_type.underlying_field] = underlying_symbol
-    return instrument_type.complete_terms(terms, {})
+        data[instrument_type.underlying_field] = underlying_symbol
+    return instrument_type.from_dict("", data).as_terms()
 
 
 def trade_terms(trade):
