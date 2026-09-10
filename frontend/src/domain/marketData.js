@@ -1,3 +1,4 @@
+import { catalogueFieldsOf } from './catalogue.js'
 import { directionOf } from './formatting.js'
 import { toNum } from './values.js'
 
@@ -32,6 +33,7 @@ function spotInstrument(tick, snapshotStreamId = null) {
     name: typeof tick.name === 'string' ? tick.name : null,
     provider,
     assetClass: tick.asset_class ?? 'UNKNOWN',
+    ...catalogueFieldsOf(tick),
     currency: tick.currency ?? null,
     market: typeof tick.market === 'string' ? tick.market : null,
     value: toNum(tick.mid ?? tick.last),
@@ -204,6 +206,8 @@ function restoreInstrument(candidate) {
     name: typeof candidate.name === 'string' ? candidate.name : null,
     provider: typeof candidate.provider === 'string' ? candidate.provider : null,
     assetClass: candidate.assetClass,
+    ticketKind: candidate.ticketKind ?? null,
+    label: candidate.label ?? null,
     currency: typeof candidate.currency === 'string' ? candidate.currency : null,
     market: typeof candidate.market === 'string' ? candidate.market : null,
     value: toNum(candidate.value),
@@ -374,6 +378,7 @@ function placeholderInstrument(id, provider, item) {
     name: item.name ?? null,
     provider,
     assetClass: item.asset_class ?? 'UNKNOWN',
+    ...catalogueFieldsOf(item),
     currency: item.currency ?? null,
     market: item.market ?? null,
     value: null,
@@ -406,6 +411,7 @@ export function boardInstruments(instruments, watchlistItems, watchlistReady = t
       ? {
           name: item.name ?? instrument.name,
           market: item.market ?? instrument.market,
+          ...catalogueFieldsOf(item),
         }
       : null
     return isWatchlisted(instrument)

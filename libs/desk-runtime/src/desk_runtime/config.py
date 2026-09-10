@@ -23,7 +23,14 @@ def env_required(name):
     return raw
 
 
-DATABASE_URL = env_required("DATABASE_URL")
+SERVICE_PORTS = {
+    "market-data-service": 8001, "pricing-service": 8002, "monitoring-service": 8003,
+    "books-service": 8004, "blotter-service": 8006, "trade-action-service": 8008,
+}
+SERVICE_URLS = {
+    name: env_str(name.upper().replace("-", "_") + "_URL", f"http://{name}:{port}").rstrip("/")
+    for name, port in SERVICE_PORTS.items()
+}
 
 BENCHMARK_SYMBOL = env_str("BENCHMARK_SYMBOL", "SPY")
 BENCHMARK_PROVIDER = env_str("BENCHMARK_PROVIDER", "FINNHUB")

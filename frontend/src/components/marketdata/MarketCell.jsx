@@ -9,7 +9,7 @@ import {
 } from '../../domain/marketFormat.js'
 import { formatClockTime, formatUnitPrice } from '../../domain/formatting.js'
 import { providerLabel } from '../../config/providers.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
+import { classLabelOf } from '../../domain/catalogue.js'
 import {
   FRESHNESS_HINTS,
   freshnessPillLevelOf,
@@ -126,7 +126,7 @@ export default function MarketCell({
       return (
         <span className="class-tag">
           <span className="class-tag__dot" />
-          {assetClassLabel(instrument.assetClass)}
+          {classLabelOf(instrument)}
         </span>
       )
     case 'last':

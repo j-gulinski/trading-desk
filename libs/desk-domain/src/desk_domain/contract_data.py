@@ -1,15 +1,9 @@
+"""Split validated terms into what the instrument row stores and what trade metadata
+keeps, and rebuild the full terms the pricing and trade code consume."""
+
 from dataclasses import dataclass
 
-from desk_domain.term_schemas import IRS_PAYMENTS_PER_YEAR
-from desk_pricing.provenance import MODEL_NAMES
-
-
-CONTRACT_FIELDS = {
-    "EQUITY": (), "FX": (), "COMMODITY": (),
-    "BOND": ("face_value", "coupon_rate", "maturity_years", "payments_per_year"),
-    "IRS": ("direction", "notional", "fixed_rate", "maturity_years", "floating_rate_index_tenor"),
-    "EUROPEAN_OPTION": ("option_type", "strike", "maturity_years", "multiplier"),
-}
+from desk_domain.instruments import instrument_type_for
 
 
 @dataclass(frozen=True)
@@ -23,15 +17,13 @@ class ContractData:
         return {"pricing": self.pricing, "open": self.opening, "close": self.closing}
 
 
-def split_terms(asset_class, terms):
-    contract = {key: terms[key] for key in CONTRACT_FIELDS[asset_class] if key in terms}
-    pricing = {"model": MODEL_NAMES[asset_class]}
-    for key in ("discount_curve", "volatility"):
-        if key in terms:
-            pricing[key] = terms[key]
-    ignored = set(contract) | set(pricing) | {
-        "asset_class", "currency", "settlement_currency", "underlying_symbol",
-        "projection_curve", "payments_per_year", "pricing_approach",
+def split_terms(instrument):
+    terms = instrument.terms
+    contract = {key: terms[key] for key in instrument.contract_fields if key in terms}
+    pricing = {"model": instrument.model,
+               **{key: terms[key] for key in instrument.pricing_terms if key in terms}}
+    ignored = set(contract) | set(pricing) | set(instrument.derived_terms) | {
+        "asset_class", "currency", "settlement_currency", instrument.underlying_field,
     }
     opening, closing = {}, {}
     for key, value in terms.items():
@@ -42,28 +34,24 @@ def split_terms(asset_class, terms):
     return ContractData(contract, pricing, opening, closing)
 
 
-def effective_terms(asset_class, currency, contract, metadata, underlying_symbol=None):
+def effective_terms(instrument_type, currency, contract, metadata, underlying_symbol=None):
     pricing = metadata.get("pricing") or {}
-    if pricing.get("model") != MODEL_NAMES[asset_class]:
-        raise ValueError(f"unsupported pricing model for {asset_class}")
+    if pricing.get("model") != instrument_type.model:
+        raise ValueError(f"unsupported pricing model for {instrument_type.asset_class}")
     terms = {**(metadata.get("open") or {}), **pricing, **contract,
-             "asset_class": asset_class, "currency": currency}
+             "asset_class": instrument_type.asset_class, "currency": currency}
     terms.update({f"close_{key}": value for key, value in (metadata.get("close") or {}).items()})
-    if asset_class in ("BOND", "IRS"):
+    if instrument_type.has_term("settlement_currency"):
         terms["settlement_currency"] = currency
-    if asset_class == "IRS":
-        terms["payments_per_year"] = IRS_PAYMENTS_PER_YEAR[terms["floating_rate_index_tenor"]]
-        terms["projection_curve"] = terms["discount_curve"]
-        terms["pricing_approach"] = "SINGLE_CURVE_APPROXIMATION"
-    if underlying_symbol is not None:
-        terms["underlying_symbol"] = underlying_symbol
-    return terms
+    if underlying_symbol is not None and instrument_type.underlying_field:
+        terms[instrument_type.underlying_field] = underlying_symbol
+    return instrument_type.complete_terms(terms, {})
 
 
 def trade_terms(trade):
     instrument = trade.instrument
     return effective_terms(
-        instrument.asset_class, instrument.currency, instrument.terms,
+        instrument_type_for(instrument.asset_class), instrument.currency, instrument.terms,
         trade.trade_metadata or {},
         instrument.underlying.symbol if instrument.underlying else None,
     )

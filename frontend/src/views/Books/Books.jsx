@@ -11,8 +11,8 @@ import {
 } from '../../domain/books.js'
 import { portfolioSummaryOf, PORTFOLIO_METRICS } from '../../domain/portfolio.js'
 import { describeApiError } from '../../domain/apiErrors.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
-import { countOptions } from '../../domain/filters.js'
+import { groupOptions } from '../../domain/filters.js'
+import { classLabelOf } from '../../domain/catalogue.js'
 import { formatNumber } from '../../domain/formatting.js'
 import EmptyState from '../../components/EmptyState.jsx'
 import LoadingSkeleton from '../../components/LoadingSkeleton.jsx'
@@ -45,9 +45,6 @@ function describeDeleteError(error) {
           open === 1 ? 'position' : 'positions'
         }.`
       : 'Refused — this book still has open positions.'
-  }
-  if (error?.status === 503 && error.body?.error === 'open trades could not be verified') {
-    return 'Blotter service unavailable — open positions could not be checked, so nothing was deleted.'
   }
   return describeApiError(error, {
     service: 'Books service',
@@ -191,7 +188,7 @@ export default function Books() {
       <FilterBar
         label="CLASS"
         ariaLabel="Filter books by asset class"
-        options={countOptions(roster, (book) => book.assetClass, assetClassLabel)}
+        options={groupOptions(roster, (book) => book.assetClass, classLabelOf)}
         value={activeClass}
         onChange={setActiveClass}
         search={{

@@ -61,18 +61,6 @@ export const CURVE_ROLE_HINTS = {
     'Sets the floating leg’s cashflows — forward rates implied by this curve stand in for index fixings that have not happened yet',
 }
 
-export const TRADE_CURVE_ROLE_TEXT = {
-  BOND: {
-    discount_curve: 'Discounts coupons and principal',
-  },
-  IRS: {
-    discount_curve: 'Discounts both legs and implies the floating payments',
-  },
-  EUROPEAN_OPTION: {
-    discount_curve: 'Discounts the strike payment',
-  },
-}
-
 export const WATCHLIST_POLL_INTERVAL_MS = 10000
 
 export const SYMBOL_SEARCH_DEBOUNCE_MS = 400

@@ -66,12 +66,13 @@ class ProviderClient(ABC):
     def base_url(self): ...
 
     timeout_seconds = REQUEST_TIMEOUT_SECONDS
+    api_key_param = None
 
     def __init__(self, api_key=None):
         self.api_key = api_key
 
     def auth_params(self):
-        return {}
+        return {self.api_key_param: self.api_key} if self.api_key_param and self.api_key else {}
 
     def decode_body(self, body):
         return json.loads(body)
@@ -199,17 +200,14 @@ class ProviderClient(ABC):
             },
         )
 
-    def _fetch(self, url, retries=0):
-        for attempt in range(retries + 1):
-            try:
-                with urllib.request.urlopen(url, timeout=self.timeout_seconds) as response:
-                    return response.read(), response.status
-            except urllib.error.HTTPError as error:
-                self._raise_for_status(error, error.read())
-            except (urllib.error.URLError, TimeoutError, OSError) as error:
-                if attempt == retries:
-                    raise ProviderUnavailable(self.provider, str(error))
-                time.sleep(1)
+    def _fetch(self, url):
+        try:
+            with urllib.request.urlopen(url, timeout=self.timeout_seconds) as response:
+                return response.read(), response.status
+        except urllib.error.HTTPError as error:
+            self._raise_for_status(error, error.read())
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            raise ProviderUnavailable(self.provider, str(error)) from error
 
     def _raise_for_status(self, error, body=None):
         try:

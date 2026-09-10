@@ -1,12 +1,9 @@
 import time
 
-from desk_domain.active_set import load_active_set
 from desk_runtime.functions import utcnow
 from desk_runtime.logging_config import get_logger
 from desk_domain.providers import FINNHUB
-from desk_domain.quotes import wire_tick
-from market_data_service import quote_lifecycle, quote_store
-from market_data_service.providers.base import ProviderDataError
+
 from market_data_service.providers.finnhub.client import FinnhubClient
 from market_data_service.providers.finnhub.normalizer import normalize_quote
 from market_data_service.config import (
@@ -23,8 +20,7 @@ from market_data_service.config import (
 )
 from market_data_service.poll_schedule import PollSchedule
 from market_data_service.provider_runtime import ProviderRuntime
-from market_data_service.publisher import publish_quote
-from market_data_service.quote_audit import audit_quote_write
+from market_data_service.quote_ingestion import store_and_publish
 
 log = get_logger(SERVICE_NAME)
 
@@ -71,38 +67,14 @@ def _classifier(symbol):
     }
 
 
+@runtime.guard("quote_unavailable")
 def _fetch_and_publish(entry):
     runtime.record_request()
     payload = _client.quote(entry.symbol)
-    with quote_lifecycle.locked_keys(entry.symbol, (FINNHUB,)):
-        current = load_active_set().get(entry.symbol)
-        if current is None or not current.serves(FINNHUB):
-            raise ProviderDataError(
-                FINNHUB, f"{entry.symbol} left the FINNHUB active set during refresh"
-            )
-        quote = normalize_quote(
-            current.symbol, current.asset_class, current.currency, payload, utcnow()
-        )
-        classifier = _classifier(current.symbol)
-        changed, created, accepted = quote_store.store_quote(quote, classifier)
-        if not accepted:
-            raise ProviderDataError(
-                FINNHUB,
-                f"older observation for {current.symbol} ignored; current row retained",
-            )
-        if changed:
-            audit_quote_write(FINNHUB, quote, created)
-        tick = wire_tick(quote, classifier, current.origin(FINNHUB))
-        publish_quote(tick)
+    quote = normalize_quote(entry.symbol, entry.asset_class, entry.currency, payload, utcnow())
+    tick = store_and_publish(quote, _classifier(entry.symbol))
     runtime.record_success()
     return tick
-
-
-def _guarded_fetch(entry):
-    return runtime.guarded(
-        lambda: _fetch_and_publish(entry), "quote_unavailable",
-        log_level="warning", symbol=entry.symbol,
-    )
 
 
 def _refresh_market_status():
@@ -152,7 +124,7 @@ def poll_loop():
         for entry in _schedule.due_entries(pollable):
             if runtime.cooldown_seconds_left() > 0 or not runtime.try_take():
                 break
-            _guarded_fetch(entry)
+            _fetch_and_publish(entry)
             _schedule.defer(entry.symbol, _cadence_seconds(entry.tier))
         _schedule.keep_only(pollable)
         time.sleep(1)
@@ -171,7 +143,7 @@ def refresh_symbol(symbol):
     if not runtime.try_take():
         return None, "FINNHUB request budget is exhausted: retry shortly", 429
     # same poll as the loop, then push the scheduled poll out
-    tick, error = _guarded_fetch(entry)
+    tick, error = _fetch_and_publish(entry)
     if tick is None:
         return None, error, 429 if runtime.status() == "RATE_LIMITED" else 502
     _schedule.defer(symbol, _cadence_seconds(entry.tier))

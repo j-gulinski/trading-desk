@@ -5,19 +5,16 @@ import urllib.error
 
 from desk_domain.audit import write_audit
 from desk_runtime.logging_config import get_logger
+from desk_runtime.streams import read_events
 from blotter_service import service
-from blotter_service.config import VALUATION_STREAM_URL, SERVICE_NAME
+from blotter_service.config import SERVICE_NAME, VALUATION_SNAPSHOT_URL, VALUATION_STREAM_URL
 
 log = get_logger(SERVICE_NAME)
 
 
-def _snapshot_url():
-    return VALUATION_STREAM_URL.rsplit("/", 1)[0] + "/valuations"
-
-
 def _reconcile_valuations():
     try:
-        with urllib.request.urlopen(_snapshot_url(), timeout=10) as response:
+        with urllib.request.urlopen(VALUATION_SNAPSHOT_URL, timeout=10) as response:
             rows = json.loads(response.read())
         if not isinstance(rows, list):
             raise ValueError("valuation snapshot is not a list")
@@ -37,13 +34,8 @@ def valuation_stream_consumer():
                 write_audit(SERVICE_NAME, "STREAM_CONNECTED", "Connected to valuation stream")
                 if not _reconcile_valuations():
                     raise RuntimeError("valuation snapshot reconciliation failed")
-                for raw in stream:
-                    line = raw.decode("utf-8").strip()
-                    if not line:
-                        continue
-                    if line.startswith("data:"):
-                        valuation = json.loads(line[len("data:"):].strip())
-                        service.handle_valuation(valuation)
+                for _event_type, valuation in read_events(stream):
+                    service.handle_valuation(valuation)
         except urllib.error.URLError as e:
             log.warning("stream_failed", error=str(e))
         except Exception:

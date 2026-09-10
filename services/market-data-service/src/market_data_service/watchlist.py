@@ -7,7 +7,8 @@ from desk_domain.audit import write_audit
 from desk_runtime.db import session_scope
 from desk_runtime.functions import utcnow
 from desk_domain.models import WatchlistItem
-from desk_domain.instruments import active_source_dependency, ensure_instrument, lock_instrument
+from desk_domain.instrument_store import active_source_dependency, ensure_instrument, lock_instrument
+from desk_domain.instruments import type_view_for
 from desk_domain.providers import supports_quotes
 from desk_domain.symbols import (
     SPOT_ASSET_CLASSES,
@@ -29,6 +30,7 @@ def _describe(symbol, name, asset_class, currency, market, chosen, quote_provide
         "symbol": symbol,
         "name": name,
         "asset_class": asset_class,
+        **type_view_for(asset_class),
         "currency": currency,
         "market": market,
         "providers": {provider: provider in chosen for provider in quote_providers},

@@ -11,7 +11,7 @@ from desk_domain.active_set import load_active_set
 from desk_domain.curve_registry import latest_curve_sets
 from desk_runtime.db import session_scope
 from desk_domain.providers import supports_quotes
-from desk_domain.symbols import watchlist_option_underlying_symbols
+from desk_domain.symbols import watchlist_spot_catalog
 from desk_domain.term_schemas import public_term_schemas
 
 app = bottle.Bottle()
@@ -154,32 +154,37 @@ def _rejection(intent):
     return error
 
 
-@app.route("/instruments")
-def instruments():
-    with session_scope() as session:
-        items = [
-            {"symbol": entry.symbol, "asset_class": entry.asset_class,
-             "currency": entry.currency,
-             "providers": sorted(
-                 provider for provider in QUOTE_PROVIDER_CHOICES
-                 if entry.serves_open(provider)
-             ),
-             "capabilities": {
-                 provider: supports_quotes(provider, entry.asset_class)
-                 for provider in QUOTE_PROVIDER_CHOICES
-             }}
+def _tradeable_instruments(session):
+    return sorted(
+        (
+            {
+                "symbol": entry.symbol,
+                "asset_class": entry.asset_class,
+                "currency": entry.currency,
+                "providers": sorted(
+                    provider for provider in QUOTE_PROVIDER_CHOICES
+                    if entry.serves_open(provider)
+                ),
+                "capabilities": {
+                    provider: supports_quotes(provider, entry.asset_class)
+                    for provider in QUOTE_PROVIDER_CHOICES
+                },
+            }
             for entry in load_active_set(session).values() if entry.tradeable
-        ]
-    return _json(sorted(items, key=lambda item: item["symbol"]))
+        ),
+        key=lambda item: item["symbol"],
+    )
 
 
 @app.route("/instruments/term-schemas")
 def term_schemas():
     with session_scope() as session:
-        underlying_choices = watchlist_option_underlying_symbols(session)
+        spot_catalog = watchlist_spot_catalog(session)
         curves = latest_curve_sets(session)
+        instruments = _tradeable_instruments(session)
     return _json({
-        "schemas": public_term_schemas(underlying_choices, curves),
+        "instruments": instruments,
+        "schemas": public_term_schemas(spot_catalog, curves),
         "curves": curves,
     })
 

@@ -4,8 +4,10 @@ import time
 import threading
 
 from pricing_service import cache, repository
-from pricing_service.pnl import compute_pnl, signed_quantity
-from pricing_service.pricers.registry import market_inputs, price_from_inputs
+from decimal import Decimal
+from desk_pricing.valuation import pnl, position_value, signed_quantity
+from pricing_service.market_inputs import market_inputs
+from desk_domain.instruments import instrument_for, type_view_for
 from pricing_service.valuation_publisher import publish_valuation
 from pricing_service.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
 from desk_pricing.provenance import pricing_provenance
@@ -52,23 +54,20 @@ def _retain_active_blocked(active):
 
 def value_trade(trade):
     meta = trade.get("metadata") or {}
-    provider = cache.trade_provider(trade) if cache.needs_spot(trade) else None
-    inputs = market_inputs(trade["asset_class"], trade["symbol"], meta, provider)
-    priced = price_from_inputs(trade["asset_class"], meta, inputs)
+    instrument = instrument_for(trade["asset_class"], trade["symbol"], meta)
+    provider = cache.trade_provider(trade) if instrument.needs_quote else None
+    inputs = market_inputs(instrument, provider)
+    priced = instrument.price(inputs)
     if priced is None:
         return None
-    price, multiplier = priced
+    price, multiplier = priced["price"], priced["multiplier"]
     spot = inputs.get("spot") or {}
     curve = inputs.get("curve") or {}
     projection = inputs.get("projection_curve") or {}
-    provenance = pricing_provenance(
-        trade["asset_class"],
-        curve,
-        projection,
-    )
+    provenance = pricing_provenance(instrument.model, curve, projection)
     quantity = trade["quantity"]
-    fair_value = price * quantity * multiplier
-    unrealized, realized, total = compute_pnl(
+    fair_value = position_value(price, quantity, multiplier)
+    unrealized = pnl(
         trade["side"], price, trade["trade_price"], quantity, multiplier
     )
     return {
@@ -76,6 +75,7 @@ def value_trade(trade):
         "book_id": trade["book_id"],
         "book_name": trade["book_name"],
         "asset_class": trade["asset_class"],
+        **type_view_for(trade["asset_class"]),
         "symbol": trade["symbol"],
         "currency": trade["currency"],
         "quantity": signed_quantity(trade["side"], quantity),
@@ -83,8 +83,8 @@ def value_trade(trade):
         "fair_value": fair_value,
         "market_value": fair_value,
         "unrealized_pnl": unrealized,
-        "realized_pnl": realized,
-        "total_pnl": total,
+        "realized_pnl": Decimal(0),
+        "total_pnl": unrealized,
         "market_data_provider": spot.get("provider") or curve.get("provider"),
         "market_data_timestamp": spot.get("provider_timestamp") or (
             f"{curve['as_of_date']}T00:00:00+00:00" if curve.get("as_of_date") else None
@@ -93,7 +93,7 @@ def value_trade(trade):
         "valuation_payload": {
             "current_price": str(price),
             "multiplier": multiplier,
-            "pricing": split_terms(trade["asset_class"], meta).pricing,
+            "pricing": split_terms(instrument).pricing,
             "spot_source": {
                 key: spot.get(key) for key in ("provider", "provider_timestamp", "received_at")
             } if spot else None,
@@ -116,7 +116,16 @@ def value_trade(trade):
 def _value_and_store(trades):
     events = []
     for trade in trades:
-        valuation = value_trade(trade)
+        try:
+            valuation = value_trade(trade)
+        except Exception:
+            log.exception(
+                "valuation_failed",
+                trade_id=trade.get("trade_id"),
+                symbol=trade.get("symbol"),
+            )
+            _audit_blocked(trade)
+            continue
         if valuation is None:
             _audit_blocked(trade)
             continue

@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import func
 
 from desk_domain.contract_data import trade_terms
+from desk_pricing.valuation import pnl
 from desk_runtime.db import session_scope
 from desk_domain.models import Trade, Valuation, AuditLog, Book, Instrument
 from blotter_service.cache import Trade as CachedTrade
@@ -102,10 +103,7 @@ def realized_pnl_by_book() -> dict[str, dict[str, object]]:
             if t.close_price is None:
                 continue
             multiplier = int(trade_terms(t).get("multiplier", 1))
-            if t.side == "SELL":
-                realized = (t.trade_price - t.close_price) * t.quantity * multiplier
-            else:
-                realized = (t.close_price - t.trade_price) * t.quantity * multiplier
+            realized = pnl(t.side, t.close_price, t.trade_price, t.quantity, multiplier)
             by_currency = totals.setdefault(str(t.book_id), {})
             by_currency[t.trade_currency] = (
                 by_currency.get(t.trade_currency) or Decimal("0")

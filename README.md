@@ -30,7 +30,8 @@ Open [localhost:3000](http://localhost:3000). Add instruments from Market Data, 
 book for the intended asset class, then open a trade. Quote-priced instruments need a usable
 provider quote; model contracts also need an eligible curve. Missing API keys disable their feeds.
 
-`.env.example` lists configuration. The main storage defaults are 90 days of quote observations
+`.env.example` lists the main settings; optional defaults live in each service's `config.py`.
+The main storage defaults are 90 days of quote observations
 and at most one ordinary persisted valuation per trade per 60 seconds. Live updates are more frequent.
 
 The instrument schema change requires a fresh development database. To discard the old local
@@ -47,8 +48,8 @@ This removes the local database and cached frontend dependencies. There is no le
 
 | Location | Responsibility |
 | --- | --- |
-| `libs/desk-domain` | Instrument/trade storage, terms, provider vocabulary and domain queries |
-| `libs/desk-pricing` | Pure numerical functions for bonds, swaps, options and risk |
+| `libs/desk-domain` | Instrument catalogue, contract terms, trade rules, storage models, provider vocabulary and domain queries |
+| `libs/desk-pricing` | Pure numerical functions for curves, bonds, swaps, options and risk |
 | `libs/desk-runtime` | Configuration, database sessions, logging and HTTP runtime |
 | `services/market-data-service` · 8001 | Provider adapters, watchlist, quote/curve storage and streams |
 | `services/pricing-service` · 8002 | Pricing, valuation persistence, scenarios and valuation stream |
@@ -59,10 +60,22 @@ This removes the local database and cached frontend dependencies. There is no le
 | `frontend/src` | React views, components, state and API clients |
 | `db` | Alembic schema migrations |
 
-Providers normalize data before storing it. Pricing reads active trades and market inputs,
-calculates values and publishes updates. Trade commands validate current data again before
-writing. Blotter reads durable trades and receives valuation updates. PostgreSQL holds durable
-state; streams update consumers, which reload state after reconnecting.
+Providers inherit HTTP handling from `ProviderClient`; `@runtime.guard` handles their errors
+and cooldowns. Quote feeds normalize responses, then share storage and publication in
+`quote_ingestion.py`. `desk-domain/instruments.py` is the instrument catalogue: one
+`FinancialInstrument` subclass per asset class declares its pricing model, the market inputs it
+needs, the terms a ticket supplies, the fields that identify a stored contract, its symbol prefix,
+curve roles, underlying requirements and trade rules. Term validation, the served ticket schema,
+contract storage, the active quote set, trade validation and the blotter read those declarations
+instead of branching on asset class. Each class also declares `label` and `ticket_kind`
+(`spot`, `bond`, `swap`, or `premium`); the ticket and blotter read those instead of copying
+asset-class maps. Adding an instrument is one class plus a pure pricing function in
+`desk-pricing` and approving its curves in `curves.py`. A new premium-style contract reuses
+the premium ticket. Provider response parsing stays in provider adapters. `valuation.py` shares
+position-value and P&L arithmetic. Trade actions share validation and one close operation.
+`desk-runtime` owns configuration, transactions and streams. The trade ticket reads one
+options payload for schema, tradeable instruments and curves, then shows the execution
+value, the total and its key assumptions above a compact price-source list.
 
 ## Database
 
@@ -77,14 +90,14 @@ state; streams update consumers, which reload state after reconnecting.
   the same instrument row lock. Closed trades allow unwatching; their instruments remain protected.
 - Contract fields live in `instruments.terms`; pricing settings and execution context live in
   trade metadata. Repositories reconstruct the inputs consumed by pricing and trade details.
-- `valuations` stores calculated values, P&L and calculation context. Book and product identity
+- `valuations` stores calculated values, P&L and calculation context. Book and instrument identity
   come from the trade. Quote snapshots record observed price changes per provider and symbol.
 
 ## Scope and simplifications
 
 Execution is simulated from stored quotes or model prices. Contracts use fixed `maturity_years`;
 calendar aging, automatic expiry and contract versioning are outside the current scope.
-IRS pricing uses one curve for discounting and projection. Pricing models are fixed per product
+IRS pricing uses one curve for discounting and projection. Pricing models are fixed per instrument class
 for now. Quote history contains observations collected by this app, without vendor backfill.
 Valuation history follows a trade's current book after reassignment. Exact historical replay,
 authentication, broker connectivity and durable command delivery are not implemented.
@@ -101,7 +114,11 @@ for package in libs/* services/*; do
 done
 ```
 
-Load configuration with local database/service URLs before running a service entry point.
+Load configuration with a local database URL before running a service entry point.
+Service addresses default to Compose hostnames. For local processes, set the corresponding
+`MARKET_DATA_SERVICE_URL=http://localhost:8001`, `PRICING_SERVICE_URL=http://localhost:8002`,
+and other `<NAME>_SERVICE_URL` values. Health and stream URLs are derived from those addresses;
+the old separate `*_HEALTHCHECK_URL` and `*_STREAM_URL` settings are replaced.
 The Vite proxy in `frontend/vite.config.js` uses Compose service names by default.
 
 ```sh
@@ -117,9 +134,3 @@ Verify changed behavior through the running app: import → preview → open →
 check rejected removal while active, unwatch/re-add after close, retained history and restart.
 Exercise concurrency with separate database connections. Recompute financial results independently.
 Check empty, missing/stale-data and closed states, plus normal and narrow browser widths.
-
-The instrument refactor was checked with six running services, an isolated PostgreSQL database
-and deterministic normalized market data. All six asset classes passed the trading/history flows;
-spot and underlying removal races passed in both orders. Fresh migration/ORM agreement, 60-second
-valuation sampling, restart recovery and a browser-entered bond were verified. Python compilation,
-package builds and frontend checks passed. Live vendor HTTP access and Docker startup were not verified.

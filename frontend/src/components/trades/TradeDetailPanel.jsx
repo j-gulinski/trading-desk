@@ -16,12 +16,10 @@ import {
   formatDateTime,
   formatNumber,
   formatSignedAmount,
-  formatUnitPrice,
 } from '../../domain/formatting.js'
 import AuditEventList from '../audit/AuditEventList.jsx'
 import {
   tradePositionLabel,
-  tradePriceForDisplay,
   tradeSize,
   tradeSizeLabel,
 } from '../../domain/trades.js'
@@ -32,7 +30,7 @@ import {
   quantityUnitLabelOf,
 } from '../../domain/marketFormat.js'
 import { instrumentLabelOf } from '../../domain/contracts.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
+import { classLabelOf, formatMarkAmount, markForDisplay, ticketKindOf, valueLabelOf, priceDriverLabelOf } from '../../domain/catalogue.js'
 
 const CURVE_TERMS = ['discount_curve', 'projection_curve']
 const HIDDEN_TERMS = new Set([
@@ -54,6 +52,7 @@ const TERM_LABELS = {
   payments_per_year: 'Payments / year',
   floating_rate_index_tenor: 'Floating index tenor',
   pricing_approach: 'Pricing approach',
+  model: 'Pricing model',
   discount_curve: 'Discount curve',
   projection_curve: 'Projection curve',
   underlying_symbol: 'Underlying',
@@ -79,6 +78,7 @@ const TERM_ORDER = [
   'payments_per_year',
   'floating_rate_index_tenor',
   'pricing_approach',
+  'model',
   'multiplier',
   'volatility',
   'discount_curve',
@@ -90,11 +90,10 @@ const TERM_ORDER = [
 ]
 const TERM_RANK = new Map(TERM_ORDER.map((key, index) => [key, index]))
 
-function visibleTermEntries(terms, assetClass) {
+function visibleTermEntries(terms) {
   return Object.entries(terms)
     .filter(([key, value]) => {
       if (HIDDEN_TERMS.has(key)) return false
-      if (assetClass !== 'IRS') return true
       if (key === 'projection_curve') return value !== terms.discount_curve
       if (key === 'projection_curve_provider') {
         return value !== terms.discount_curve_provider
@@ -132,19 +131,8 @@ function DetailField({ label, children }) {
   )
 }
 
-function tradeValueLabel(trade, prefix) {
-  if (trade.assetClass === 'BOND') return `${prefix} / 100 face`
-  if (trade.assetClass === 'IRS') return `${prefix} NPV`
-  if (trade.assetClass === 'EUROPEAN_OPTION') return `${prefix} premium / contract`
-  if (trade.assetClass === 'FX') return `${prefix} rate`
-  return `${prefix} price`
-}
-
 function tradeValueText(trade, value) {
-  const display = tradePriceForDisplay(trade, value)
-  const amount = trade.assetClass === 'IRS'
-    ? formatSignedAmount(display)
-    : formatUnitPrice(display, trade.assetClass)
+  const amount = formatMarkAmount(trade, value)
   const unit = priceUnitLabelOf(trade)
   return amount === '—' || !unit ? amount : `${amount} ${unit}`
 }
@@ -185,20 +173,20 @@ function CloseTradeControl({
       {closeNote && <span className="trade-detail__close-trade-error">{closeNote}</span>}
       {confirming ? (
         <span className="trade-detail__close-confirmation" role="dialog" aria-label="Confirm trade close">
-          <strong>Close at current market?</strong>
-          <span>
+          <span className="trade-detail__close-confirmation-title">Close at current market?</span>
+          <strong className="trade-detail__close-value">
             {Number.isFinite(indicativeValue)
               ? `${formatAmount(indicativeValue)} ${currency ?? ''}`.trim()
-              : 'Indicative position value unavailable'}
-          </span>
-          <small>
-            {source ?? 'Current valuation'}
-            {valuationTimeMs != null ? ` · ${formatClockTime(valuationTimeMs)}` : ''}
-          </small>
+              : 'Position value unavailable'}
+          </strong>
           <small>
             {closeReferenceLabel}: {Number.isFinite(closeReference)
               ? `${formatAmount(closeReference)} ${currency ?? ''}`.trim()
               : 'unavailable'}
+          </small>
+          <small>
+            {source ?? 'Current valuation'}
+            {valuationTimeMs != null ? ` · ${formatClockTime(valuationTimeMs)}` : ''}
           </small>
           <small>Final close value is recomputed from current market data.</small>
           <span className="trade-detail__close-confirmation-actions">
@@ -244,15 +232,6 @@ function Metric({ label, value, tone = null, note }) {
   )
 }
 
-const PRICE_DRIVER_LABELS = {
-  BOND: 'Bond price move',
-  COMMODITY: 'Spot price move',
-  EQUITY: 'Share price move',
-  EUROPEAN_OPTION: 'Premium move',
-  FX: 'FX rate move',
-  IRS: 'Model NPV move',
-}
-
 function formatRate(rate) {
   return Number.isFinite(rate) ? `${formatAmount(rate, 3)}%` : '—'
 }
@@ -275,9 +254,9 @@ function AttributionCell({ value, note, tone = null }) {
 
 function MoveAttribution({ trade, row, entryCurve, currentCurve }) {
   const valuation = row.valuation
-  const entryLevel = tradePriceForDisplay(trade, trade.entryPrice)
+  const entryLevel = markForDisplay(trade, trade.entryPrice)
   const currentRaw = valuation?.price ?? (row.lifecycle === 'CLOSED' ? trade.closePrice : null)
-  const currentLevel = tradePriceForDisplay(trade, currentRaw)
+  const currentLevel = markForDisplay(trade, currentRaw)
   const delta = Number.isFinite(entryLevel) && Number.isFinite(currentLevel)
     ? currentLevel - entryLevel
     : null
@@ -293,10 +272,10 @@ function MoveAttribution({ trade, row, entryCurve, currentCurve }) {
     ? 'Close level'
     : 'Current'
   const maturity = trade.terms?.maturity_years
-  const entryCurveMarket = trade.assetClass === 'BOND'
+  const entryCurveMarket = ticketKindOf(trade) === 'bond'
     ? curveMarketAt(entryCurve, maturity)
     : null
-  const currentCurveMarket = trade.assetClass === 'BOND'
+  const currentCurveMarket = ticketKindOf(trade) === 'bond'
     ? curveMarketAt(currentCurve, maturity)
     : null
   const curveDeltaBps = Number.isFinite(entryCurveMarket?.rate) && Number.isFinite(currentCurveMarket?.rate)
@@ -316,7 +295,7 @@ function MoveAttribution({ trade, row, entryCurve, currentCurve }) {
           <span role="columnheader">{currentLabel}</span>
           <span role="columnheader">Change</span>
         </div>
-        {trade.assetClass === 'BOND' && (
+        {ticketKindOf(trade) === 'bond' && (
           <div className="trade-detail__attribution-row" role="row">
             <span role="rowheader" title="The pricing model discounts every bond cash flow on this curve; the maturity rate summarizes the curve shift.">
               Curve rate at {formatNumber(maturity)}Y
@@ -336,7 +315,7 @@ function MoveAttribution({ trade, row, entryCurve, currentCurve }) {
           </div>
         )}
         <div className="trade-detail__attribution-row" role="row">
-          <span role="rowheader">{PRICE_DRIVER_LABELS[trade.assetClass] ?? 'Market move'}</span>
+          <span role="rowheader">{priceDriverLabelOf(trade)}</span>
           <AttributionCell value={tradeValueText(trade, trade.entryPrice)} />
           <AttributionCell value={tradeValueText(trade, currentRaw)} />
           <AttributionCell
@@ -391,7 +370,7 @@ export default function TradeDetailPanel({
       wide
       eyebrow="TRADE DETAIL"
       title={instrumentLabelOf(trade)}
-      subtitle={`${trade.bookName} · ${trade.tradeRef} · ${assetClassLabel(trade.assetClass)}`}
+      subtitle={`${trade.bookName} · ${trade.tradeRef} · ${classLabelOf(trade)}`}
       onClose={onClose}
       headActions={
         <>
@@ -474,13 +453,13 @@ export default function TradeDetailPanel({
             </div>
             <dl className="trade-detail__fields">
               <DetailField label="Book">{trade.bookName}</DetailField>
-              <DetailField label={trade.assetClass === 'IRS' ? 'Direction' : 'Side'}>
+              <DetailField label={trade.terms?.direction ? 'Direction' : 'Side'}>
                 <span className={`trade-side trade-side--${trade.side.toLowerCase()}`}>
                   {tradePositionLabel(trade)}
                 </span>
               </DetailField>
               <DetailField label={tradeSizeLabel(trade)}>{tradeSizeText(trade)}</DetailField>
-              <DetailField label={tradeValueLabel(trade, 'Entry')}>
+              <DetailField label={valueLabelOf(trade, 'Entry')}>
                 {tradeValueText(trade, trade.entryPrice)}
               </DetailField>
               <DetailField label="Pricing source">
@@ -488,7 +467,7 @@ export default function TradeDetailPanel({
                   ? providerLabel(trade.provider ?? valuation.marketDataProvider)
                   : null}
               </DetailField>
-              <DetailField label={['BOND', 'IRS'].includes(trade.assetClass) ? 'Curve as of' : 'Quote time'}>
+              <DetailField label={trade.modelPriced ? 'Curve as of' : 'Quote time'}>
                 {trade.entryPriceAtMs == null ? null : formatDateTime(trade.entryPriceAtMs)}
               </DetailField>
               {trade.terms != null &&
@@ -497,7 +476,7 @@ export default function TradeDetailPanel({
                 ) && (
                 <DetailField label="Terms">
                   <dl className="trade-detail__terms">
-                    {visibleTermEntries(trade.terms, trade.assetClass)
+                    {visibleTermEntries(trade.terms)
                       .map(([key, value]) => (
                         <div key={key}>
                           <dt
@@ -506,7 +485,7 @@ export default function TradeDetailPanel({
                             }
                             title={CURVE_ROLE_HINTS[key]}
                           >
-                            {key === 'discount_curve' && trade.assetClass === 'IRS'
+                            {ticketKindOf(trade) === 'swap' && key === 'discount_curve'
                               ? 'Discount / projection curve'
                               : TERM_LABELS[key] ?? key.replaceAll('_', ' ')}
                           </dt>
@@ -523,7 +502,7 @@ export default function TradeDetailPanel({
               {row.lifecycle === 'CLOSED' && (
                 <>
                   <DetailField label="Closed">{formatDateTime(trade.closedAtMs)}</DetailField>
-                  <DetailField label={tradeValueLabel(trade, 'Close')}>
+                  <DetailField label={valueLabelOf(trade, 'Close')}>
                     {tradeValueText(trade, trade.closePrice)}
                   </DetailField>
                   <DetailField label="Close quote time">

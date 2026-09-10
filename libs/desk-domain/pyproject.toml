@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 dependencies = [
     "SQLAlchemy",
     "desk-pricing",
+    "desk-runtime",
 ]
 
 [build-system]

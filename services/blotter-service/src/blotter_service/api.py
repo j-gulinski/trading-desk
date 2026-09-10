@@ -46,6 +46,24 @@ def _trade_id(value):
         return None
 
 
+def _trade_query():
+    page, error = _page()
+    if error is not None:
+        return None, error
+    book_id, error = _book_filter()
+    if error is not None:
+        return None, error
+    limit, offset = page
+    return {
+        "book_id": book_id,
+        "asset_class": request.query.get("asset_class") or None,
+        "status": request.query.get("status") or None,
+        "symbol": request.query.get("symbol") or None,
+        "limit": limit,
+        "offset": offset,
+    }, None
+
+
 @app.route("/health")
 def health():
     return _json({
@@ -63,43 +81,21 @@ def books_summary():
 
 @app.route("/trades/overview")
 def trades_overview():
-    page, error = _page()
+    query, error = _trade_query()
     if error is not None:
         return _json({"error": error}, 400)
-    book_id, error = _book_filter()
-    if error is not None:
-        return _json({"error": error}, 400)
-    limit, offset = page
     return _json({
-        "trades": service.list_trades(
-            book_id=book_id,
-            asset_class=request.query.get("asset_class") or None,
-            status=request.query.get("status") or None,
-            symbol=request.query.get("symbol") or None,
-            limit=limit,
-            offset=offset,
-        ),
+        "trades": service.list_trades(**query),
         "books": service.books_summary(),
     })
 
 
 @app.route("/trades")
 def list_trades():
-    page, error = _page()
+    query, error = _trade_query()
     if error is not None:
         return _json({"error": error}, 400)
-    book_id, error = _book_filter()
-    if error is not None:
-        return _json({"error": error}, 400)
-    limit, offset = page
-    return _json(service.list_trades(
-        book_id=book_id,
-        asset_class=request.query.get("asset_class") or None,
-        status=request.query.get("status") or None,
-        symbol=request.query.get("symbol") or None,
-        limit=limit,
-        offset=offset,
-    ))
+    return _json(service.list_trades(**query))
 
 
 @app.route("/trades/<trade_id>")

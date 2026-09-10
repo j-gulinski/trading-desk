@@ -3,7 +3,7 @@ import time
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
-from market_data_service import quote_lifecycle, quote_store
+from market_data_service import quote_store
 from market_data_service.config import (
     ALPHA_VANTAGE_API_KEY,
     ALPHA_VANTAGE_DAILY_BUDGET,
@@ -19,13 +19,10 @@ from market_data_service.provider_runtime import ProviderRuntime
 from market_data_service.providers.alpha_vantage.client import AlphaVantageClient
 from market_data_service.providers.alpha_vantage.normalizer import normalize_quote
 from market_data_service.providers.base import ProviderDataError
-from market_data_service.publisher import publish_quote
-from market_data_service.quote_audit import audit_quote_write
-from desk_domain.active_set import load_active_set
+from market_data_service.quote_ingestion import store_and_publish
 from desk_runtime.functions import utcnow
 from desk_runtime.logging_config import get_logger
 from desk_domain.providers import ALPHA_VANTAGE
-from desk_domain.quotes import wire_tick
 
 
 log = get_logger(SERVICE_NAME)
@@ -109,44 +106,13 @@ def _request_payload(entry):
         return _client.quote(entry.symbol, entry.asset_class)
 
 
+@runtime.guard("quote_unavailable")
 def _fetch_and_publish(entry):
     payload = _request_payload(entry)
-    with quote_lifecycle.locked_keys(entry.symbol, (ALPHA_VANTAGE,)):
-        current = load_active_set().get(entry.symbol)
-        if current is None or not current.serves(ALPHA_VANTAGE):
-            raise ProviderDataError(
-                ALPHA_VANTAGE,
-                f"{entry.symbol} left the ALPHA_VANTAGE active set during refresh",
-            )
-        quote = normalize_quote(
-            current.symbol,
-            current.asset_class,
-            current.currency,
-            payload,
-            utcnow(),
-        )
-        classifier = _classifier(current.symbol)
-        changed, created, accepted = quote_store.store_quote(quote, classifier)
-        if not accepted:
-            raise ProviderDataError(
-                ALPHA_VANTAGE,
-                f"older observation for {current.symbol} ignored; current row retained",
-            )
-        if changed:
-            audit_quote_write(ALPHA_VANTAGE, quote, created)
-        tick = wire_tick(quote, classifier, current.origin(ALPHA_VANTAGE))
-        publish_quote(tick)
+    quote = normalize_quote(entry.symbol, entry.asset_class, entry.currency, payload, utcnow())
+    tick = store_and_publish(quote, _classifier(entry.symbol))
     runtime.record_success()
     return tick
-
-
-def _guarded_fetch(entry):
-    return runtime.guarded(
-        lambda: _fetch_and_publish(entry),
-        "quote_unavailable",
-        log_level="warning",
-        symbol=entry.symbol,
-    )
 
 
 def _seed_new_entries(entries):
@@ -193,7 +159,7 @@ def poll_loop():
         pollable = runtime.pollable_entries()
         _seed_new_entries(pollable)
         for entry in _schedule.due_entries(pollable):
-            tick, error = _guarded_fetch(entry)
+            tick, error = _fetch_and_publish(entry)
             if tick is None:
                 if "spacing" in str(error) or "budget" in str(error):
                     break
@@ -213,7 +179,7 @@ def refresh_symbol(symbol):
     unavailable = runtime.unavailable()
     if unavailable is not None:
         return None, unavailable, 503
-    tick, error = _guarded_fetch(entry)
+    tick, error = _fetch_and_publish(entry)
     if tick is None:
         daily = "daily request budget" in str(error)
         spacing = "request spacing" in str(error)

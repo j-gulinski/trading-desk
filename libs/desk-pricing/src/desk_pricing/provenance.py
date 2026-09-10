@@ -3,16 +3,6 @@
 from desk_pricing.curves import curve_convention
 
 
-MODEL_NAMES = {
-    "EQUITY": "SPOT",
-    "FX": "SPOT",
-    "COMMODITY": "SPOT",
-    "BOND": "BOND_DCF",
-    "EUROPEAN_OPTION": "BLACK_SCHOLES",
-    "IRS": "IRS_SINGLE_CURVE",
-}
-
-
 def _curve_revision(curve):
     return {
         "name": curve.get("curve_name"),
@@ -22,9 +12,8 @@ def _curve_revision(curve):
     }
 
 
-def pricing_provenance(asset_class, discount_curve, projection_curve=None):
-    model = MODEL_NAMES.get(asset_class)
-    if model is None or not discount_curve:
+def pricing_provenance(model, discount_curve, projection_curve=None):
+    if not discount_curve:
         return None
     curves = {"discount": _curve_revision(discount_curve)}
     if projection_curve:

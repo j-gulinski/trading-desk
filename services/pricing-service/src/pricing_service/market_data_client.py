@@ -9,8 +9,9 @@ from desk_domain.audit import write_audit
 from desk_runtime.config import BENCHMARK_PROVIDER, BENCHMARK_SYMBOL
 from desk_runtime.functions import first_present
 from desk_runtime.logging_config import get_logger
+from desk_runtime.streams import read_events
 from pricing_service import cache
-from pricing_service.config import MARKET_DATA_STREAM_URL, SERVICE_NAME
+from pricing_service.config import MARKET_DATA_SNAPSHOT_URL, MARKET_DATA_STREAM_URL, SERVICE_NAME
 from pricing_service.book_risk import sample_and_publish
 from pricing_service.valuation_engine import value_all_active, value_curve, value_quote
 from pricing_service.valuation_publisher import publish_valuation
@@ -53,10 +54,6 @@ def _handle(event_type, tick):
             sample_and_publish(level)
 
 
-def _snapshot_url():
-    return MARKET_DATA_STREAM_URL.rsplit("/", 1)[0] + "/snapshot"
-
-
 def _reconcile_market_state():
     """Replace local state from a snapshot and return its stream checkpoint.
 
@@ -64,7 +61,7 @@ def _reconcile_market_state():
     are therefore queued by Market Data and can be consumed after the snapshot.
     """
     try:
-        with urllib.request.urlopen(_snapshot_url(), timeout=10) as response:
+        with urllib.request.urlopen(MARKET_DATA_SNAPSHOT_URL, timeout=10) as response:
             snapshot = json.loads(response.read())
         cache.replace_market_state(
             snapshot.get("spots") or {}, snapshot.get("curves") or {}
@@ -118,17 +115,8 @@ def market_data_stream_consumer():
                 checkpoint = _reconcile_market_state()
                 if checkpoint is None:
                     raise RuntimeError("market-data snapshot reconciliation failed")
-                event_type = None
-                for raw in stream:
-                    line = raw.decode("utf-8").strip()
-                    if not line:
-                        continue
-                    if line.startswith("event:"):
-                        event_type = line[len("event:"):].strip()
-                    elif line.startswith("data:"):
-                        tick = json.loads(line[len("data:"):].strip())
-                        if _at_or_before_checkpoint(tick, checkpoint):
-                            continue
+                for event_type, tick in read_events(stream):
+                    if not _at_or_before_checkpoint(tick, checkpoint):
                         _handle(event_type, tick)
         except urllib.error.URLError as e:
             log.warning("stream_failed", error=str(e))

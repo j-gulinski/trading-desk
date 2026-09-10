@@ -7,7 +7,6 @@ import {
   formatNumber,
   formatShortId,
   formatSignedAmount,
-  formatUnitPrice,
 } from '../../domain/formatting.js'
 import {
   priceUnitLabelOf,
@@ -15,7 +14,7 @@ import {
 } from '../../domain/marketFormat.js'
 import { instrumentLabelOf } from '../../domain/contracts.js'
 import { irsDirectionLabel } from '../../domain/trades.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
+import { classLabelOf, formatMarkAmount, netSizeLabelOf, positionValueLabelsOf, ticketKindOf } from '../../domain/catalogue.js'
 
 function PnlMetric({ label, value, title, signed = true }) {
   return (
@@ -48,7 +47,7 @@ function withUnit(value, unit) {
 function positionTitle(position) {
   const terms = position.terms ?? {}
   const instrument = instrumentLabelOf(position)
-  if (position.assetClass === 'IRS') {
+  if (terms.direction) {
     return `${instrument} · ${irsDirectionLabel(terms.direction)}`
   }
   return instrument
@@ -56,25 +55,20 @@ function positionTitle(position) {
 
 function positionSize(position) {
   const terms = position.terms ?? {}
-  if (position.assetClass === 'IRS') {
+  const kind = ticketKindOf(position)
+  if (kind === 'swap') {
     return {
-      label: 'NOTIONAL',
+      label: netSizeLabelOf(position),
       value: withUnit(formatAmount(Number(terms.notional)), position.currency),
     }
   }
-  if (position.assetClass === 'BOND') {
+  if (kind === 'bond') {
     const face = Number(terms.face_value)
     const total = Number.isFinite(face) ? Math.abs(position.netQuantity) * face : null
-    return { label: 'FACE', value: withUnit(formatAmount(total), position.currency) }
-  }
-  const labels = {
-    EQUITY: 'NET SHARES',
-    EUROPEAN_OPTION: 'NET CONTRACTS',
-    FX: 'NET NOTIONAL',
-    COMMODITY: 'NET UNITS',
+    return { label: netSizeLabelOf(position), value: withUnit(formatAmount(total), position.currency) }
   }
   return {
-    label: labels[position.assetClass] ?? 'NET QUANTITY',
+    label: netSizeLabelOf(position),
     value: withUnit(
       formatSignedAmount(position.netQuantity, 0),
       quantityUnitLabelOf(position),
@@ -83,23 +77,7 @@ function positionSize(position) {
 }
 
 function positionValue(position, value) {
-  let displayed = value
-  const face = Number(position.terms?.face_value)
-  if (position.assetClass === 'BOND' && Number.isFinite(value) && face > 0) {
-    displayed = value / face * 100
-  }
-  const amount = position.assetClass === 'IRS'
-    ? formatSignedAmount(displayed)
-    : formatUnitPrice(displayed, position.assetClass)
-  return withUnit(amount, priceUnitLabelOf(position))
-}
-
-function positionValueLabels(position) {
-  if (position.assetClass === 'IRS') return ['ENTRY NPV', 'CURRENT NPV']
-  if (position.assetClass === 'BOND') return ['ENTRY / 100', 'CURRENT / 100']
-  if (position.assetClass === 'EUROPEAN_OPTION') return ['ENTRY PREMIUM', 'MODEL PREMIUM']
-  if (position.assetClass === 'FX') return ['AVG ENTRY RATE', 'MARK RATE']
-  return ['AVG ENTRY', 'MARK']
+  return withUnit(formatMarkAmount(position, value), priceUnitLabelOf(position))
 }
 
 function PositionList({ positions }) {
@@ -107,7 +85,7 @@ function PositionList({ positions }) {
     <ul className="book-positions">
       {positions.map((position) => {
         const size = positionSize(position)
-        const [entryLabel, currentLabel] = positionValueLabels(position)
+        const [entryLabel, currentLabel] = positionValueLabelsOf(position)
         return (
           <li key={position.id} className="book-position">
             <div className="book-position__head">
@@ -167,7 +145,7 @@ export default function BookCard({
         </div>
         <span className="book-tile__class">
           <span className="book-tile__badge-dot" />
-          {assetClassLabel(book.assetClass)}
+          {classLabelOf(book)}
         </span>
       </header>
 

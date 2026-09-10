@@ -1,45 +1,39 @@
-from decimal import Decimal
-
-from pricing_service.pricers.registry import market_inputs, price_from_inputs, shock_inputs
+from desk_pricing.valuation import pnl, position_value
+from pricing_service.market_inputs import market_inputs, shock_inputs
 from pricing_service.schemas import ScenarioRequest
 
 
 def run_scenario(req: ScenarioRequest) -> dict | None:
-    inst = req.position.instrument
-    pos = req.position
-
-    inputs = market_inputs(inst.asset_class, inst.symbol, inst.meta,
-                           req.market_data_provider)
-    base_priced = price_from_inputs(inst.asset_class, inst.meta, inputs)
+    instrument = req.instrument
+    inputs = market_inputs(instrument, req.market_data_provider)
+    base_priced = instrument.price(inputs)
     if base_priced is None:
         return None
-    model_base, multiplier = base_priced
+    model_base, multiplier = base_priced["price"], base_priced["multiplier"]
 
-    shocked = shock_inputs(inst.asset_class, inputs, req.shock)
+    shocked = shock_inputs(instrument, inputs, req.shock)
     if shocked is None:
         return None
-    shocked_priced = price_from_inputs(inst.asset_class, inst.meta, shocked)
+    shocked_priced = instrument.price(shocked)
     if shocked_priced is None:
         return None
-    model_shocked, _ = shocked_priced
+    model_shocked = shocked_priced["price"]
 
-    base_price = inst.current_price if inst.current_price is not None else model_base
+    base_price = req.current_price if req.current_price is not None else model_base
     shocked_price = base_price + (model_shocked - model_base)
 
-    direction = Decimal(-1) if pos.side == "SELL" else Decimal(1)
+    entry_value = position_value(req.trade_price, req.quantity, multiplier)
+    base_value = position_value(base_price, req.quantity, multiplier)
+    scenario_value = position_value(shocked_price, req.quantity, multiplier)
 
-    entry_value = pos.trade_price * pos.quantity * multiplier
-    base_value = base_price * pos.quantity * multiplier
-    scenario_value = shocked_price * pos.quantity * multiplier
-
-    base_pnl = (base_value - entry_value) * direction
-    scenario_pnl = (scenario_value - base_value) * direction
+    base_pnl = pnl(req.side, base_price, req.trade_price, req.quantity, multiplier)
+    scenario_pnl = pnl(req.side, shocked_price, base_price, req.quantity, multiplier)
     current_pnl = base_pnl + scenario_pnl
 
     return {
-        "asset_class": inst.asset_class,
-        "symbol": inst.symbol,
-        "side": pos.side,
+        "asset_class": instrument.asset_class,
+        "symbol": instrument.symbol,
+        "side": req.side,
         "open_value": entry_value,
         "shock": req.shock,
         "base": {"price": base_price, "value": base_value, "base_pnl": base_pnl},

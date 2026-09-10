@@ -1,3 +1,4 @@
+import { ticketKindOf } from './catalogue.js'
 import { unitPriceDecimals } from './formatting.js'
 
 function currencyPair(symbol) {
@@ -58,13 +59,14 @@ export function priceUnitLabelOf(instrument) {
 }
 
 export function quantityUnitLabelOf(instrument) {
-  if (instrument.assetClass === 'IRS') {
+  const kind = ticketKindOf(instrument)
+  if (kind === 'swap') {
     return instrument.currency ? `${instrument.currency} notional` : 'notional'
   }
-  if (instrument.assetClass === 'BOND') {
+  if (kind === 'bond') {
     return instrument.currency ? `${instrument.currency} face` : 'face'
   }
-  if (instrument.assetClass === 'EUROPEAN_OPTION') return 'contracts'
+  if (kind === 'premium') return 'contracts'
   if (instrument.assetClass === 'EQUITY') return 'shares'
   if (instrument.symbol === 'XAUPLN_G') return 'grams'
   const base = baseCurrencyOf(instrument.symbol)

@@ -6,9 +6,6 @@ class NbpClient(ProviderClient):
     provider = NBP
     base_url = "https://api.nbp.pl/api"
 
-    def classify_body(self, payload):
-        pass
-
     def table_a(self):
         return self.get("/exchangerates/tables/a", {"format": "json"})
 

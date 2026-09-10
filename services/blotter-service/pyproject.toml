@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Blotter service: trade store and valuation-enriched trade feed"
 requires-python = ">=3.14"
 dependencies = [
+    "desk-domain",
+    "desk-pricing",
+    "desk-runtime",
     "bottle",
     "SQLAlchemy",
 ]

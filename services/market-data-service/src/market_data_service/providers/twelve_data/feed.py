@@ -1,12 +1,10 @@
 import threading
 import time
 
-from desk_domain.active_set import load_active_set
 from desk_runtime.functions import utcnow
 from desk_runtime.logging_config import get_logger
 from desk_domain.providers import TWELVE_DATA
-from desk_domain.quotes import wire_tick
-from market_data_service import quote_lifecycle, quote_store
+
 from market_data_service.providers.base import ProviderDataError
 from market_data_service.providers.twelve_data.client import TwelveDataClient
 from market_data_service.providers.twelve_data.normalizer import normalize_quote
@@ -24,8 +22,7 @@ from market_data_service.config import (
 )
 from market_data_service.poll_schedule import PollSchedule
 from market_data_service.provider_runtime import ProviderRuntime
-from market_data_service.publisher import publish_quote
-from market_data_service.quote_audit import audit_quote_write
+from market_data_service.quote_ingestion import store_and_publish
 
 log = get_logger(SERVICE_NAME)
 
@@ -87,31 +84,12 @@ def _classifier(symbol):
 
 
 def _store_and_publish(entry, payload):
-    with quote_lifecycle.locked_keys(entry.symbol, (TWELVE_DATA,)):
-        current = load_active_set().get(entry.symbol)
-        if current is None or not current.serves(TWELVE_DATA):
-            raise ProviderDataError(
-                TWELVE_DATA,
-                f"{entry.symbol} left the TWELVE_DATA active set during refresh",
-            )
-        _record_market_open(current.symbol, payload)
-        quote = normalize_quote(
-            current.symbol, current.asset_class, current.currency, payload, utcnow()
-        )
-        classifier = _classifier(current.symbol)
-        changed, created, accepted = quote_store.store_quote(quote, classifier)
-        if not accepted:
-            raise ProviderDataError(
-                TWELVE_DATA,
-                f"older observation for {current.symbol} ignored; current row retained",
-            )
-        if changed:
-            audit_quote_write(TWELVE_DATA, quote, created)
-        tick = wire_tick(quote, classifier, current.origin(TWELVE_DATA))
-        publish_quote(tick)
-        return tick
+    _record_market_open(entry.symbol, payload)
+    quote = normalize_quote(entry.symbol, entry.asset_class, entry.currency, payload, utcnow())
+    return store_and_publish(quote, _classifier(entry.symbol))
 
 
+@runtime.guard("quote_batch_unavailable")
 def _fetch_and_publish(entries):
     runtime.record_request(credits=len(entries))
     by_provider_symbol = {
@@ -135,27 +113,11 @@ def _fetch_and_publish(entries):
                 detail=f"invalid provider quote: {type(error).__name__}",
             )
     if not ticks:
-        raise ProviderDataError(
-            TWELVE_DATA, "the quote batch contained no usable observations"
-        )
+        error = ProviderDataError(TWELVE_DATA, "the quote batch contained no usable observations")
+        runtime.transient_error(error.detail, TRANSIENT_ERROR_BACKOFF_SECONDS)
+        raise error
     runtime.record_success()
     return ticks
-
-
-def _guarded_fetch(entries):
-    def fetch():
-        try:
-            return _fetch_and_publish(entries)
-        except ProviderDataError as error:
-            # Per-symbol failures are isolated inside _fetch_and_publish. Reaching
-            # this boundary means the complete requested batch was unusable.
-            runtime.transient_error(error.detail, TRANSIENT_ERROR_BACKOFF_SECONDS)
-            raise
-
-    return runtime.guarded(
-        fetch, "quote_batch_unavailable",
-        log_level="warning",
-    )
 
 
 def poll_loop():
@@ -179,7 +141,7 @@ def poll_loop():
                 break
             if not runtime.try_take(len(chunk)):
                 break
-            ticks, _ = _guarded_fetch(chunk)
+            ticks, _ = _fetch_and_publish(chunk)
             if ticks is None:
                 # Keep the symbols due so the short runtime backoff, rather than the
                 # normal daily-ledger cadence, controls the retry.
@@ -205,7 +167,7 @@ def refresh_symbol(symbol):
         return None, "TWELVE_DATA daily credit budget is spent for now: retry later", 429
     if not runtime.try_take():
         return None, "TWELVE_DATA request budget is exhausted: retry shortly", 429
-    ticks, error = _guarded_fetch([entry])
+    ticks, error = _fetch_and_publish([entry])
     tick = (ticks or {}).get(symbol)
     if tick is None:
         return None, error or f"no quote data for {symbol}", (

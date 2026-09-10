@@ -64,12 +64,7 @@ def open_trade(intent):
                 return action_queue.incr("rejected")
             quote, price = plan["quote"], plan["price"]
             repository.insert_trade(
-                session,
-                intent,
-                plan["terms"],
-                plan["provider"],
-                price,
-                quote,
+                session, intent, plan["instrument"], plan["provider"], price, quote,
             )
             _audit(
                 session,
@@ -111,51 +106,29 @@ def open_trade(intent):
         action_queue.incr("duplicates")
 
 
+def _apply_close(session, intent, plan):
+    trade, quote, price = plan["trade"], plan["quote"], plan["price"]
+    metadata = with_close_metadata(trade.trade_metadata, plan.get("close_provenance") or {})
+    repository.close_trade(session, trade.trade_id, price, intent.get("close_reason"), quote, metadata)
+    _audit(session, "TRADE_CLOSED", "Trade closed", intent, payload={
+        "provider": plan["provider"], "symbol": trade.instrument.symbol,
+        "freshness": quote.state.value, "close_price": str(price),
+        "client_seen_price": intent.get("client_seen_price"),
+        "close_reason": intent.get("close_reason"),
+        "quote_timestamp": quote.provider_timestamp.isoformat() if quote.provider_timestamp else None,
+        "snapshot_id": str(quote.snapshot_id) if quote.snapshot_id else None,
+    })
+
+
 def close_trade(intent):
     with session_scope() as session:
         plan, error = validate_close(session, intent)
         if error is not None:
             audit_rejection(session, intent, error)
             return action_queue.incr("rejected")
-        quote, price = plan["quote"], plan["price"]
-        close_metadata = with_close_metadata(
-            plan["trade"].trade_metadata, plan.get("close_provenance") or {}
-        )
-        repository.close_trade(
-            session,
-            plan["trade"].trade_id,
-            price,
-            intent.get("close_reason"),
-            quote,
-            close_metadata,
-        )
-        _audit(
-            session,
-            "TRADE_CLOSED",
-            "Trade closed",
-            intent,
-            payload={
-                "provider": plan["provider"],
-                "symbol": plan["trade"].instrument.symbol,
-                "freshness": quote.state.value,
-                "close_price": str(price),
-                "client_seen_price": intent.get("client_seen_price"),
-                "close_reason": intent.get("close_reason"),
-                "quote_timestamp": (
-                    quote.provider_timestamp.isoformat()
-                    if quote.provider_timestamp is not None
-                    else None
-                ),
-                "snapshot_id": str(quote.snapshot_id) if quote.snapshot_id else None,
-            },
-        )
-    log.info(
-        "trade_closed",
-        trade_id=intent.get("trade_id"),
-        provider=plan["provider"],
-        close_price=str(price),
-        close_reason=intent.get("close_reason"),
-    )
+        _apply_close(session, intent, plan)
+    log.info("trade_closed", trade_id=intent.get("trade_id"), provider=plan["provider"],
+             close_price=str(plan["price"]), close_reason=intent.get("close_reason"))
     action_queue.incr("closed")
 
 
@@ -172,40 +145,7 @@ def close_all_trades(intent):
             if error is not None:
                 skipped.append((str(trade.trade_id), error))
                 continue
-            close_metadata = with_close_metadata(
-                plan["trade"].trade_metadata, plan.get("close_provenance") or {}
-            )
-            repository.close_trade(
-                session,
-                trade.trade_id,
-                plan["price"],
-                reason,
-                plan["quote"],
-                close_metadata,
-            )
-            write_audit(
-                SERVICE_NAME,
-                "TRADE_CLOSED",
-                "Trade closed",
-                entity_type="TRADE",
-                entity_id=str(trade.trade_id),
-                payload={
-                    "close_reason": reason,
-                    "provider": plan["provider"],
-                    "close_price": str(plan["price"]),
-                    "quote_timestamp": (
-                        plan["quote"].provider_timestamp.isoformat()
-                        if plan["quote"].provider_timestamp is not None
-                        else None
-                    ),
-                    "snapshot_id": (
-                        str(plan["quote"].snapshot_id)
-                        if plan["quote"].snapshot_id
-                        else None
-                    ),
-                },
-                session=session,
-            )
+            _apply_close(session, {**intent, "trade_id": str(trade.trade_id), "close_reason": reason}, plan)
             closed += 1
         for trade_id, error in skipped:
             write_audit(

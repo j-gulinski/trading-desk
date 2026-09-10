@@ -31,15 +31,6 @@ def upgrade():
         ),
         sa.Column("retired_at", sa.DateTime(timezone=True)),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint(
-            "underlying_instrument_id <> instrument_id",
-            name="ck_instruments_not_self_underlying",
-        ),
-        sa.CheckConstraint("jsonb_typeof(terms) = 'object'", name="ck_instruments_terms_object"),
-        sa.CheckConstraint(
-            "(asset_class = 'EUROPEAN_OPTION') = (underlying_instrument_id IS NOT NULL)",
-            name="ck_instruments_underlying_required",
-        ),
     )
     op.drop_constraint("watchlist_items_pkey", "watchlist_items", type_="primary")
     for column in ("symbol", "name", "asset_class", "currency", "market"):

@@ -21,7 +21,8 @@ import {
   summarizeFeed,
 } from '../../domain/marketData.js'
 import { formatMarketSymbol, marketLabelOf } from '../../domain/marketFormat.js'
-import { countOptions } from '../../domain/filters.js'
+import { classLabelOf } from '../../domain/catalogue.js'
+import { countOptions, groupOptions } from '../../domain/filters.js'
 import { formatElapsedTime, formatNumber } from '../../domain/formatting.js'
 import StatCard from '../../components/cards/StatCard.jsx'
 import StreamHeader from '../../components/status/StreamHeader.jsx'
@@ -38,7 +39,6 @@ import OfficialRates from '../../components/marketdata/OfficialRates.jsx'
 import CurveSection from '../../components/marketdata/CurveSection.jsx'
 import QuoteHistoryPanel from '../../components/marketdata/QuoteHistoryPanel.jsx'
 import { providerLabel } from '../../config/providers.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
 import { usePanelCoordinator } from '../../layout/panelContext.js'
 
 function matchesSearch(row, search) {
@@ -243,7 +243,11 @@ export default function MarketData() {
       <FilterBar
         label="CLASS"
         ariaLabel="Filter market instruments by asset class"
-        options={countOptions(symbolRows, (row) => row.instrument.assetClass, assetClassLabel)}
+        options={groupOptions(
+          symbolRows,
+          (row) => row.instrument.assetClass,
+          (row) => classLabelOf(row.instrument),
+        )}
         value={activeClass}
         onChange={setActiveClass}
         search={{

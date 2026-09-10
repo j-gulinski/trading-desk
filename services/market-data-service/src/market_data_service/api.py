@@ -72,19 +72,16 @@ def _serve_stream(provider=None):
 
 
 @app.route("/stream")
-@app.route("/market-data/stream")
 def stream():
     return _serve_stream()
 
 
 @app.route("/stream/<provider>")
-@app.route("/market-data/stream/<provider>")
 def provider_stream(provider):
     return _serve_stream(provider.strip().upper())
 
 
 @app.route("/snapshot")
-@app.route("/market-data/snapshot")
 def get_snapshot():
     response.content_type = "application/json"
     # Every event at or below this watermark was persisted before it was published.
@@ -99,7 +96,6 @@ def get_snapshot():
 
 
 @app.route("/curves")
-@app.route("/market-data/curves")
 def get_curves():
     response.content_type = "application/json"
     include_raw = (request.query.raw or "").strip() in ("1", "true")
@@ -108,7 +104,6 @@ def get_curves():
 
 
 @app.route("/curves/<provider>")
-@app.route("/market-data/curves/<provider>")
 def get_provider_curves(provider):
     response.content_type = "application/json"
     normalized = provider.strip().upper()
@@ -121,7 +116,6 @@ def get_provider_curves(provider):
 
 
 @app.route("/curves/<provider>/<curve_name>/<as_of>")
-@app.route("/market-data/curves/<provider>/<curve_name>/<as_of>")
 def get_curve_revision(provider, curve_name, as_of):
     response.content_type = "application/json"
     normalized_provider = provider.strip().upper()
@@ -140,7 +134,6 @@ def get_curve_revision(provider, curve_name, as_of):
 
 
 @app.route("/curves/refresh", method="POST")
-@app.route("/market-data/curves/refresh", method="POST")
 def refresh_curves():
     response.content_type = "application/json"
     curve = (request.query.curve or "").strip().upper() or None
@@ -153,7 +146,6 @@ def refresh_curves():
 
 
 @app.route("/quotes")
-@app.route("/market-data/quotes")
 def get_quotes():
     response.content_type = "application/json"
     symbol = (request.query.symbol or "").strip().upper() or None
@@ -163,7 +155,6 @@ def get_quotes():
 
 
 @app.route("/quotes/<provider>/<symbol>")
-@app.route("/market-data/quotes/<provider>/<symbol>")
 def get_quote(provider, symbol):
     response.content_type = "application/json"
     normalized_provider = provider.strip().upper()
@@ -178,7 +169,6 @@ def get_quote(provider, symbol):
 
 
 @app.route("/quotes/<provider>/<symbol>/history")
-@app.route("/market-data/quotes/<provider>/<symbol>/history")
 def get_quote_history(provider, symbol):
     response.content_type = "application/json"
     normalized_provider = provider.strip().upper()
@@ -282,7 +272,6 @@ def get_provider_health(name):
 
 
 @app.route("/refresh", method="POST")
-@app.route("/market-data/refresh", method="POST")
 def refresh():
     response.content_type = "application/json"
     symbol = (request.query.symbol or "").strip().upper()

@@ -5,13 +5,13 @@ import SidePanel from '../panel/SidePanel.jsx'
 import { apiGet, apiPost, apiPut } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
 import {
-  BOOK_ASSET_CLASSES,
   BOOK_DESCRIPTION_MAX_LENGTH,
   BOOK_NAME_MAX_LENGTH,
 } from '../../config/books.js'
 import { bookFormErrorsOf, bookFormValuesOf, bookPayloadOf } from '../../domain/books.js'
+import { assetClassLabel, catalogueAssetClasses } from '../../domain/catalogue.js'
+import { ticketOptionsOf } from '../../domain/tradeActions.js'
 import { describeApiError } from '../../domain/apiErrors.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
 
 function FieldError({ id, message }) {
   if (!message) return null
@@ -26,10 +26,33 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
   const editing = bookId != null
 
   const [values, setValues] = useState(() => (editing ? null : bookFormValuesOf(null)))
+  const [schemas, setSchemas] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [errors, setErrors] = useState({})
   const [pending, setPending] = useState(false)
   const [submitError, setSubmitError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const controller = new AbortController()
+    apiGet(endpoints.tradeAction.termSchemas, { signal: controller.signal })
+      .then((data) => {
+        if (!cancelled) setSchemas(ticketOptionsOf(data).schemas)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setLoadError(
+          describeApiError(err, {
+            service: 'Trade action service',
+            outcome: 'asset classes could not be loaded.',
+          }),
+        )
+      })
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [])
 
   useEffect(() => {
     if (!editing) return undefined
@@ -68,7 +91,7 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    const nextErrors = bookFormErrorsOf(values)
+    const nextErrors = bookFormErrorsOf(values, schemas)
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
 
@@ -93,7 +116,8 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
     }
   }
 
-  const ready = values != null && loadError == null
+  const classes = catalogueAssetClasses(schemas)
+  const ready = values != null && loadError == null && schemas != null
 
   return (
     <SidePanel
@@ -102,7 +126,7 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
       subtitle={editing ? 'name, asset class & description' : 'a new empty trading book'}
       onClose={onClose}
     >
-      {editing && values == null && loadError == null && (
+      {(schemas == null || (editing && values == null)) && loadError == null && (
         <LoadingSkeleton variant="panel" rows={4} label="Loading book" />
       )}
       {loadError != null && <EmptyState message={loadError} />}
@@ -139,9 +163,9 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
               onChange={(event) => setField('assetClass', event.target.value)}
             >
               <option value="">Select asset class…</option>
-              {BOOK_ASSET_CLASSES.map((assetClass) => (
+              {classes.map((assetClass) => (
                 <option key={assetClass} value={assetClass}>
-                  {assetClassLabel(assetClass)}
+                  {assetClassLabel(assetClass, schemas)}
                 </option>
               ))}
             </select>

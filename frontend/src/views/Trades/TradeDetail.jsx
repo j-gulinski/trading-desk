@@ -7,11 +7,11 @@ import { tradeDetailOf } from '../../domain/trades.js'
 import { buildCloseTradeIntent } from '../../domain/tradeActions.js'
 import { describeApiError } from '../../domain/apiErrors.js'
 import { curveOf } from '../../domain/curves.js'
+import { ticketKindOf } from '../../domain/catalogue.js'
 import { BLOTTER_POLL_INTERVAL_MS } from '../../config/trades.js'
 import TradeDetailPanel from '../../components/trades/TradeDetailPanel.jsx'
 
 const CLOSE_STALL_MS = 15000
-const MODEL_PRICED_CLASSES = new Set(['BOND', 'IRS', 'EUROPEAN_OPTION'])
 
 export default function TradeDetail({ row, bookNames, instruments, curves, onClose }) {
   const detail = usePolling(
@@ -26,7 +26,7 @@ export default function TradeDetail({ row, bookNames, instruments, curves, onClo
   const [entryCurve, setEntryCurve] = useState(null)
   const [valuationCurve, setValuationCurve] = useState(null)
   const stallTimer = useRef(null)
-  const modelPriced = MODEL_PRICED_CLASSES.has(row.trade.assetClass)
+  const modelPriced = row.trade.modelPriced
   const closingSide = row.trade.side === 'SELL' ? 'BUY' : 'SELL'
   const marketQuote = instruments?.[`${row.trade.provider}:${row.trade.symbol}`] ?? null
   const quotedClose = closingSide === 'BUY' ? marketQuote?.ask : marketQuote?.bid
@@ -43,7 +43,7 @@ export default function TradeDetail({ row, bookNames, instruments, curves, onClo
   const feedCurve = curveName ? curves?.[curveName] ?? null : null
 
   useEffect(() => {
-    if (row.trade.assetClass !== 'BOND' || !curveName || !curveProvider || !curveAsOf) return
+    if (ticketKindOf(row.trade) !== 'bond' || !curveName || !curveProvider || !curveAsOf) return
     const controller = new AbortController()
     apiGet(
       endpoints.marketData.curveRevision(curveProvider, curveName, curveAsOf),
@@ -52,11 +52,11 @@ export default function TradeDetail({ row, bookNames, instruments, curves, onClo
       .then((data) => setEntryCurve(curveOf(data)))
       .catch(() => setEntryCurve(null))
     return () => controller.abort()
-  }, [curveAsOf, curveName, curveProvider, row.trade.assetClass])
+  }, [curveAsOf, curveName, curveProvider, row.trade.ticketKind])
 
   useEffect(() => {
     if (
-      row.trade.assetClass !== 'BOND' || !curveName || !curveProvider ||
+      ticketKindOf(row.trade) !== 'bond' || !curveName || !curveProvider ||
       !valuationCurveAsOf || feedCurve?.asOfDate === valuationCurveAsOf
     ) {
       setValuationCurve(null)
@@ -70,7 +70,7 @@ export default function TradeDetail({ row, bookNames, instruments, curves, onClo
       .then((data) => setValuationCurve(curveOf(data)))
       .catch(() => setValuationCurve(null))
     return () => controller.abort()
-  }, [curveName, curveProvider, feedCurve?.asOfDate, row.trade.assetClass, valuationCurveAsOf])
+  }, [curveName, curveProvider, feedCurve?.asOfDate, row.trade.ticketKind, valuationCurveAsOf])
 
   useEffect(() => {
     if (!closing || detailStatus == null || detailStatus === 'ACTIVE') {

@@ -1,3 +1,4 @@
+import { ticketKindOf } from './catalogue.js'
 import { toNum } from './values.js'
 
 function conciseNumber(value) {
@@ -8,8 +9,9 @@ export function instrumentLabelOf(instrument) {
   const terms = instrument.terms ?? instrument.contractTerms ?? {}
   const currency = instrument.currency ?? terms.settlement_currency ?? terms.currency
   const maturity = toNum(terms.maturity_years)
+  const kind = ticketKindOf(instrument)
 
-  if (instrument.assetClass === 'BOND') {
+  if (kind === 'bond') {
     const coupon = toNum(terms.coupon_rate)
     return [
       currency ? `${currency} bond` : 'Bond',
@@ -18,7 +20,7 @@ export function instrumentLabelOf(instrument) {
     ].filter(Boolean).join(' · ')
   }
 
-  if (instrument.assetClass === 'IRS') {
+  if (kind === 'swap') {
     const fixedRate = toNum(terms.fixed_rate)
     return [
       currency ? `${currency} IRS` : 'IRS',
@@ -27,7 +29,7 @@ export function instrumentLabelOf(instrument) {
     ].filter(Boolean).join(' · ')
   }
 
-  if (instrument.assetClass === 'EUROPEAN_OPTION') {
+  if (kind === 'premium') {
     const underlying = terms.underlying_symbol ?? instrument.underlyingSymbol ?? instrument.symbol
     const optionType = terms.option_type?.toUpperCase()
     const strike = toNum(terms.strike)
@@ -41,3 +43,4 @@ export function instrumentLabelOf(instrument) {
 
   return instrument.symbol ?? '—'
 }
+

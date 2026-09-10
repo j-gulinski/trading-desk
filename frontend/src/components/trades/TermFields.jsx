@@ -1,5 +1,6 @@
 import NumberField from './NumberField.jsx'
 import { curveChoicesFor } from '../../domain/tradeActions.js'
+import { hasTermField } from '../../domain/ticket.js'
 import {
   bondParCouponAt,
   curveBasisText,
@@ -11,7 +12,6 @@ import {
 } from '../../domain/curves.js'
 import {
   CURVE_ROLE_HINTS,
-  TRADE_CURVE_ROLE_TEXT,
 } from '../../config/marketData.js'
 import { formatLongDate } from '../../domain/formatting.js'
 
@@ -25,47 +25,33 @@ function CurveMarketContext({
   curve,
   maturityYears,
   paymentsPerYear,
-  assetClass,
+  suggestCoupon,
   onChange,
 }) {
   const market = curveMarketAt(curve, maturityYears)
   if (market == null) return null
-  const parCoupon = assetClass === 'BOND'
+  const parCoupon = suggestCoupon
     ? bondParCouponAt(curve, maturityYears, Number(paymentsPerYear))
     : null
 
   return (
     <div className="panel-form__curve-market" role="note">
-      <div className="panel-form__curve-market-head">
-        <span>At contract maturity</span>
-        <strong>{market.maturity}Y</strong>
-      </div>
-      <dl className="panel-form__curve-market-values">
-        <div>
-          <dt>Curve rate</dt>
-          <dd>{market.rate.toFixed(4)}%</dd>
-        </div>
-        <div>
-          <dt>Discount factor</dt>
-          <dd>{market.discountFactor.toFixed(6)}</dd>
-        </div>
-      </dl>
-      {parCoupon != null && (
-        <div className="panel-form__curve-action">
-          <span>
-            Curve-implied par coupon
-            <strong>{parCoupon.toFixed(4)}%</strong>
-          </span>
+      <div className="panel-form__curve-market-line">
+        <span>
+          {market.maturity}Y {market.rate.toFixed(4)}% · DF {market.discountFactor.toFixed(4)}
+        </span>
+        {parCoupon != null && (
           <button
             type="button"
+            className="panel-form__inline-action"
             onClick={() => onChange('coupon_rate', parCoupon.toFixed(4))}
           >
-            Use as coupon
+            Use par {parCoupon.toFixed(4)}%
           </button>
-        </div>
-      )}
+        )}
+      </div>
       <details className="panel-form__curve-points">
-        <summary>{market.method} · View {curve.points.length} curve points</summary>
+        <summary>{market.method} · {curve.points.length} points</summary>
         <dl>
           {curve.points.map((point) => (
             <div key={`${curve.name}:${point.label}`}>
@@ -83,6 +69,7 @@ function CurveMarketContext({
 }
 
 function CurveSelect({
+  schema,
   field,
   value,
   curves,
@@ -94,8 +81,8 @@ function CurveSelect({
   assetClass,
   onChange,
 }) {
-  const waitingForUnderlying = assetClass === 'EUROPEAN_OPTION' && !currency
-  const waitingForCurrency = ['BOND', 'IRS'].includes(assetClass) && !currency
+  const waitingForUnderlying = schema.underlying_field != null && !currency
+  const waitingForCurrency = hasTermField(schema, 'settlement_currency') && !currency
   const choices = waitingForUnderlying || waitingForCurrency
     ? []
     : curveChoicesFor(
@@ -158,7 +145,7 @@ function CurveSelect({
         <dl className="panel-form__curve-facts">
           <div>
             <dt>In this trade</dt>
-            <dd>{TRADE_CURVE_ROLE_TEXT[assetClass]?.[field.name] ?? field.label}</dd>
+            <dd>{field.role_text ?? field.label}</dd>
           </div>
           <div>
             <dt>Basis</dt>
@@ -191,7 +178,7 @@ function CurveSelect({
         curve={marketCurve}
         maturityYears={maturityYears}
         paymentsPerYear={paymentsPerYear}
-        assetClass={assetClass}
+        suggestCoupon={hasTermField(schema, 'coupon_rate')}
         onChange={onChange}
       />
     )}
@@ -200,6 +187,7 @@ function CurveSelect({
 }
 
 function Field({
+  schema,
   field,
   values,
   curves,
@@ -210,7 +198,7 @@ function Field({
   visuallyHideLabel = false,
 }) {
   const isCurve = CURVE_FIELDS.includes(field.name)
-  const fairRate = assetClass === 'IRS' && field.name === 'fixed_rate'
+  const fairRate = field.name === 'fixed_rate' && hasTermField(schema, 'floating_rate_index_tenor')
     ? irsParRateAt(
         marketCurves?.[values.discount_curve],
         marketCurves?.[values.projection_curve ?? values.discount_curve],
@@ -234,6 +222,7 @@ function Field({
       </label>
       {field.type === 'choice' && field.choices_source === 'CURVES' ? (
         <CurveSelect
+          schema={schema}
           field={field}
           value={values[field.name]}
           curves={curves}
@@ -299,15 +288,17 @@ export default function TermFields({
   const contract = schema.fields.filter((field) => !CURVE_FIELDS.includes(field.name))
   const curveFields = schema.fields.filter((field) => CURVE_FIELDS.includes(field.name))
   const compactSingleCurve = curveFields.length === 1
+  const denseTerms = contract.length >= 4
 
   return (
     <div className="panel-form__model-layout">
       <div className="panel-form__group panel-form__group--contract">
         <h3 className="panel-form__group-title">Model contract</h3>
-        <div className="panel-form__terms">
+        <div className={`panel-form__terms${denseTerms ? ' panel-form__terms--dense' : ''}`}>
           {contract.map((field) => (
             <Field
               key={field.name}
+              schema={schema}
               field={field}
               values={values}
               curves={curves}
@@ -332,6 +323,7 @@ export default function TermFields({
           {curveFields.map((field) => (
             <Field
               key={field.name}
+              schema={schema}
               field={field}
               values={values}
               curves={curves}

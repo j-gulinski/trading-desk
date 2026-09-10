@@ -1,16 +1,11 @@
-import {
-  CURVE_PRICED_ASSET_CLASSES,
-  TRADE_QUANTITY_BOUNDS,
-} from '../config/tradeActions.js'
 import { freshnessOf, instrumentId } from './marketData.js'
 import { curveTitle } from './curves.js'
-import { formatNumber } from './formatting.js'
 
 export function newOpenTradeRequestId() {
   return `manual-open-${crypto.randomUUID()}`
 }
 
-export function instrumentCatalogOf(raw) {
+function instrumentCatalogOf(raw) {
   return (Array.isArray(raw) ? raw : [])
     .filter(
       (instrument) =>
@@ -25,12 +20,9 @@ export function instrumentCatalogOf(raw) {
     }))
 }
 
-export function isCurvePriced(assetClass) {
-  return CURVE_PRICED_ASSET_CLASSES.includes(assetClass)
-}
-
-export function termSchemasOf(raw) {
+export function ticketOptionsOf(raw) {
   return {
+    instruments: instrumentCatalogOf(raw?.instruments),
     schemas: raw?.schemas && typeof raw.schemas === 'object' ? raw.schemas : {},
     curves: Array.isArray(raw?.curves) ? raw.curves : [],
   }
@@ -66,11 +58,10 @@ export function termFormComplete(schema, terms) {
   })
 }
 
-export function termCurrencyOf(assetClass, terms, catalog) {
-  if (assetClass === 'EUROPEAN_OPTION' && terms.underlying_symbol) {
-    const entry = (catalog ?? []).find(
-      (instrument) => instrument.symbol === terms.underlying_symbol,
-    )
+export function termCurrencyOf(schema, terms, catalog) {
+  const underlying = schema?.underlying_field ? terms[schema.underlying_field] : null
+  if (underlying) {
+    const entry = (catalog ?? []).find((instrument) => instrument.symbol === underlying)
     return entry?.currency ?? null
   }
   if (terms.settlement_currency) return terms.settlement_currency
@@ -130,31 +121,18 @@ export function tradeableInstrumentsOf(instruments, assetClass) {
     .sort((a, b) => a.symbol.localeCompare(b.symbol))
 }
 
-const WHOLE_UNIT_CLASSES = ['EQUITY', 'EUROPEAN_OPTION']
+// Realtime live quotes first, then any other tradeable state, newest provider time wins.
+const QUOTE_PREFERENCE = { LIVE: 2, CLOSED: 1, EOD: 1 }
 
-export function tradeFormErrorsOf({ bookId, symbol, quantity, quote, assetClass }) {
-  const errors = {}
-  if (!bookId) errors.book = 'Pick a book.'
-  if (!symbol) errors.instrument = 'Pick an instrument.'
-  if (symbol && quote == null) errors.provider = 'Pick a market data provider.'
-  else if (quote?.state === 'STALE') {
-    errors.provider = 'This quote is stale. Wait for the provider to update.'
-  } else if (quote != null && !quote.tradeable) {
-    errors.provider = `${quote.provider} cannot fill this trade right now.`
-  }
-  const whole = WHOLE_UNIT_CLASSES.includes(assetClass)
-  if (
-    !Number.isFinite(quantity) ||
-    (whole && !Number.isSafeInteger(quantity)) ||
-    quantity < TRADE_QUANTITY_BOUNDS.min ||
-    quantity > TRADE_QUANTITY_BOUNDS.max
-  ) {
-    const amountLabel = assetClass === 'FX' ? 'Notional' : 'Quantity'
-    errors.quantity = `${whole ? 'Quantity must be a whole number' : `${amountLabel} must be`} between ${formatNumber(
-      TRADE_QUANTITY_BOUNDS.min,
-    )} and ${formatNumber(TRADE_QUANTITY_BOUNDS.max)}.`
-  }
-  return errors
+export function preferredQuoteProviderOf(quotes) {
+  const ranked = quotes
+    .filter((quote) => quote.tradeable)
+    .map((quote) => ({
+      quote,
+      rank: (QUOTE_PREFERENCE[quote.state] ?? 0) * 2 + (quote.grade === 'EOD' ? 0 : 1),
+    }))
+    .sort((a, b) => b.rank - a.rank || (b.quote.atMs ?? 0) - (a.quote.atMs ?? 0))
+  return ranked[0]?.quote.provider ?? null
 }
 
 export function buildOpenTradeIntent({

@@ -5,6 +5,13 @@ import { formatShortId } from './formatting.js'
 import { sortRows } from './tableSort.js'
 import { statusOf as liveValuationStatusOf, valuationOf } from './valuations.js'
 import { toNum, toTime } from './values.js'
+import {
+  catalogueFieldsOf,
+  markForDisplay,
+  sizeLabelOf,
+  sizeOf,
+  ticketKindOf,
+} from './catalogue.js'
 
 const VALUATION_STATUS_RANK = {
   LIVE: 5,
@@ -25,31 +32,17 @@ export function irsDirectionLabel(direction) {
 }
 
 export function tradePositionLabel(trade) {
-  return trade.assetClass === 'IRS'
+  return ticketKindOf(trade) === 'swap'
     ? irsDirectionLabel(trade.terms?.direction)
     : trade.side
 }
 
 export function tradeSize(trade) {
-  if (trade.assetClass === 'IRS') return toNum(trade.terms?.notional)
-  if (trade.assetClass === 'BOND') {
-    const face = toNum(trade.terms?.face_value)
-    return face == null ? null : face * (trade.quantity ?? 1)
-  }
-  return trade.quantity
+  return sizeOf(trade)
 }
 
 export function tradeSizeLabel(trade) {
-  if (trade.assetClass === 'IRS') return 'Notional'
-  if (trade.assetClass === 'BOND') return 'Face amount'
-  return 'Quantity'
-}
-
-export function tradePriceForDisplay(trade, value) {
-  const price = toNum(value)
-  if (trade.assetClass !== 'BOND' || price == null) return price
-  const face = toNum(trade.terms?.face_value)
-  return face != null && face > 0 ? price / face * 100 : price
+  return sizeLabelOf(trade)
 }
 
 export function booksFromSummary(data) {
@@ -80,6 +73,8 @@ function snapshotValuationOf(data, trade) {
     book_id: trade.bookId,
     book_name: trade.bookName,
     asset_class: trade.assetClass,
+    ticket_kind: trade.ticketKind,
+    label: trade.label,
     symbol: trade.symbol,
     quantity: trade.side === 'SELL' ? -trade.quantity : trade.quantity,
     trade_price: trade.entryPrice,
@@ -105,6 +100,7 @@ function tradeOf(data, bookNames = new Map()) {
     bookId: data.book_id ?? null,
     bookName: bookNames.get(data.book_id) ?? formatShortId(data.book_id),
     assetClass: data.asset_class ?? 'UNKNOWN',
+    ...catalogueFieldsOf(data),
     symbol: data.symbol ?? null,
     side,
     quantity: Number.isFinite(quantity) ? Math.abs(quantity) : null,
@@ -122,6 +118,7 @@ function tradeOf(data, bookNames = new Map()) {
     closePrice: toNum(data.close_price),
     closeReason: data.close_reason ?? null,
     terms: data.terms && typeof data.terms === 'object' ? data.terms : null,
+    modelPriced: data.model_priced === true,
   }
 
   trade.latestValuation = snapshotValuationOf(data.latest_valuation, trade)
@@ -225,7 +222,7 @@ function structuralValueOf(row, column) {
   if (column === 'symbol') return instrumentLabelOf(trade)
   if (column === 'side') return tradePositionLabel(trade)
   if (column === 'quantity') return tradeSize(trade)
-  if (column === 'entry') return tradePriceForDisplay(trade, trade.entryPrice)
+  if (column === 'entry') return markForDisplay(trade, trade.entryPrice)
   if (column === 'provider') return trade.provider ?? row.valuation?.marketDataProvider
   if (column === 'opened') return trade.openedAtMs
   return undefined
@@ -233,7 +230,7 @@ function structuralValueOf(row, column) {
 
 function snapshotValueOf(row, column, rates = null, comparisonCurrency = null) {
   let value = null
-  if (column === 'price') return tradePriceForDisplay(row.trade, row.valuation?.price)
+  if (column === 'price') return markForDisplay(row.trade, row.valuation?.price)
   if (column === 'fairValue') value = row.valuation?.fairValue ?? null
   else if (column === 'pnl') value = row.pnl
   if (column === 'return') return row.valuation?.closed ? null : row.valuation?.returnPercent ?? null

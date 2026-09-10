@@ -1,31 +1,15 @@
-import queue
 
 from pricing_service import cache
 from pricing_service.config import SERVICE_NAME
 from desk_runtime.logging_config import get_logger
+from desk_runtime.streams import STREAM_OVERFLOW, publish_event
 
 log = get_logger(SERVICE_NAME)
-STREAM_OVERFLOW = object()
+
 
 
 def _publish(event_type, data):
-    with cache.clients_lock:
-        targets = list(cache.client_event_queues)
-    message = {"event": event_type, "data": data}
-    for client_queue in targets:
-        try:
-            client_queue.put_nowait(message)
-        except queue.Full:
-            try:
-                while True:
-                    client_queue.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                client_queue.put_nowait(STREAM_OVERFLOW)
-            except queue.Full:
-                pass
-            log.warning("stream_client_overflow_reconnect_required", event_type=event_type)
+    publish_event(cache.client_event_queues, cache.clients_lock, event_type, data, log)
 
 
 def publish_valuation(pricing_event):

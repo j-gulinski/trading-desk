@@ -1,7 +1,6 @@
 from sqlalchemy import (
     Boolean,
     Column,
-    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -37,15 +36,6 @@ class Book(Base):
 class Instrument(Base):
     __tablename__ = "instruments"
     __table_args__ = (
-        CheckConstraint(
-            "underlying_instrument_id <> instrument_id",
-            name="ck_instruments_not_self_underlying",
-        ),
-        CheckConstraint("jsonb_typeof(terms) = 'object'", name="ck_instruments_terms_object"),
-        CheckConstraint(
-            "(asset_class = 'EUROPEAN_OPTION') = (underlying_instrument_id IS NOT NULL)",
-            name="ck_instruments_underlying_required",
-        ),
         Index("ix_instruments_underlying_instrument_id", "underlying_instrument_id"),
         Index("ix_instruments_asset_class", "asset_class"),
     )

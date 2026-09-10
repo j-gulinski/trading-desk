@@ -5,7 +5,7 @@ from blotter_service import cache, repository
 from blotter_service.config import SERVICE_NAME
 from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from desk_runtime.logging_config import get_logger
-from desk_domain.symbols import SPOT_ASSET_CLASSES
+from desk_domain.instruments import instrument_type_for, type_view_for
 
 log = get_logger(SERVICE_NAME)
 
@@ -55,6 +55,7 @@ def _trade_to_dict(trade) -> dict:
         "trade_id": trade.trade_id,
         "book_id": trade.book_id,
         "asset_class": trade.asset_class,
+        **type_view_for(trade.asset_class),
         "symbol": trade.symbol,
         "side": trade.side,
         "quantity": trade.quantity,
@@ -74,6 +75,7 @@ def _trade_to_dict(trade) -> dict:
         "source": trade.source,
         "created_by_service": trade.created_by_service,
         "terms": trade.terms,
+        "model_priced": instrument_type_for(trade.asset_class).needs_curve,
     }
 
 
@@ -156,9 +158,7 @@ def _net_positions(active) -> tuple[Decimal, dict, Decimal, dict, list[dict]]:
     for trade in active:
         valuation = cache.get_valuation(trade.trade_id)
         provider = trade.market_data_provider
-        if provider is None and trade.asset_class in (
-            *SPOT_ASSET_CLASSES, "EUROPEAN_OPTION"
-        ):
+        if provider is None and instrument_type_for(trade.asset_class).needs_quote:
             provider = DEFAULT_QUOTE_PROVIDER
         if provider is None and valuation is not None:
             provider = valuation.get("market_data_provider")
@@ -169,6 +169,7 @@ def _net_positions(active) -> tuple[Decimal, dict, Decimal, dict, list[dict]]:
             "symbol": trade.symbol,
             "currency": trade.currency,
             "asset_class": trade.asset_class,
+            **type_view_for(trade.asset_class),
             "market_data_provider": provider,
             "terms": dict(trade.terms or {}),
             "trades": 0,
@@ -289,6 +290,7 @@ def books_summary() -> list[dict]:
             "book_id": book_id,
             "name": book["name"],
             "expected_asset_class": book["expected_asset_class"],
+            **type_view_for(book["expected_asset_class"]),
             "is_active": book["is_active"],
             "active_trades": len(active),
             "closed_trades": closed_by_book.get(book_id, 0),

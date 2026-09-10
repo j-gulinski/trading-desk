@@ -1,3 +1,4 @@
+import { catalogueFieldsOf } from './catalogue.js'
 import { VALUATION_STALE_AFTER_MS } from '../config/valuations.js'
 import { groupOptions } from './filters.js'
 import { instrumentLabelOf } from './contracts.js'
@@ -31,6 +32,7 @@ export function valuationOf(data) {
     bookId: data.book_id ?? null,
     bookName: data.book_name ?? null,
     assetClass: data.asset_class ?? 'UNKNOWN',
+    ...catalogueFieldsOf(data),
     symbol: data.symbol ?? null,
     currency: data.currency ?? null,
     signedQuantity,
@@ -200,30 +202,20 @@ function keepsUpWith(valuation, instrument, now) {
   return valuation.receivedAtMs != null && now - valuation.receivedAtMs <= window
 }
 
+function curveVintageMatches(valuationAsOf, feed) {
+  return feed?.asOfDate != null && valuationAsOf === feed.asOfDate
+}
+
 export function statusOf(valuation, now, instruments = null, curves = null) {
   if (valuation.closed) return 'CLOSED'
 
   if (valuation.discountCurve != null) {
-    const discount = curves?.[valuation.discountCurve]
-    if (
-      discount?.asOfDate == null ||
-      valuation.curveAsOf !== discount.asOfDate ||
-      (Number.isFinite(discount.receivedAtMs) &&
-        (!Number.isFinite(valuation.curveReceivedAtMs) ||
-          valuation.curveReceivedAtMs < discount.receivedAtMs))
-    ) {
+    if (!curveVintageMatches(valuation.curveAsOf, curves?.[valuation.discountCurve])) {
       return 'STALE'
     }
   }
   if (valuation.projectionCurve != null) {
-    const projection = curves?.[valuation.projectionCurve]
-    if (
-      projection?.asOfDate == null ||
-      valuation.projectionCurveAsOf !== projection.asOfDate ||
-      (Number.isFinite(projection.receivedAtMs) &&
-        (!Number.isFinite(valuation.projectionCurveReceivedAtMs) ||
-          valuation.projectionCurveReceivedAtMs < projection.receivedAtMs))
-    ) {
+    if (!curveVintageMatches(valuation.projectionCurveAsOf, curves?.[valuation.projectionCurve])) {
       return 'STALE'
     }
   }
@@ -236,7 +228,7 @@ export function statusOf(valuation, now, instruments = null, curves = null) {
   }
   const feedState = freshnessOf(instrument, now)
   if (feedState === 'CLOSED') return 'MARKET_CLOSED'
-  if (feedState !== 'LIVE') return 'STALE'
+  if (feedState === 'STALE' || feedState === 'MISSING') return 'STALE'
   return keepsUpWith(valuation, instrument, now) ? 'LIVE' : 'STALE'
 }
 

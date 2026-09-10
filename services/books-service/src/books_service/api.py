@@ -1,8 +1,7 @@
 import bottle
 from bottle import request, response
 
-from books_service import blotter_client, repository
-from books_service.blotter_client import BlotterUnavailable
+from books_service import repository
 from desk_runtime.serialization import to_json
 
 app = bottle.Bottle()
@@ -15,13 +14,7 @@ def _json(data, status=200):
 
 
 def _deactivation_refusal(book_id):
-    try:
-        open_trades = blotter_client.active_trade_count(book_id)
-    except BlotterUnavailable:
-        return _json({
-            "error": "open trades could not be verified",
-            "book_id": book_id,
-        }, 503)
+    open_trades = repository.active_trade_count(book_id)
     if open_trades > 0:
         return _json({
             "error": "book has open trades",

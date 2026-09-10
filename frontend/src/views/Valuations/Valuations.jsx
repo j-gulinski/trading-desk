@@ -22,7 +22,7 @@ import {
   summarizeValuations,
   valuationRowsOf,
 } from '../../domain/valuations.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
+import { classLabelOf } from '../../domain/catalogue.js'
 import { BOOK_SUMMARY_POLL_INTERVAL_MS } from '../../config/books.js'
 import { apiGet } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
@@ -30,7 +30,7 @@ import { bookSummariesOf } from '../../domain/books.js'
 import {
   reportedPortfolioSummaryOf,
 } from '../../domain/portfolio.js'
-import { countOptions } from '../../domain/filters.js'
+import { groupOptions } from '../../domain/filters.js'
 import {
   formatAmount,
   formatClockTime,
@@ -369,7 +369,11 @@ export default function Valuations() {
         <FilterBar
           label="CLASS"
           ariaLabel="Filter valuations by asset class"
-          options={countOptions(openRows, (row) => row.valuation.assetClass, assetClassLabel)}
+          options={groupOptions(
+            openRows,
+            (row) => row.valuation.assetClass,
+            (row) => classLabelOf(row.valuation),
+          )}
           value={activeClass}
           onChange={selectClass}
           search={{

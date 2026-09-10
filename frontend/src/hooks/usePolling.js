@@ -54,7 +54,7 @@ export function usePolling(
           if (rerunRequested) {
             rerunRequested = false
             timer = setTimeout(tick, 0)
-          } else {
+          } else if (intervalMs != null) {
             const elapsedMs = Date.now() - startedAt
             const delayMs = Math.max(MIN_RETRY_DELAY_MS, intervalMs - elapsedMs)
             timer = setTimeout(tick, delayMs)

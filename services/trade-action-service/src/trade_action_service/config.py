@@ -1,8 +1,9 @@
+from desk_runtime.config import SERVICE_PORTS
 from desk_runtime.config import env_float, env_int
 from desk_domain.providers import QUOTE_PROVIDERS
 
 SERVICE_NAME = "trade-action-service"
-PORT = 8008
+PORT = SERVICE_PORTS[SERVICE_NAME]
 
 QUOTE_PROVIDER_CHOICES = QUOTE_PROVIDERS
 

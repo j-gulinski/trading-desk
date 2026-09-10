@@ -1,3 +1,4 @@
+from functools import wraps
 import threading
 import time
 
@@ -172,6 +173,16 @@ class ProviderRuntime:
         if cooldown_left > 0:
             return f"{self.provider} is {self.status()}: retry in {round(cooldown_left)}s"
         return None
+
+    def guard(self, event, log_level="warning"):
+        def decorate(fetch):
+            @wraps(fetch)
+            def guarded_fetch(*args, **kwargs):
+                symbol = getattr(args[0], "symbol", None) if args else None
+                return self.guarded(lambda: fetch(*args, **kwargs), event, log_level,
+                                    symbol=symbol)
+            return guarded_fetch
+        return decorate
 
     def guarded(self, work, unavailable_event, log_level="info", **context):
         """Runs one provider call, mapping every provider error onto this runtime's

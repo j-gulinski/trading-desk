@@ -1,3 +1,4 @@
+from desk_runtime.config import SERVICE_PORTS
 import math
 
 from desk_runtime.config import env_int, env_str
@@ -11,7 +12,7 @@ def _symbol_list(name, default):
     )
 
 SERVICE_NAME = "market-data-service"
-PORT = 8001
+PORT = SERVICE_PORTS[SERVICE_NAME]
 
 # Cross-provider policy. Provider-published limits are converted to the safer
 # operating budgets below; these settings do not belong to one adapter.

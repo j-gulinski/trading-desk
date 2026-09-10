@@ -57,7 +57,6 @@ export const endpoints = {
   tradeAction: {
     submit: '/api/trade-action/trade-actions',
     queueStatus: '/api/trade-action/queue/status',
-    instruments: '/api/trade-action/instruments',
     termSchemas: '/api/trade-action/instruments/term-schemas',
   },
 }

@@ -1,31 +1,18 @@
 import StatusPill from '../status/StatusPill.jsx'
 import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
 import { providerLabel } from '../../config/providers.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
+import { classLabelOf, formatMarkAmount } from '../../domain/catalogue.js'
 import {
   formatClockTime,
   formatPercent,
   formatShortId,
-  formatSignedAmount,
-  formatUnitPrice,
 } from '../../domain/formatting.js'
 import { priceUnitLabelOf } from '../../domain/marketFormat.js'
 import { instrumentLabelOf } from '../../domain/contracts.js'
 import MoneyCell from '../tables/MoneyCell.jsx'
 
 function currentValueText(valuation) {
-  let value = valuation.price
-  if (
-    valuation.assetClass === 'BOND' &&
-    Number.isFinite(value) &&
-    Number.isFinite(valuation.faceValue) &&
-    valuation.faceValue > 0
-  ) {
-    value = value / valuation.faceValue * 100
-  }
-  const amount = valuation.assetClass === 'IRS'
-    ? formatSignedAmount(value)
-    : formatUnitPrice(value, valuation.assetClass)
+  const amount = formatMarkAmount(valuation, valuation.price)
   const unit = priceUnitLabelOf(valuation)
   return amount === '—' || !unit ? amount : `${amount} ${unit}`
 }
@@ -47,7 +34,7 @@ export default function ValuationCell({
       return (
         <span className="class-tag">
           <span className="class-tag__dot" />
-          {assetClassLabel(valuation.assetClass)}
+          {classLabelOf(valuation)}
         </span>
       )
     case 'symbol':

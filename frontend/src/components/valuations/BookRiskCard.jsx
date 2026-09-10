@@ -1,5 +1,5 @@
 import { directionOf, formatPercent, formatSignedAmount } from '../../domain/formatting.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
+import { classLabelOf } from '../../domain/catalogue.js'
 
 function Metric({ label, value, className, title }) {
   return (
@@ -69,7 +69,7 @@ export default function BookRiskCard({ book }) {
     <article className={`book-card stat-card stat-card--${tone}`}>
       <header className="book-card__head">
         <span className="book-card__name" title={book.name}>{book.name}</span>
-        <span className="book-card__class">{assetClassLabel(book.assetClass)}</span>
+        <span className="book-card__class">{classLabelOf(book)}</span>
       </header>
 
       <div className="book-card__metrics">

@@ -1,9 +1,13 @@
+from desk_domain.instruments import type_view_for
+
+
 def book_to_dict(book) -> dict:
     return {
         "book_id": book.book_id,
         "name": book.name,
         "description": book.description,
         "expected_asset_class": book.expected_asset_class,
+        **type_view_for(book.expected_asset_class),
         "is_active": book.is_active,
         "created_at": book.created_at,
         "updated_at": book.updated_at,

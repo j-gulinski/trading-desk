@@ -6,8 +6,7 @@ class FinnhubClient(ProviderClient):
     provider = FINNHUB
     base_url = "https://finnhub.io/api/v1"
 
-    def auth_params(self):
-        return {"token": self.api_key}
+    api_key_param = "token"
 
     def classify_body(self, payload):
         if isinstance(payload, dict) and payload.get("error"):

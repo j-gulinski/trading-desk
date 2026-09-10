@@ -11,8 +11,7 @@ class AlphaVantageClient(ProviderClient):
     provider = ALPHA_VANTAGE
     base_url = "https://www.alphavantage.co"
 
-    def auth_params(self):
-        return {"apikey": self.api_key}
+    api_key_param = "apikey"
 
     def classify_body(self, payload):
         if not isinstance(payload, dict):

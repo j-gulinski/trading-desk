@@ -1,14 +1,16 @@
-from desk_runtime.config import env_float, env_int, env_str
+from desk_runtime.config import SERVICE_PORTS, SERVICE_URLS
+from desk_runtime.config import env_float, env_int
 from desk_pricing.risk import MINIMUM_OBSERVATIONS
 
 SERVICE_NAME = "pricing-service"
-PORT = 8002
+PORT = SERVICE_PORTS[SERVICE_NAME]
 
 TRADE_REFRESH_SECONDS = 2
 VALUATION_WRITE_INTERVAL_SECONDS = env_int("VALUATION_WRITE_INTERVAL_SECONDS", 60)
 VALUATION_STREAM_QUEUE_SIZE = 5000
 
-MARKET_DATA_STREAM_URL = env_str("MARKET_DATA_STREAM_URL")
+MARKET_DATA_STREAM_URL = SERVICE_URLS["market-data-service"] + "/stream"
+MARKET_DATA_SNAPSHOT_URL = SERVICE_URLS["market-data-service"] + "/snapshot"
 
 BOOK_RISK_WINDOW = env_int("BOOK_RISK_WINDOW", 100)
 BOOK_RISK_MINIMUM_OBSERVATIONS = env_int("BOOK_RISK_MINIMUM_OBSERVATIONS", MINIMUM_OBSERVATIONS)

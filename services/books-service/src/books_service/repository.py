@@ -1,7 +1,7 @@
 import uuid
 
 from desk_runtime.db import session_scope
-from desk_domain.models import Book
+from desk_domain.models import Book, Trade
 from desk_runtime.functions import utcnow
 from desk_domain.audit import write_audit
 from desk_runtime.logging_config import get_logger
@@ -25,6 +25,15 @@ def get_book(book_id):
     with session_scope() as session:
         book = session.get(Book, uuid.UUID(book_id))
         return book_to_dict(book) if book else None
+
+
+def active_trade_count(book_id):
+    with session_scope() as session:
+        return (
+            session.query(Trade)
+            .filter(Trade.book_id == uuid.UUID(book_id), Trade.status == "ACTIVE")
+            .count()
+        )
 
 
 def create_book(body):

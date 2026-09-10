@@ -241,13 +241,14 @@
   top: calc(100% + var(--sp-2));
   right: 0;
   z-index: 3;
-  width: min(300px, calc(100vw - 48px));
+  width: min(340px, calc(100vw - 48px));
   display: flex;
   align-items: flex-start;
   flex-direction: column;
   gap: var(--sp-1);
   padding: var(--sp-3);
   border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--neg);
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
@@ -257,6 +258,21 @@
     color: var(--text-muted);
     line-height: 1.35;
   }
+}
+.trade-detail__close-confirmation-title {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.trade-detail__close-value {
+  margin-bottom: 2px;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 .trade-detail__close-confirmation-actions {
   display: flex;

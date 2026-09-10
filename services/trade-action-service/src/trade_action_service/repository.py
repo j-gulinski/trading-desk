@@ -4,9 +4,8 @@ from sqlalchemy import update
 
 from desk_domain.models import Trade, Book
 from desk_domain.contract_data import split_terms
-from desk_domain.instruments import ensure_instrument, lock_instrument, require_watched_source
+from desk_domain.instrument_store import ensure_instrument, lock_instrument, require_watched_source
 from desk_runtime.functions import utcnow
-from desk_domain.symbols import CURVE_PRICED_ASSET_CLASSES
 from trade_action_service.config import SERVICE_NAME
 
 
@@ -25,33 +24,37 @@ def trade_by_client_request_id(session, client_request_id):
     return session.query(Trade).filter_by(client_request_id=client_request_id).one_or_none()
 
 
-def insert_trade(session, intent, terms, market_data_provider, executed_price, quote):
+def insert_trade(session, intent, instrument, market_data_provider, executed_price, quote):
     now = utcnow()
     symbol = intent.get("symbol")
     trade_id = uuid.UUID(intent["trade_id"])
-    asset_class = intent["asset_class"]
-    currency = quote.currency or terms["currency"]
-    data = split_terms(asset_class, terms)
-    if asset_class in CURVE_PRICED_ASSET_CLASSES:
+    asset_class = instrument.asset_class
+    currency = quote.currency or instrument.terms["currency"]
+    data = split_terms(instrument)
+    if instrument.symbol_prefix is not None:
         underlying = None
-        if asset_class == "EUROPEAN_OPTION":
-            underlying = lock_instrument(session, terms["underlying_symbol"])
+        if instrument.underlying_field:
+            underlying = lock_instrument(session, instrument.quote_symbol)
             require_watched_source(session, underlying, market_data_provider)
-            if underlying.asset_class != "EQUITY" or underlying.currency != currency:
-                raise ValueError("option underlying must be an equity in the contract currency")
-        instrument = ensure_instrument(
+            if underlying.asset_class not in instrument.underlying_asset_classes \
+                    or underlying.currency != currency:
+                raise ValueError(
+                    f"{asset_class} underlying must be "
+                    f"{' or '.join(instrument.underlying_asset_classes)} in the contract currency"
+                )
+        row = ensure_instrument(
             session, symbol, asset_class, currency, terms=data.terms,
             underlying_id=underlying.instrument_id if underlying else None,
         )
     else:
-        instrument = lock_instrument(session, symbol)
-        require_watched_source(session, instrument, market_data_provider)
-        if instrument.asset_class != asset_class or instrument.currency != currency:
+        row = lock_instrument(session, symbol)
+        require_watched_source(session, row, market_data_provider)
+        if row.asset_class != asset_class or row.currency != currency:
             raise ValueError("execution does not match instrument identity")
     trade = Trade(
         trade_id=trade_id,
         book_id=uuid.UUID(intent["book_id"]),
-        instrument_id=instrument.instrument_id,
+        instrument_id=row.instrument_id,
         side=intent.get("side"),
         quantity=intent.get("quantity"),
         trade_price=executed_price,

@@ -5,7 +5,7 @@ import uuid
 from decimal import Decimal
 
 from pricing_service.config import SERVICE_NAME, VALUATION_WRITE_INTERVAL_SECONDS
-from pricing_service.pnl import signed_quantity
+from desk_pricing.valuation import pnl, position_value, signed_quantity
 from desk_domain.contract_data import trade_terms
 from desk_runtime.db import session_scope
 from desk_runtime.functions import get_iso_timestamp, utcnow
@@ -13,6 +13,7 @@ from desk_runtime.logging_config import get_logger
 from desk_domain.audit import write_audit
 from sqlalchemy import and_, func
 
+from desk_domain.instruments import type_view_for
 from desk_domain.models import Book, Trade, Valuation
 
 log = get_logger(SERVICE_NAME)
@@ -186,6 +187,7 @@ def load_terminal_valuations():
                 "book_id": str(trade.book_id),
                 "book_name": book_name,
                 "asset_class": trade.instrument.asset_class,
+                **type_view_for(trade.instrument.asset_class),
                 "symbol": trade.instrument.symbol,
                 "currency": valuation.currency,
                 "quantity": signed_quantity(trade.side, trade.quantity),
@@ -213,6 +215,7 @@ def finalize_closed_trades():
         rows = (
             _trades_with_book(session)
             .filter(Trade.status == "CLOSED", Trade.valuation_finalized.is_(False))
+            .with_for_update(of=Trade, skip_locked=True)
             .all()
         )
         for trade, book_name in rows:
@@ -231,11 +234,8 @@ def finalize_closed_trades():
 
             if trade.close_price is not None:
                 close_price = trade.close_price
-                if trade.side == "SELL":
-                    realized = (trade_price - close_price) * quantity * multiplier
-                else:
-                    realized = (close_price - trade_price) * quantity * multiplier
-                fair_value = close_price * quantity * multiplier
+                realized = pnl(trade.side, close_price, trade_price, quantity, multiplier)
+                fair_value = position_value(close_price, quantity, multiplier)
                 payload = {
                     "close_price": str(close_price),
                     "multiplier": multiplier,
@@ -256,7 +256,7 @@ def finalize_closed_trades():
                     fair_value = last.fair_value
                 else:
                     realized = Decimal("0")
-                    fair_value = trade_price * quantity * multiplier
+                    fair_value = position_value(trade_price, quantity, multiplier)
                 payload = {
                     "close_price": None,
                     "multiplier": multiplier,
@@ -271,6 +271,7 @@ def finalize_closed_trades():
                 "book_id": str(trade.book_id),
                 "book_name": book_name,
                 "asset_class": trade.instrument.asset_class,
+                **type_view_for(trade.instrument.asset_class),
                 "symbol": trade.instrument.symbol,
                 "currency": trade.trade_currency,
                 "quantity": signed_quantity(trade.side, quantity),

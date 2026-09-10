@@ -30,7 +30,8 @@ import {
   tradeRowsOf,
   tradesFromSnapshot,
 } from '../../domain/trades.js'
-import { countOptions } from '../../domain/filters.js'
+import { groupOptions } from '../../domain/filters.js'
+import { classLabelOf } from '../../domain/catalogue.js'
 import { formatClockTime, formatNumber } from '../../domain/formatting.js'
 import StreamHeader from '../../components/status/StreamHeader.jsx'
 import FilterChipGroup from '../../components/filters/FilterChipGroup.jsx'
@@ -42,7 +43,6 @@ import TradeStatusTabs from '../../components/trades/TradeStatusTabs.jsx'
 import TradeTable from '../../components/trades/TradeTable.jsx'
 import TradeDetail from './TradeDetail.jsx'
 import { PANEL_ID, usePanelCoordinator } from '../../layout/panelContext.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
 
 const INITIAL_FILTERS = { lifecycle: 'BOTH', book: null, assetClass: null, query: '' }
 
@@ -176,7 +176,11 @@ export default function Trades() {
   const visibleRows = matchingRows.slice(pageStart, pageStart + TRADE_PAGE_SIZE)
   const selectedRow = rows.find((row) => row.trade.id === selectedTradeId) ?? null
   const bookOptions = tradeBookOptionsOf(lifecycleRows)
-  const classOptions = countOptions(lifecycleRows, (row) => row.trade.assetClass, assetClassLabel)
+  const classOptions = groupOptions(
+    lifecycleRows,
+    (row) => row.trade.assetClass,
+    (row) => classLabelOf(row.trade),
+  )
   const closedTotal = Math.max(closedTradeCountOf(books), summary.closed)
   const totalTradeCount = books.reduce(
     (total, book) => total + book.activeTrades + book.closedTrades,

@@ -4,7 +4,8 @@ from bottle import request, response
 
 from pricing_service import cache
 from pricing_service.config import SERVICE_NAME, VALUATION_STREAM_QUEUE_SIZE
-from pricing_service.pricers.registry import market_inputs, price_details, price_from_inputs
+from pricing_service.market_inputs import market_inputs
+from desk_domain.instruments import instrument_for
 from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from pricing_service.schemas import ScenarioRequest
 from pricing_service.valuation_publisher import STREAM_OVERFLOW
@@ -12,12 +13,7 @@ from desk_domain.curve_registry import latest_curve_sets
 from desk_pricing.provenance import pricing_provenance
 from desk_runtime.db import session_scope
 from desk_domain.active_set import load_active_set
-from desk_domain.symbols import (
-    CURVE_PRICED_ASSET_CLASSES,
-    SPOT_ASSET_CLASSES,
-    watchlist_option_underlying_symbols,
-    watchlist_spot_currencies,
-)
+from desk_domain.symbols import watchlist_spot_catalog
 from desk_domain.term_schemas import validate_terms
 from pricing_service.scenario import run_scenario
 from desk_runtime.serialization import to_json
@@ -99,12 +95,10 @@ def price_preview():
         return to_json({"error": "symbol must be text"})
     if body.get("terms") is not None:
         with session_scope() as session:
-            underlying_choices = watchlist_option_underlying_symbols(session)
-            underlying_currencies = watchlist_spot_currencies(session)
+            spot_catalog = watchlist_spot_catalog(session)
             curves = latest_curve_sets(session)
         terms, error = validate_terms(body.get("asset_class"), body["terms"],
-                                      underlying_choices, curves,
-                                      underlying_currencies)
+                                      spot_catalog, curves)
         if terms is None:
             log.warning("price_preview_rejected", symbol=symbol,
                         asset_class=body.get("asset_class"), reason=error)
@@ -126,19 +120,19 @@ def price_preview():
         response.status = 400
         return to_json({"error": "market_data_provider must be text"})
     provider = (raw_provider or "").strip().upper() or None
-    inputs = market_inputs(terms["asset_class"], symbol, terms, provider)
-    priced = price_from_inputs(terms["asset_class"], terms, inputs)
+    instrument = instrument_for(terms["asset_class"], symbol, terms)
+    inputs = market_inputs(instrument, provider)
+    priced = instrument.price(inputs)
     if priced is None:
         log.warning("price_preview_unavailable", symbol=symbol,
                     asset_class=terms["asset_class"], provider=provider)
         response.status = 503
         return to_json({
             "error": f"{provider or DEFAULT_QUOTE_PROVIDER} has no current quote for {symbol}"
-            if terms["asset_class"] in SPOT_ASSET_CLASSES
+            if not instrument.needs_curve
             else "the selected curve (or the underlying quote) is not available yet",
             "symbol": symbol,
         })
-    price, multiplier = priced
     revisions = _preview_revisions(terms, inputs)
     if not _revisions_match(body.get("expected_market_revisions"), revisions):
         response.status = 409
@@ -146,27 +140,20 @@ def price_preview():
             "error": "pricing market data is catching up; retry the preview",
             "market_revisions": revisions,
         })
-    needs_spot = (
-        terms["asset_class"] in SPOT_ASSET_CLASSES
-        or terms["asset_class"] == "EUROPEAN_OPTION"
-    )
+    needs_spot = instrument.needs_quote
     provenance = pricing_provenance(
-        terms["asset_class"],
-        inputs.get("curve"),
-        inputs.get("projection_curve"),
+        instrument.model, inputs.get("curve"), inputs.get("projection_curve"),
     )
     log.info("price_preview", symbol=symbol, asset_class=terms["asset_class"],
-             provider=provider, price=str(price))
+             provider=provider, price=str(priced["price"]))
     return to_json({
         "symbol": symbol,
         "asset_class": terms["asset_class"],
         "currency": terms.get("currency", "USD"),
         "market_data_provider": (provider or DEFAULT_QUOTE_PROVIDER) if needs_spot else None,
-        "price": price,
-        "multiplier": multiplier,
+        **priced,
         "market_revisions": revisions,
         **({"pricing_provenance": provenance} if provenance else {}),
-        **price_details(terms["asset_class"], terms, inputs),
     })
 
 
@@ -222,24 +209,23 @@ def post_scenario():
         response.status = 400
         return to_json({"error": str(e)})
 
-    if req.position.instrument.asset_class in CURVE_PRICED_ASSET_CLASSES:
+    if req.instrument.needs_curve:
         with session_scope() as session:
-            underlying_choices = watchlist_option_underlying_symbols(session)
-            underlying_currencies = watchlist_spot_currencies(session)
+            spot_catalog = watchlist_spot_catalog(session)
             curves = latest_curve_sets(session)
         terms, error = validate_terms(
-            req.position.instrument.asset_class,
-            req.position.instrument.meta,
-            underlying_choices,
-            curves,
-            underlying_currencies,
+            req.instrument.asset_class, req.instrument.terms, spot_catalog, curves,
         )
         if terms is None:
             response.status = 400
             return to_json({"error": error})
-        req.position.instrument.meta = terms
+        req.instrument.terms = terms
 
-    result = run_scenario(req)
+    try:
+        result = run_scenario(req)
+    except (ValueError, ArithmeticError) as error:
+        response.status = 400
+        return to_json({"error": str(error)})
     if result is None:
         response.status = 404
         return to_json({"error": "market data not found for instrument"})

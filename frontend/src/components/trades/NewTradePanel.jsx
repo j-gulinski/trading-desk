@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import SidePanel from '../panel/SidePanel.jsx'
 import LoadingSkeleton from '../LoadingSkeleton.jsx'
-import ProviderQuoteOption from './ProviderQuoteOption.jsx'
+import PriceSourcePicker from './PriceSourcePicker.jsx'
 import TermFields from './TermFields.jsx'
+import TicketValue from './TicketValue.jsx'
+import TradeSubmitted from './TradeSubmitted.jsx'
 import NumberField from './NumberField.jsx'
 import { useMarketFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
+import { useModelPreview } from '../../hooks/useModelPreview.js'
 import { usePolling } from '../../hooks/usePolling.js'
 import { apiGet, apiPost } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
@@ -14,34 +17,48 @@ import {
   buildCurveTradeIntent,
   buildOpenTradeIntent,
   curveChoicesFor,
-  instrumentCatalogOf,
-  isCurvePriced,
   newOpenTradeRequestId,
+  preferredQuoteProviderOf,
   providerQuotesOf,
   termCurrencyOf,
   termFormComplete,
-  termSchemasOf,
-  tradeFormErrorsOf,
+  ticketOptionsOf,
   tradeableInstrumentsOf,
 } from '../../domain/tradeActions.js'
-import { providerLabel } from '../../config/providers.js'
+import {
+  ackSummaryOf,
+  hasTermField,
+  quantityLabelOf,
+  submitActionOf,
+  ticketErrorsOf,
+  ticketValueOf,
+} from '../../domain/ticket.js'
 import { bookSummariesOf } from '../../domain/books.js'
 import { describeApiError } from '../../domain/apiErrors.js'
-import {
-  TRADE_QUANTITY_BOUNDS,
-  TICKET_OPTIONS_POLL_INTERVAL_MS,
-  assetClassLabel,
-} from '../../config/tradeActions.js'
-import {
-  formatAmount,
-  formatDateTime,
-  formatNumber,
-  formatShortId,
-  formatSignedAmount,
-  formatUnitPrice,
-} from '../../domain/formatting.js'
-import { unitLabelOf } from '../../domain/marketFormat.js'
-import { irsDirectionLabel } from '../../domain/trades.js'
+import { assetClassLabel } from '../../domain/catalogue.js'
+import { formatAmount } from '../../domain/formatting.js'
+import { quantityUnitLabelOf, unitLabelOf } from '../../domain/marketFormat.js'
+
+const CURVE_TERM_FIELDS = ['discount_curve', 'projection_curve']
+
+function TicketNote({ children }) {
+  return (
+    <p className="panel-form__note" role="status">
+      {children}
+    </p>
+  )
+}
+
+function ticketSchemaNote(assetClass, requestError, schemas) {
+  return requestError
+    ? 'Ticket configuration unavailable.'
+    : `No ticket configuration for ${assetClassLabel(assetClass, schemas)}.`
+}
+
+function watchlistNote(assetClass, requestError, catalog, schemas) {
+  if (requestError || catalog == null) return 'Instrument list unavailable.'
+  return `No ${assetClassLabel(assetClass, schemas)} symbol is on the watchlist — add one in Market data.`
+}
 
 function FieldError({ id, message }) {
   if (!message) return null
@@ -53,37 +70,42 @@ function FieldError({ id, message }) {
 }
 
 function ExecutionFields({
+  schema,
   assetClass,
-  bond,
   side,
   quantityText,
   quantityError,
   onSideChange,
   onQuantityChange,
 }) {
+  const sides = schema.allowed_sides ?? ['BUY', 'SELL']
+  const showSide = sides.length > 1
+  const showQuantity = schema.fixed_quantity == null
+  if (!showSide && !showQuantity) return null
   return (
     <div className="panel-form__execution-row">
-      <div className="panel-form__field">
-        <span className="panel-form__label" id="new-trade-side-label">SIDE</span>
-        <div className="panel-form__side" role="group" aria-labelledby="new-trade-side-label">
-          {['BUY', 'SELL'].map((option) => (
-            <button
-              key={option}
-              type="button"
-              className="panel-form__side-button"
-              aria-pressed={side === option}
-              onClick={() => onSideChange(option)}
-            >
-              {option === 'BUY' ? 'Buy' : 'Sell'}
-            </button>
-          ))}
+      {showSide && (
+        <div className="panel-form__field">
+          <span className="panel-form__label" id="new-trade-side-label">SIDE</span>
+          <div className="panel-form__side" role="group" aria-labelledby="new-trade-side-label">
+            {sides.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className="panel-form__side-button"
+                aria-pressed={side === option}
+                onClick={() => onSideChange(option)}
+              >
+                {option === 'BUY' ? 'Buy' : 'Sell'}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-
-      {!bond && (
+      )}
+      {showQuantity && (
         <div className="panel-form__field">
           <label className="panel-form__label" htmlFor="new-trade-quantity">
-            {assetClass === 'FX' ? 'NOTIONAL (BASE CURRENCY)' : 'QUANTITY'}
+            {quantityLabelOf(schema, assetClass)}
           </label>
           <NumberField
             id="new-trade-quantity"
@@ -99,8 +121,23 @@ function ExecutionFields({
   )
 }
 
-const PREVIEW_DEBOUNCE_MS = 500
-const CURVE_TERM_FIELDS = ['discount_curve', 'projection_curve']
+function without(errors, fields) {
+  if (!fields.some((field) => errors[field] != null)) return errors
+  const next = { ...errors }
+  fields.forEach((field) => delete next[field])
+  return next
+}
+
+function resolveCurveFields(next, curves, currency, assetClass) {
+  CURVE_TERM_FIELDS.forEach((field) => {
+    const eligible = currency
+      ? curveChoicesFor(curves, currency, field, next.floating_rate_index_tenor, assetClass)
+      : []
+    if (eligible.some((curve) => curve.curve_name === next[field])) return
+    if (eligible.length === 1) next[field] = eligible[0].curve_name
+    else delete next[field]
+  })
+}
 
 export default function NewTradePanel({ onClose }) {
   const { instruments, curves: feedCurves } = useMarketFeedContext()
@@ -112,264 +149,139 @@ export default function NewTradePanel({ onClose }) {
   const [quantityText, setQuantityText] = useState('')
   const [termValues, setTermValues] = useState({})
   const [staleCurveAcknowledged, setStaleCurveAcknowledged] = useState(false)
-  const [preview, setPreview] = useState(null)
-  const [previewPending, setPreviewPending] = useState(false)
-  const [previewRetry, setPreviewRetry] = useState(0)
   const [errors, setErrors] = useState({})
   const [pending, setPending] = useState(false)
   const [submitError, setSubmitError] = useState(null)
   const [ack, setAck] = useState(null)
   const [requestId, setRequestId] = useState(newOpenTradeRequestId)
-  const previewSeq = useRef(0)
   const booksRequest = usePolling(
-    ({ signal }) => apiGet(endpoints.blotter.booksSummary, { signal }),
-    { intervalMs: TICKET_OPTIONS_POLL_INTERVAL_MS },
+    ({ signal }) => apiGet(endpoints.books.list, { signal }),
+    { intervalMs: null },
   )
-  const catalogRequest = usePolling(
-    ({ signal }) => apiGet(endpoints.tradeAction.instruments, { signal }),
-    { intervalMs: TICKET_OPTIONS_POLL_INTERVAL_MS },
-  )
-  const termSchemasRequest = usePolling(
+  const optionsRequest = usePolling(
     ({ signal }) => apiGet(endpoints.tradeAction.termSchemas, { signal }),
-    { intervalMs: TICKET_OPTIONS_POLL_INTERVAL_MS },
+    { intervalMs: null },
   )
-  const refetchCatalog = catalogRequest.refetch
-  const refetchTermSchemas = termSchemasRequest.refetch
+  const refetchOptions = optionsRequest.refetch
 
   useEffect(
-    () => onWatchlistChange(() => {
-      refetchCatalog()
-      refetchTermSchemas()
-    }),
-    [refetchCatalog, refetchTermSchemas],
+    () => onWatchlistChange(() => refetchOptions()),
+    [refetchOptions],
   )
 
   const books = booksRequest.data == null ? null : bookSummariesOf(booksRequest.data)
-  const catalog = catalogRequest.data == null ? null : instrumentCatalogOf(catalogRequest.data)
-  const { schemas, curves } = termSchemasOf(termSchemasRequest.data)
+  const optionsPayload = optionsRequest.data == null ? null : ticketOptionsOf(optionsRequest.data)
+  const catalog = optionsPayload?.instruments ?? null
+  const schemas = optionsPayload?.schemas ?? {}
+  const curves = optionsPayload?.curves ?? []
 
   const bookList = (books ?? []).filter((book) => book.isActive)
   const selectedBook = bookList.find((book) => book.id === bookId) ?? null
   const assetClass = selectedBook?.assetClass
-  const curvePriced = isCurvePriced(assetClass)
-  const schema = curvePriced ? schemas[assetClass] ?? null : null
+  const schema = assetClass ? schemas[assetClass] ?? null : null
+  const modelPriced = schema?.needs_curve === true
+  const needsQuote = schema?.needs_quote === true
+  const underlyingField = schema?.underlying_field ?? null
   const options = useMemo(
-    () => curvePriced ? [] : tradeableInstrumentsOf(catalog, assetClass),
-    [assetClass, catalog, curvePriced],
+    () => (schema == null || modelPriced ? [] : tradeableInstrumentsOf(catalog, assetClass)),
+    [assetClass, catalog, modelPriced, schema],
   )
   const instrument = options.find((option) => option.symbol === symbol) ?? null
-
-  const termCurrency = curvePriced ? termCurrencyOf(assetClass, termValues, catalog) : null
-  const isOption = assetClass === 'EUROPEAN_OPTION'
-  const irs = assetClass === 'IRS'
-  const bond = assetClass === 'BOND'
-  const underlying = isOption
-    ? (catalog ?? []).find((entry) => entry.symbol === termValues.underlying_symbol) ?? null
+  const currentUnderlying = underlyingField ? termValues[underlyingField] ?? null : null
+  const underlying = currentUnderlying
+    ? (catalog ?? []).find((entry) => entry.symbol === currentUnderlying) ?? null
     : null
+  const quoteInstrument = modelPriced ? underlying : instrument
+  const termCurrency = modelPriced ? termCurrencyOf(schema, termValues, catalog) : null
+  const sides = schema?.allowed_sides ?? ['BUY', 'SELL']
+  const effectiveSide = sides.includes(side) ? side : sides[0]
+  const fixedQuantity = schema?.fixed_quantity ?? null
+  const selectedCurve = curves.find((curve) => curve.curve_name === termValues.discount_curve) ?? null
   const selectedStaleCurves = CURVE_TERM_FIELDS
     .map((field) => curves.find((curve) => curve.curve_name === termValues[field]))
     .filter((curve) => curve?.stale === true)
 
   useEffect(() => {
-    if (selectedBook == null || curvePriced || catalog == null) return
+    if (selectedBook == null || schema == null || modelPriced || catalog == null) return
     if (options.some((option) => option.symbol === symbol)) return
     setSymbol(options.length === 1 ? options[0].symbol : '')
     setProviderChoice('')
-    setPreview(null)
-    setErrors((current) => {
-      if (current.instrument == null && current.provider == null) return current
-      const next = { ...current }
-      delete next.instrument
-      delete next.provider
-      return next
-    })
-  }, [catalog, curvePriced, options, selectedBook, symbol])
+    setErrors((current) => without(current, ['instrument', 'provider']))
+  }, [catalog, modelPriced, options, schema, selectedBook, symbol])
 
   const underlyingChoices = useMemo(
-    () => isOption
-      ? schema?.fields.find((field) => field.name === 'underlying_symbol')?.choices ?? []
-      : [],
-    [isOption, schema],
+    () => (underlyingField
+      ? schema?.fields.find((field) => field.name === underlyingField)?.choices ?? []
+      : []),
+    [schema, underlyingField],
   )
   useEffect(() => {
-    const currentUnderlying = termValues.underlying_symbol
-    if (!isOption || schema == null || !currentUnderlying) return
-    if (underlyingChoices.includes(currentUnderlying)) return
+    if (!currentUnderlying || schema == null || underlyingChoices.includes(currentUnderlying)) return
     setTermValues((current) => {
-      if (current.underlying_symbol !== currentUnderlying) return current
+      if (current[underlyingField] !== currentUnderlying) return current
       const next = { ...current }
-      delete next.underlying_symbol
+      delete next[underlyingField]
       delete next.settlement_currency
       CURVE_TERM_FIELDS.forEach((field) => delete next[field])
       return next
     })
     setProviderChoice('')
-    setPreview(null)
-    setPreviewPending(false)
-    setErrors((current) => {
-      if (current.provider == null && current.preview == null) return current
-      const next = { ...current }
-      delete next.provider
-      delete next.preview
-      return next
-    })
-  }, [isOption, schema, termValues.underlying_symbol, underlyingChoices])
+    setErrors((current) => without(current, ['provider', 'preview']))
+  }, [currentUnderlying, schema, underlyingChoices, underlyingField])
 
   const quotes = providerQuotesOf({
-    instrument: curvePriced ? underlying : instrument,
+    instrument: quoteInstrument,
     feed: instruments,
-    side: isOption ? null : side,
+    side: modelPriced ? null : effectiveSide,
     now,
   })
-  const priced = quotes.filter((option) => Number.isFinite(option.price))
-  const provider = providerChoice || (priced.length === 1 ? priced[0].provider : '')
+  const provider = providerChoice || preferredQuoteProviderOf(quotes) || ''
   const quote = quotes.find((option) => option.provider === provider) ?? null
 
-  const unitLabel = symbol && !curvePriced ? unitLabelOf({ symbol, assetClass }) : null
+  const unitLabel = symbol && !modelPriced ? unitLabelOf({ symbol, assetClass }) : null
   const trimmed = quantityText.trim()
-  const quantity = curvePriced && (irs || bond) ? 1 : trimmed === '' ? null : Number(trimmed)
-  const faceValue = Number(termValues.face_value)
+  const quantity = fixedQuantity ?? (trimmed === '' ? null : Number(trimmed))
   const termsComplete = termFormComplete(schema, termValues)
-  const previewReady = termsComplete && (!isOption || quote?.tradeable === true)
-  const termsKey = JSON.stringify(termValues)
-  const underlyingQuotePrice = isOption ? quote?.price ?? null : null
+  const previewReady = modelPriced && termsComplete && (!needsQuote || quote?.tradeable === true)
   const expectedMarketRevisions = {
-    spot: isOption && quote != null ? {
+    spot: needsQuote && quote != null ? {
       provider: quote.provider,
-      symbol: termValues.underlying_symbol,
+      symbol: currentUnderlying,
       provider_timestamp: quote.providerTimestamp,
       received_at: quote.receivedAt,
     } : null,
     ...Object.fromEntries(CURVE_TERM_FIELDS.map((field) => {
-      const selectedCurve = feedCurves?.[termValues[field]]
-      return [field, selectedCurve == null ? null : {
-        curve_name: selectedCurve.name,
-        as_of_date: selectedCurve.asOfDate,
-        received_at: selectedCurve.receivedAt,
+      const chosen = feedCurves?.[termValues[field]]
+      return [field, chosen == null ? null : {
+        curve_name: chosen.name,
+        as_of_date: chosen.asOfDate,
+        received_at: chosen.receivedAt,
       }]
     })),
   }
-  const selectedMarketRevision = JSON.stringify(expectedMarketRevisions)
-  const selectedCurveRevision = CURVE_TERM_FIELDS.map((field) => {
-    const selectedCurve = feedCurves?.[termValues[field]]
-    return `${field}:${selectedCurve?.receivedAtMs ?? ''}:${selectedCurve?.asOfDate ?? ''}`
-  }).join('|')
   const previewRequestKey = JSON.stringify({
     assetClass,
     provider,
-    termsKey,
-    underlyingQuotePrice,
-    selectedCurveRevision,
-    selectedMarketRevision,
+    termValues,
+    underlyingQuotePrice: needsQuote ? quote?.price ?? null : null,
+    expectedMarketRevisions,
   })
-  const previewCurrent = preview?.requestKey === previewRequestKey && !previewPending
-  const previewPrice = previewCurrent && Number.isFinite(preview?.price) ? preview.price : null
-  const bondPricePer100 = bond && previewPrice != null && Number.isFinite(faceValue) && faceValue > 0
-    ? previewPrice / faceValue * 100
-    : null
-  const bondPricePosition = bondPricePer100 == null
-    ? null
-    : bondPricePer100 > 100.005
-      ? 'premium'
-      : bondPricePer100 < 99.995
-        ? 'discount'
-        : 'near par'
-  const estimatedPositionValue = curvePriced
-    ? previewPrice != null && Number.isFinite(quantity)
-      ? previewPrice * quantity
-      : null
-    : Number.isFinite(quantity) && quote?.price != null
-      ? quantity * quote.price
-      : null
-  const estimatedValueCurrency = curvePriced ? termCurrency : quote?.currency
-  const previewLoading = curvePriced && previewReady && !previewCurrent
+  const { preview, previewError, previewLoading } = useModelPreview({
+    enabled: previewReady,
+    requestKey: previewRequestKey,
+    buildBody: () => ({
+      asset_class: assetClass,
+      symbol: assetClass,
+      terms: termValues,
+      market_data_provider: provider || undefined,
+      expected_market_revisions: expectedMarketRevisions,
+    }),
+  })
+  const previewPrice = preview?.price ?? null
+  const valueCurrency = modelPriced ? termCurrency : quote?.currency ?? null
 
-  const modelValueLabel = irs
-    ? 'NET PRESENT VALUE'
-    : bond
-      ? 'PRICE / 100 FACE'
-      : 'MODEL PREMIUM / CONTRACT'
-  const modelValueHint = irs
-    ? `${termValues.direction === 'RECEIVE_FIXED_PAY_FLOAT' ? 'Fixed leg less floating leg' : 'Floating leg less fixed leg'} for the stated notional. ${termValues.direction === 'RECEIVE_FIXED_PAY_FLOAT' ? 'Higher projected floating rates usually reduce this value.' : 'Higher projected floating rates usually increase this value.'}`
-    : bond
-      ? 'Price normalized to 100 face from the present value of coupons and principal. Higher discount rates reduce it; lower rates raise it.'
-      : `Black–Scholes premium for a one-unit contract using the underlying mid, strike, time, ${formatNumber((schema?.defaults?.volatility ?? 0) * 100)}% volatility and the selected discount curve. Higher rates usually raise calls and reduce puts.`
-
-  useEffect(() => {
-    if (!curvePriced || !previewReady) {
-      previewSeq.current += 1
-      setPreview(null)
-      setPreviewPending(false)
-      return undefined
-    }
-    const sequence = previewSeq.current + 1
-    previewSeq.current = sequence
-    const controller = new AbortController()
-    setPreview(null)
-    setPreviewPending(true)
-    let retryTimer
-    const timer = setTimeout(async () => {
-      try {
-        const body = {
-          asset_class: assetClass,
-          symbol: curvePriced ? assetClass : symbol,
-          terms: termValues,
-          market_data_provider: provider || undefined,
-          expected_market_revisions: expectedMarketRevisions,
-        }
-        const response = await apiPost(endpoints.pricing.price, body, {
-          signal: controller.signal,
-        })
-        if (previewSeq.current === sequence) {
-          const price = Number(response?.price)
-          setPreview(Number.isFinite(price) ? {
-            requestKey: previewRequestKey,
-            price,
-            atMs: Date.now(),
-            fixedLegValue: Number(response?.fixed_leg_pv),
-            floatingLegValue: Number(response?.floating_leg_pv),
-            parRate: response?.par_rate == null ? null : Number(response.par_rate),
-          } : null)
-          if (Number.isFinite(price)) clearError('preview')
-        }
-      } catch (err) {
-        if (previewSeq.current === sequence && !controller.signal.aborted) {
-          setPreview({
-            requestKey: previewRequestKey,
-            error: describeApiError(err, {
-              service: 'Pricing service',
-              outcome: 'no model value yet.',
-            }),
-          })
-          if (err?.status === 409) {
-            retryTimer = window.setTimeout(() => {
-              if (previewSeq.current === sequence) {
-                setPreviewRetry((current) => current + 1)
-              }
-            }, 500)
-          }
-        }
-      } finally {
-        if (previewSeq.current === sequence) setPreviewPending(false)
-      }
-    }, PREVIEW_DEBOUNCE_MS)
-    return () => {
-      clearTimeout(timer)
-      window.clearTimeout(retryTimer)
-      controller.abort()
-    }
-    // The request key invalidates the old result synchronously when any model input,
-    // underlying quote or selected curve revision changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curvePriced, previewReady, previewRequestKey, previewRetry])
-
-  function clearError(field) {
-    setErrors((current) => {
-      if (!current[field]) return current
-      const next = { ...current }
-      delete next[field]
-      return next
-    })
+  function clearErrors(fields) {
+    setErrors((current) => without(current, fields))
   }
 
   function selectBook(nextBookId) {
@@ -379,20 +291,19 @@ export default function NewTradePanel({ onClose }) {
     setErrors({})
     setTermValues({})
     setStaleCurveAcknowledged(false)
-    setPreview(null)
-    setPreviewPending(false)
     setSubmitError(null)
     setSide('BUY')
     const nextBook = bookList.find((book) => book.id === nextBookId) ?? null
-    const nextOptions = isCurvePriced(nextBook?.assetClass)
+    const nextSchema = nextBook ? schemas[nextBook.assetClass] ?? null : null
+    const nextOptions = nextSchema == null || nextSchema.needs_curve
       ? []
-      : tradeableInstrumentsOf(catalog, nextBook?.assetClass)
+      : tradeableInstrumentsOf(catalog, nextBook.assetClass)
     setSymbol(nextOptions.length === 1 ? nextOptions[0].symbol : '')
   }
 
   function selectProvider(nextProvider) {
     setProviderChoice(nextProvider)
-    clearError('provider')
+    clearErrors(['provider'])
   }
 
   function resetTicket() {
@@ -403,8 +314,6 @@ export default function NewTradePanel({ onClose }) {
     setQuantityText('')
     setTermValues({})
     setStaleCurveAcknowledged(false)
-    setPreview(null)
-    setPreviewPending(false)
     setErrors({})
     setSubmitError(null)
     setAck(null)
@@ -412,119 +321,65 @@ export default function NewTradePanel({ onClose }) {
   }
 
   function setTerm(name, value) {
-    previewSeq.current += 1
-    setPreview(null)
-    setPreviewPending(false)
     setStaleCurveAcknowledged(false)
     setTermValues((current) => {
       const next = { ...current, [name]: value }
-      if (!isOption && CURVE_TERM_FIELDS.includes(name) && !next.settlement_currency) {
+      if (!underlyingField && CURVE_TERM_FIELDS.includes(name) && !next.settlement_currency) {
         const chosen = curves.find((curve) => curve.curve_name === value)
         if (chosen != null) next.settlement_currency = chosen.currency
       }
-      if (isOption && name === 'underlying_symbol') {
+      if (underlyingField && name === underlyingField) {
         delete next.settlement_currency
-        const nextUnderlying = (catalog ?? []).find((entry) => entry.symbol === value)
-        CURVE_TERM_FIELDS.forEach((field) => {
-          const eligible = nextUnderlying == null
-            ? []
-            : curveChoicesFor(
-                curves,
-                nextUnderlying.currency,
-                field,
-                next.floating_rate_index_tenor,
-                assetClass,
-              )
-          if (eligible.some((curve) => curve.curve_name === next[field])) return
-          if (eligible.length === 1) next[field] = eligible[0].curve_name
-          else delete next[field]
-        })
+        const entry = (catalog ?? []).find((item) => item.symbol === value)
+        resolveCurveFields(next, curves, entry?.currency ?? null, assetClass)
       }
       if (name === 'settlement_currency') {
-        CURVE_TERM_FIELDS.forEach((field) => {
-          const eligible = curveChoicesFor(
-            curves,
-            value,
-            field,
-            next.floating_rate_index_tenor,
-            assetClass,
-          )
-          if (eligible.length === 1) next[field] = eligible[0].curve_name
-          else delete next[field]
-        })
+        resolveCurveFields(next, curves, value, assetClass)
       }
       if (name === 'floating_rate_index_tenor' && next.projection_curve) {
-        const selected = curves.find(
-          (curve) => curve.curve_name === next.projection_curve,
-        )
-        if (selected?.index_tenor && selected.index_tenor !== value) {
-          delete next.projection_curve
-        }
+        const chosen = curves.find((curve) => curve.curve_name === next.projection_curve)
+        if (chosen?.index_tenor && chosen.index_tenor !== value) delete next.projection_curve
       }
       return next
     })
-    if (isOption && name === 'underlying_symbol') setProviderChoice('')
-    clearError('terms')
-    clearError('preview')
+    if (underlyingField && name === underlyingField) setProviderChoice('')
+    clearErrors(['terms', 'preview'])
   }
 
-  function formErrorsOf() {
-    if (!curvePriced) {
-      return tradeFormErrorsOf({ bookId, symbol, quantity, quote, assetClass })
-    }
-    const next = {}
-    if (!bookId) next.book = 'Pick a book.'
-    if (schema == null) next.terms = 'Term schema unavailable — retrying.'
-    else if (!termsComplete) next.terms = 'Fill in every term.'
-    else if (selectedStaleCurves.length > 0 && !staleCurveAcknowledged) {
-      next.terms = 'Acknowledge the stale curve before submitting this trade.'
-    }
-    if (isOption && provider === '') {
-      next.provider = 'Pick a market data provider for the underlying.'
-    } else if (isOption && quote?.state === 'STALE') {
-      next.provider = 'This underlying quote is stale. Wait for the provider to update.'
-    } else if (isOption && !quote?.tradeable) {
-      next.provider = `${quote?.provider ?? 'The selected provider'} cannot price this option right now.`
-    }
-    if (
-      !irs && !bond && (
-        !Number.isFinite(quantity) ||
-        (isOption && !Number.isSafeInteger(quantity)) ||
-        quantity < TRADE_QUANTITY_BOUNDS.min ||
-        quantity > TRADE_QUANTITY_BOUNDS.max
-      )
-    ) {
-      next.quantity = isOption
-        ? `Quantity must be a whole number between ${formatNumber(TRADE_QUANTITY_BOUNDS.min)} and ${formatNumber(TRADE_QUANTITY_BOUNDS.max)}.`
-        : `Quantity must be between ${formatNumber(TRADE_QUANTITY_BOUNDS.min)} and ${formatNumber(TRADE_QUANTITY_BOUNDS.max)}.`
-    }
-    if (previewPrice == null) {
-      next.preview = previewCurrent && preview?.error
-        ? preview.error
-        : 'Waiting for the current model value.'
-    }
-    return next
-  }
+  const currentFormErrors = ticketErrorsOf({
+    bookId,
+    schema,
+    schemaError: optionsRequest.error,
+    symbol,
+    termsComplete,
+    staleCurves: selectedStaleCurves,
+    staleAcknowledged: staleCurveAcknowledged,
+    hasQuoteInstrument: quoteInstrument != null,
+    quote,
+    quantity,
+    previewPrice,
+    previewError,
+  })
+  const valid = Object.keys(currentFormErrors).length === 0
 
   async function handleSubmit(event) {
     event.preventDefault()
-    const nextErrors = formErrorsOf()
-    setErrors(nextErrors)
-    if (Object.keys(nextErrors).length > 0) return
+    setErrors(currentFormErrors)
+    if (!valid) return
 
     setPending(true)
     setSubmitError(null)
     try {
-      const intent = curvePriced
+      const intent = modelPriced
         ? buildCurveTradeIntent({
             clientRequestId: requestId,
             bookId,
             assetClass,
-            side: irs ? 'BUY' : side,
+            side: effectiveSide,
             quantity,
             terms: termValues,
             currency: termCurrency,
-            provider: isOption ? provider : null,
+            provider: needsQuote ? provider : null,
             previewPrice,
             staleCurveAcknowledged,
           })
@@ -533,23 +388,23 @@ export default function NewTradePanel({ onClose }) {
             bookId,
             assetClass,
             symbol,
-            side,
+            side: effectiveSide,
             quantity,
             quote,
           })
       const accepted = await apiPost(endpoints.tradeAction.submit, intent)
       setAck({
         tradeId: accepted?.trade_id ?? null,
-        assetClass,
-        direction: termValues.direction ?? null,
-        notional: termValues.notional ?? null,
-        faceAmount: termValues.face_value ?? null,
-        side: intent.side,
-        quantity,
-        symbol: intent.symbol ?? null,
-        price: curvePriced ? previewPrice : quote.price,
-        provider: curvePriced ? provider || null : quote.provider,
-        model: curvePriced,
+        summary: ackSummaryOf({
+          schema,
+          side: intent.side,
+          quantity,
+          symbol: intent.symbol ?? null,
+          terms: termValues,
+          currency: termCurrency,
+        }),
+        provider: modelPriced ? (needsQuote ? provider || null : null) : quote.provider,
+        modelPriced,
       })
       setRequestId(newOpenTradeRequestId())
     } catch (err) {
@@ -564,110 +419,87 @@ export default function NewTradePanel({ onClose }) {
     }
   }
 
-  const currentFormErrors = formErrorsOf()
-  const valid = Object.keys(currentFormErrors).length === 0
   const providerError = errors.provider ?? (
     quote != null && !quote.tradeable ? currentFormErrors.provider : null
   )
-  const submitLabel = !valid
-    ? 'Submit trade intent'
-    : curvePriced
-      ? bond
-        ? `${side} ${formatNumber(faceValue)} face of ${termCurrency} bond at ${formatAmount(bondPricePer100, 2)} ${termCurrency} / 100 face`
-        : irs
-          ? `OPEN ${termCurrency} IRS at model value ${formatSignedAmount(previewPrice)} ${termCurrency}`
-          : `${side} ${termValues.underlying_symbol} ${termValues.option_type?.toLowerCase()} option at model premium ${formatSignedAmount(previewPrice)} ${termCurrency ?? ''}`
-      : `${side} ${formatNumber(quantity)} ${symbol} at ${formatUnitPrice(quote.price, assetClass)} ${unitLabel ?? quote.currency ?? ''}`
-  const showReview = selectedBook != null && (
-    curvePriced
-      ? previewLoading || previewPrice != null
-      : quote?.price != null
-  )
-  const ticketLoading = booksRequest.loading || catalogRequest.loading || termSchemasRequest.loading
-  const executionFields = !irs && selectedBook != null ? (
+  const submitLabel = submitActionOf({ side: effectiveSide, valid })
+  const showTicket = selectedBook != null && schema != null
+  const ticketValue = showTicket
+    ? ticketValueOf({
+        assetClass,
+        schema,
+        terms: termValues,
+        side: effectiveSide,
+        quantity,
+        quote,
+        preview,
+        curve: selectedCurve,
+        currency: valueCurrency,
+        unitLabel,
+        quantityUnit: quantityUnitLabelOf({ symbol, assetClass, currency: valueCurrency }),
+        volatility: schema.defaults?.volatility ?? 0,
+        now,
+      })
+    : null
+  const valuePlaceholder = modelPriced
+    ? termsComplete
+      ? needsQuote && quote?.tradeable !== true
+        ? 'Waiting for a usable underlying quote'
+        : 'Waiting for the model value'
+      : 'Complete the contract terms to see the model value'
+    : symbol === ''
+      ? 'Pick an instrument to see the execution price'
+      : quotes.length === 0
+        ? 'No price source is available for this instrument'
+        : 'Pick a price source'
+  const ticketLoading = booksRequest.loading || optionsRequest.loading
+  const executionFields = schema != null && selectedBook != null ? (
     <ExecutionFields
+      schema={schema}
       assetClass={assetClass}
-      bond={bond}
-      side={side}
+      side={effectiveSide}
       quantityText={quantityText}
       quantityError={errors.quantity}
       onSideChange={setSide}
       onQuantityChange={(next) => {
         setQuantityText(next)
-        clearError('quantity')
+        clearErrors(['quantity'])
       }}
     />
   ) : null
 
   if (ack) {
     return (
-      <SidePanel
-        eyebrow="TRADE ACTION"
-        title="Trade submitted"
-        subtitle="The order was accepted for processing"
-        dismissOnOutsideClick={false}
+      <TradeSubmitted
+        summary={ack.summary}
+        provider={ack.provider}
+        modelPriced={ack.modelPriced}
+        tradeId={ack.tradeId}
+        onNewTrade={resetTicket}
         onClose={onClose}
-      >
-        <div className="panel-form__ack" role="status">
-          <span>
-            {ack.assetClass === 'IRS'
-              ? `${irsDirectionLabel(ack.direction)} · ${termCurrency} IRS · notional ${formatNumber(ack.notional)}`
-              : ack.assetClass === 'BOND'
-                ? `${ack.side} · ${termCurrency} bond · face ${formatNumber(ack.faceAmount)}`
-                : ack.assetClass === 'EUROPEAN_OPTION'
-                  ? `${ack.side} · ${termValues.underlying_symbol} ${termValues.option_type?.toLowerCase()} option`
-                  : `${ack.side} ${formatNumber(ack.quantity)} × ${ack.symbol}`}
-            {ack.provider != null && <> via {providerLabel(ack.provider)}</>}
-            {ack.model && ' · model-priced'}
-            {ack.tradeId != null && ` · trade ${formatShortId(ack.tradeId)}`}
-          </span>
-        </div>
-        <div className="panel-form__actions">
-          <button
-            type="button"
-            className="panel-form__cancel"
-            onClick={resetTicket}
-          >
-            New trade
-          </button>
-          <button
-            type="button"
-            className="panel-form__submit"
-            onClick={() => {
-              window.location.hash = '/trades'
-              onClose()
-            }}
-          >
-            View in Trades
-          </button>
-        </div>
-      </SidePanel>
+      />
     )
   }
 
   return (
     <SidePanel
       wide
-      roomy
       compact
       eyebrow="TRADE ACTION"
       title="New trade"
       subtitle={selectedBook?.name ?? 'Select a book to continue'}
-      bodyClassName={`new-trade-panel${irs ? ' new-trade-panel--irs' : ''}`}
+      bodyClassName="new-trade-panel"
       dismissOnOutsideClick={false}
       onClose={onClose}
-      footer={showReview ? (
+      footer={showTicket ? (
         <div className="new-trade-footer">
-          <span className="new-trade-footer__summary">
-            {valid ? submitLabel : 'Complete the required fields to submit'}
-          </span>
           <button
             type="submit"
             form="new-trade-form"
             className="panel-form__submit"
             disabled={pending || !valid}
           >
-            {pending ? 'Submitting…' : 'Submit trade'}
+            {pending ? 'Submitting…' : submitLabel}
           </button>
         </div>
       ) : null}
@@ -689,7 +521,7 @@ export default function NewTradePanel({ onClose }) {
               <option value="">{books == null ? 'Books unavailable' : 'Select book…'}</option>
               {bookList.map((book) => (
                 <option key={book.id} value={book.id}>
-                  {book.name} · {assetClassLabel(book.assetClass)}
+                  {book.name} · {assetClassLabel(book.assetClass, schemas)}
                 </option>
               ))}
             </select>
@@ -700,7 +532,13 @@ export default function NewTradePanel({ onClose }) {
           </div>
         </div>
 
-        {selectedBook != null && !curvePriced && (
+        {selectedBook != null && schema == null && (
+          <TicketNote>
+            {ticketSchemaNote(assetClass, optionsRequest.error, schemas)}
+          </TicketNote>
+        )}
+
+        {showTicket && !modelPriced && (
           <div className="panel-form__spot-layout">
             <div className="panel-form__field">
               <label className="panel-form__label" htmlFor="new-trade-instrument">INSTRUMENT</label>
@@ -714,8 +552,7 @@ export default function NewTradePanel({ onClose }) {
                 onChange={(event) => {
                   setSymbol(event.target.value)
                   setProviderChoice('')
-                  clearError('instrument')
-                  clearError('provider')
+                  clearErrors(['instrument', 'provider'])
                 }}
               >
                 <option value="">{options.length === 0 ? 'No instrument' : 'Select instrument…'}</option>
@@ -729,15 +566,7 @@ export default function NewTradePanel({ onClose }) {
           </div>
         )}
 
-        {curvePriced && schema == null && (
-          <p className="panel-form__note" role="status">
-            {termSchemasRequest.error
-              ? 'Term schemas unavailable — retrying.'
-              : 'Term schema unavailable.'}
-          </p>
-        )}
-
-        {curvePriced && schema != null && (
+        {showTicket && modelPriced && (
           <>
             <TermFields
               schema={schema}
@@ -756,7 +585,7 @@ export default function NewTradePanel({ onClose }) {
                   checked={staleCurveAcknowledged}
                   onChange={(event) => {
                     setStaleCurveAcknowledged(event.target.checked)
-                    clearError('terms')
+                    clearErrors(['terms'])
                   }}
                 />
                 {`Use ${selectedStaleCurves
@@ -768,152 +597,44 @@ export default function NewTradePanel({ onClose }) {
           </>
         )}
 
-        {selectedBook != null && !curvePriced && options.length === 0 && (
-          <p className="panel-form__note" role="status">
-            {catalogRequest.error
-                ? 'Instrument list unavailable — retrying.'
-              : catalog == null
-                ? 'Instrument list unavailable.'
-                : `No ${assetClassLabel(selectedBook.assetClass)} symbol is on the watchlist — add one in Market data.`}
-          </p>
+        {showTicket && !modelPriced && options.length === 0 && (
+          <TicketNote>
+            {watchlistNote(selectedBook.assetClass, optionsRequest.error, catalog, schemas)}
+          </TicketNote>
         )}
 
-        {(curvePriced ? isOption && underlying != null : symbol !== '') && (
-          <div className="panel-form__field">
-            <span className="panel-form__label" id="new-trade-provider-label">
-              {curvePriced ? 'UNDERLYING MARKET DATA PROVIDER' : 'MARKET DATA PROVIDER'}
-            </span>
-            <ul className="quote-options" aria-labelledby="new-trade-provider-label">
-              {quotes.map((option) => (
-                <ProviderQuoteOption
-                  key={option.provider}
-                  quote={option}
-                  assetClass={curvePriced ? underlying?.assetClass : assetClass}
-                  unit={unitLabel}
-                  side={isOption ? null : side}
-                  selected={provider === option.provider}
-                  now={now}
-                  onSelect={selectProvider}
-                />
-              ))}
-            </ul>
-            {isOption && quote?.tradeable && Number.isFinite(quote.price) && (
-              <div className="panel-form__market-choice">
-                <span>
-                  At-the-money reference
-                  <strong>{formatAmount(quote.price, 2)} {quote.currency ?? ''}</strong>
-                </span>
+        {ticketValue && (
+          <TicketValue
+            {...ticketValue}
+            loading={previewLoading}
+            placeholder={valuePlaceholder}
+            error={errors.preview}
+          />
+        )}
+
+        {showTicket && needsQuote && quoteInstrument != null && (
+          <PriceSourcePicker
+            label={modelPriced ? 'UNDERLYING PRICE SOURCE' : 'PRICE SOURCE'}
+            quotes={quotes}
+            selected={provider}
+            onSelect={selectProvider}
+          >
+            {hasTermField(schema, 'strike') && quote?.tradeable && Number.isFinite(quote.price) && (
+              <div className="panel-form__field-assist">
                 <button
                   type="button"
+                  className="panel-form__inline-action"
                   onClick={() => setTerm('strike', String(quote.price))}
                 >
-                  Use as strike
+                  Use {formatAmount(quote.price, 2)} as strike
                 </button>
               </div>
             )}
             <FieldError id="new-trade-provider-error" message={providerError} />
-          </div>
+          </PriceSourcePicker>
         )}
-
-        {showReview && <div className="panel-form__info">
-          <div className="panel-form__info-row">
-            <span
-              className={`panel-form__info-label${
-                curvePriced ? ' panel-form__info-label--hinted' : ''
-              }`}
-              title={curvePriced ? modelValueHint : undefined}
-            >
-              {curvePriced ? modelValueLabel : 'ESTIMATED PRICE'}
-            </span>
-            <span className="panel-form__info-value">
-              {curvePriced
-                ? previewLoading
-                  ? <LoadingSkeleton variant="inline" label="Computing model value" />
-                  : previewPrice != null
-                    ? bond
-                      ? `${formatAmount(bondPricePer100, 2)} ${termCurrency ?? ''} / 100 face`.trim()
-                      : `${irs ? formatSignedAmount(previewPrice) : formatAmount(previewPrice, 2)} ${termCurrency ?? ''}`
-                    : '—'
-                : quote?.price != null
-                  ? `${formatUnitPrice(quote.price, assetClass)} ${unitLabel ?? quote.currency ?? ''}`
-                  : '—'}
-            </span>
-          </div>
-          {irs && Number.isFinite(preview?.fixedLegValue) && (
-            <>
-              <div className="panel-form__info-row">
-                <span
-                  className="panel-form__info-label panel-form__info-label--hinted"
-                  title="The fixed rate that would make both legs worth the same today — at this rate the swap is worth nothing"
-                >
-                  FAIR FIXED RATE
-                </span>
-                <span className="panel-form__info-value">
-                  {Number.isFinite(preview.parRate) ? `${preview.parRate.toFixed(4)}%` : '—'}
-                </span>
-              </div>
-              <div className="panel-form__info-row">
-                <span className="panel-form__info-label">FIXED LEG</span>
-                <span className="panel-form__info-value">
-                  {formatAmount(preview.fixedLegValue)} {termCurrency ?? ''}
-                </span>
-              </div>
-              <div className="panel-form__info-row">
-                <span className="panel-form__info-label">FLOATING LEG</span>
-                <span className="panel-form__info-value">
-                  {formatAmount(preview.floatingLegValue)} {termCurrency ?? ''}
-                </span>
-              </div>
-            </>
-          )}
-          {bondPricePosition != null && (
-            <div className="panel-form__info-row">
-              <span className="panel-form__info-label">POSITION VS PAR</span>
-              <span className="panel-form__info-value">{bondPricePosition}</span>
-            </div>
-          )}
-          {isOption && (
-            <div className="panel-form__info-row">
-              <span
-                className="panel-form__info-label panel-form__info-label--hinted"
-                title="Fixed model input used for every new option; it is not a live implied-volatility quote"
-              >
-                VOLATILITY ASSUMPTION
-              </span>
-              <span className="panel-form__info-value">
-                {formatNumber((schema?.defaults?.volatility ?? 0) * 100)}%
-              </span>
-            </div>
-          )}
-          <div className="panel-form__info-row">
-            <span className="panel-form__info-label">
-              {curvePriced ? 'MODEL TIME' : 'QUOTE TIME'}
-            </span>
-            <span className="panel-form__info-value">
-              {curvePriced
-                ? preview?.atMs != null ? formatDateTime(preview.atMs) : '—'
-                : quote?.atMs != null ? formatDateTime(quote.atMs) : '—'}
-            </span>
-          </div>
-          {!irs && (
-            <div className="panel-form__info-row">
-              <span className="panel-form__info-label">
-                {curvePriced ? 'TOTAL MODEL VALUE' : 'EST. POSITION VALUE'}
-              </span>
-              <span className="panel-form__info-value">
-                {formatAmount(estimatedPositionValue)} {estimatedValueCurrency ?? ''}
-              </span>
-            </div>
-          )}
-        </div>}
-
-        {curvePriced && previewCurrent && preview?.error && (
-          <p className="panel-form__note" role="alert">{preview.error}</p>
-        )}
-        <FieldError id="new-trade-preview-error" message={errors.preview} />
 
         {submitError && <div className="panel-form__submit-error" role="alert">{submitError}</div>}
-
       </form>}
     </SidePanel>
   )

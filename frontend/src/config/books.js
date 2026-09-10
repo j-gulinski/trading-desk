@@ -1,13 +1,4 @@
 export const BOOK_SUMMARY_POLL_INTERVAL_MS = 5000
 
-export const BOOK_ASSET_CLASSES = [
-  'BOND',
-  'COMMODITY',
-  'EQUITY',
-  'EUROPEAN_OPTION',
-  'FX',
-  'IRS',
-]
-
 export const BOOK_NAME_MAX_LENGTH = 60
 export const BOOK_DESCRIPTION_MAX_LENGTH = 200

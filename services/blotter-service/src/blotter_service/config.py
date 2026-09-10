@@ -1,8 +1,9 @@
-from desk_runtime.config import env_str
+from desk_runtime.config import SERVICE_PORTS, SERVICE_URLS
 
 SERVICE_NAME = "blotter-service"
-PORT = 8006
+PORT = SERVICE_PORTS[SERVICE_NAME]
 
 ACTIVE_TRADES_REFRESH_SECONDS = 5
 
-VALUATION_STREAM_URL = env_str("VALUATION_STREAM_URL")
+VALUATION_STREAM_URL = SERVICE_URLS["pricing-service"] + "/valuation-stream"
+VALUATION_SNAPSHOT_URL = SERVICE_URLS["pricing-service"] + "/valuations"

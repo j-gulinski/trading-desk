@@ -1,11 +1,16 @@
 from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 from market_data_service.providers.base import ProviderDataError
 from desk_domain.providers import ALPHA_VANTAGE, quote_grade
 from desk_domain.quotes import build_quote
 
+# The daily quote names only the trading day; the price is that day's US session close.
+US_SESSION_CLOSE = time(16, 0)
+US_SESSION_TZ = ZoneInfo("America/New_York")
 
-def _equity_quote(symbol, currency, payload, received_at):
+
+def _equity_fields(symbol, currency, payload):
     if currency != "USD" or ":" in symbol:
         raise ProviderDataError(
             ALPHA_VANTAGE,
@@ -26,21 +31,17 @@ def _equity_quote(symbol, currency, payload, received_at):
         ).date()
     except ValueError as error:
         raise ProviderDataError(ALPHA_VANTAGE, f"no EOD date for {symbol}") from error
-    return build_quote(
-        provider=ALPHA_VANTAGE,
-        symbol=symbol,
-        asset_class="EQUITY",
-        quote_grade=quote_grade(ALPHA_VANTAGE, "EQUITY"),
-        received_at=received_at,
-        raw_payload=quote,
-        currency=currency,
-        last=quote.get("05. price"),
-        previous_close=quote.get("08. previous close"),
-        provider_timestamp=datetime.combine(as_of, time.min, tzinfo=timezone.utc),
-    )
+    return {
+        "raw_payload": quote,
+        "last": quote.get("05. price"),
+        "previous_close": quote.get("08. previous close"),
+        "provider_timestamp": datetime.combine(
+            as_of, US_SESSION_CLOSE, tzinfo=US_SESSION_TZ,
+        ).astimezone(timezone.utc),
+    }
 
 
-def _fx_quote(symbol, currency, payload, received_at):
+def _fx_fields(symbol, currency, payload):
     quote = payload.get("Realtime Currency Exchange Rate") \
         if isinstance(payload, dict) else None
     if not isinstance(quote, dict) or not quote:
@@ -65,29 +66,27 @@ def _fx_quote(symbol, currency, payload, received_at):
         ).replace(tzinfo=timezone.utc)
     except ValueError as error:
         raise ProviderDataError(ALPHA_VANTAGE, f"no FX timestamp for {symbol}") from error
-    return build_quote(
-        provider=ALPHA_VANTAGE,
-        symbol=symbol,
-        asset_class="FX",
-        quote_grade=quote_grade(ALPHA_VANTAGE, "FX"),
-        received_at=received_at,
-        raw_payload=quote,
-        currency=currency,
-        bid=quote.get("8. Bid Price"),
-        ask=quote.get("9. Ask Price"),
-        last=quote.get("5. Exchange Rate"),
-        provider_timestamp=quoted_at,
-    )
+    return {
+        "raw_payload": quote,
+        "bid": quote.get("8. Bid Price"),
+        "ask": quote.get("9. Ask Price"),
+        "last": quote.get("5. Exchange Rate"),
+        "provider_timestamp": quoted_at,
+    }
 
 
 def normalize_quote(symbol, asset_class, currency, payload, received_at):
-    if asset_class == "EQUITY":
-        return _equity_quote(symbol, currency, payload, received_at)
-    if asset_class == "FX":
-        return _fx_quote(symbol, currency, payload, received_at)
-    raise ProviderDataError(
-        ALPHA_VANTAGE,
-        f"{asset_class} is not supported by this adapter",
+    parser = {"EQUITY": _equity_fields, "FX": _fx_fields}.get(asset_class)
+    if parser is None:
+        raise ProviderDataError(ALPHA_VANTAGE, f"{asset_class} is not supported by this adapter")
+    return build_quote(
+        provider=ALPHA_VANTAGE,
+        symbol=symbol,
+        asset_class=asset_class,
+        currency=currency,
+        quote_grade=quote_grade(ALPHA_VANTAGE, asset_class),
+        received_at=received_at,
+        **parser(symbol, currency, payload),
     )
 
 

@@ -1,8 +1,8 @@
 import {
-  BOOK_ASSET_CLASSES,
   BOOK_DESCRIPTION_MAX_LENGTH,
   BOOK_NAME_MAX_LENGTH,
 } from '../config/books.js'
+import { catalogueAssetClasses, catalogueFieldsOf } from './catalogue.js'
 import { statusOf } from './valuations.js'
 import { toNum, toTime } from './values.js'
 
@@ -13,6 +13,7 @@ export function bookSummariesOf(raw) {
       id: book.book_id,
       name: book.name ?? book.book_id,
       assetClass: book.expected_asset_class ?? 'UNKNOWN',
+      ...catalogueFieldsOf(book),
       activeTrades: toNum(book.active_trades) ?? 0,
       closedTrades: toNum(book.closed_trades) ?? 0,
       grossEntryValue: toNum(book.gross_entry_value),
@@ -82,6 +83,7 @@ export function bookPositionsOf(book, now, instruments = {}, curves = {}) {
       provider,
       currency: position.currency ?? null,
       assetClass: position.asset_class ?? 'UNKNOWN',
+      ...catalogueFieldsOf(position),
       terms: position.terms && typeof position.terms === 'object' ? position.terms : null,
       netQuantity: toNum(position.net_quantity) ?? 0,
       averageEntry: toNum(position.average_entry),
@@ -100,7 +102,7 @@ export function bookFormValuesOf(book) {
   }
 }
 
-export function bookFormErrorsOf(values) {
+export function bookFormErrorsOf(values, schemas) {
   const errors = {}
   const name = values.name.trim()
   if (name.length === 0) {
@@ -108,7 +110,7 @@ export function bookFormErrorsOf(values) {
   } else if (name.length > BOOK_NAME_MAX_LENGTH) {
     errors.name = `Name must be at most ${BOOK_NAME_MAX_LENGTH} characters.`
   }
-  if (!BOOK_ASSET_CLASSES.includes(values.assetClass)) {
+  if (!catalogueAssetClasses(schemas).includes(values.assetClass)) {
     errors.assetClass = 'Pick an asset class.'
   }
   if (values.description.trim().length > BOOK_DESCRIPTION_MAX_LENGTH) {

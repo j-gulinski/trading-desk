@@ -1,120 +1,70 @@
+"""Validation of ticket terms against the instrument catalogue, and the public schema
+the ticket reads. Nothing here knows a specific asset class."""
+
 import math
 
-DEFAULT_VOLATILITY = 0.22
-IRS_PAYMENTS_PER_YEAR = {"3M": 4, "6M": 2}
-MAX_CONTRACT_AMOUNT = 1_000_000_000_000
-MAX_OPTION_STRIKE = 1_000_000_000
-
-TERM_SCHEMAS = {
-    "EUROPEAN_OPTION": {
-        "customizable": True,
-        "defaults": {"multiplier": 1, "volatility": DEFAULT_VOLATILITY},
-        "fields": [
-            {"name": "underlying_symbol", "label": "UNDERLYING", "type": "choice",
-             "choices_source": "WATCHLIST_SPOT"},
-            {"name": "option_type", "label": "TYPE", "type": "choice",
-             "choices": ["CALL", "PUT"], "labels": {"CALL": "Call", "PUT": "Put"}},
-            {"name": "strike", "label": "STRIKE", "type": "number", "gt": 0,
-             "max": MAX_OPTION_STRIKE},
-            {"name": "maturity_years", "label": "MATURITY (YEARS)", "type": "number",
-             "gt": 0, "max": 50},
-            {"name": "discount_curve", "label": "DISCOUNT CURVE", "type": "choice",
-             "choices_source": "CURVES"},
-        ],
-    },
-    "IRS": {
-        "customizable": True,
-        "defaults": {},
-        "fields": [
-            {"name": "direction", "label": "DIRECTION", "type": "choice",
-             "choices": ["PAY_FIXED_RECEIVE_FLOAT", "RECEIVE_FIXED_PAY_FLOAT"],
-             "labels": {"PAY_FIXED_RECEIVE_FLOAT": "Pay fixed",
-                        "RECEIVE_FIXED_PAY_FLOAT": "Receive fixed"}},
-            {"name": "settlement_currency", "label": "CURRENCY", "type": "choice",
-             "choices_source": "CURVE_CURRENCIES"},
-            {"name": "notional", "label": "NOTIONAL", "type": "number", "gt": 0,
-             "max": MAX_CONTRACT_AMOUNT},
-            {"name": "fixed_rate", "label": "FIXED RATE (%)", "type": "number",
-             "gt": 0, "max": 100, "unit": "percent"},
-            {"name": "maturity_years", "label": "MATURITY (YEARS)", "type": "number",
-             "gt": 0, "max": 50},
-            {"name": "floating_rate_index_tenor", "label": "FLOATING INDEX TENOR",
-             "type": "choice", "choices": ["3M", "6M"],
-             "labels": {"3M": "3-month", "6M": "6-month"}},
-            {"name": "discount_curve", "label": "DISCOUNT / PROJECTION CURVE",
-             "type": "choice",
-             "choices_source": "CURVES"},
-        ],
-    },
-    "BOND": {
-        "customizable": True,
-        "defaults": {},
-        "fields": [
-            {"name": "settlement_currency", "label": "CURRENCY", "type": "choice",
-             "choices_source": "CURVE_CURRENCIES"},
-            {"name": "face_value", "label": "FACE AMOUNT", "type": "number", "gt": 0,
-             "max": MAX_CONTRACT_AMOUNT},
-            {"name": "coupon_rate", "label": "COUPON (%)", "type": "number",
-             "ge": 0, "max": 100, "unit": "percent"},
-            {"name": "maturity_years", "label": "MATURITY (YEARS)", "type": "number",
-             "gt": 0, "max": 50},
-            {"name": "payments_per_year", "label": "PAYMENTS / YEAR", "type": "integer",
-             "ge": 1, "max": 12},
-            {"name": "discount_curve", "label": "DISCOUNT CURVE", "type": "choice",
-             "choices_source": "CURVES"},
-        ],
-    },
-}
-
-CURVE_FIELDS = ("discount_curve", "projection_curve")
+from desk_domain.instruments import CURVE_FIELDS, INSTRUMENT_TYPES, instrument_type_for, type_view
 
 
 def curve_currencies(curves):
     return sorted({curve["currency"] for curve in curves})
 
 
-def _field_choices(field, underlying_choices, curves):
+def _approved_curves(instrument_type, field_name, curves):
+    required = {
+        f"{instrument_type.asset_class}:{role}"
+        for role in instrument_type.curve_roles.get(field_name, ())
+    }
+    return [curve for curve in curves if required.issubset(set(curve.get("uses", ())))]
+
+
+def _field_choices(instrument_type, field, spot_catalog, curves, approved_only=False):
     source = field.get("choices_source")
     if source == "WATCHLIST_SPOT":
-        return list(underlying_choices)
+        return [
+            symbol for symbol, entry in spot_catalog.items()
+            if entry["asset_class"] in instrument_type.underlying_asset_classes
+        ]
     if source == "CURVES":
-        return [curve["curve_name"] for curve in curves]
+        eligible = _approved_curves(instrument_type, field["name"], curves) if approved_only else curves
+        return [curve["curve_name"] for curve in eligible]
     if source == "CURVE_CURRENCIES":
         return curve_currencies(curves)
     return field["choices"]
 
 
-def _public_curve_choices(asset_class, field_name, curves):
-    required_uses = {_trade_use(asset_class, field_name)}
-    if asset_class == "IRS":
-        required_uses = {"IRS:DISCOUNT", "IRS:PROJECTION"}
-    return [
-        curve["curve_name"]
-        for curve in curves
-        if required_uses.issubset(set(curve.get("uses", ())))
-    ]
-
-
-def public_term_schemas(underlying_choices, curves=()):
+def public_term_schemas(spot_catalog, curves=()):
     schemas = {}
-    for asset_class, schema in TERM_SCHEMAS.items():
+    for asset_class, instrument_type in INSTRUMENT_TYPES.items():
         fields = []
-        for field in schema["fields"]:
+        for field in instrument_type.term_fields:
             if field["type"] != "choice":
                 fields.append(field)
                 continue
             public_field = {
                 key: value for key, value in field.items() if key != "choices_source"
             }
-            public_field["choices"] = (
-                _public_curve_choices(asset_class, field["name"], curves)
-                if field.get("choices_source") == "CURVES"
-                else _field_choices(field, underlying_choices, curves)
+            public_field["choices"] = _field_choices(
+                instrument_type, field, spot_catalog, curves, approved_only=True,
             )
             if field.get("choices_source") == "CURVES":
                 public_field["choices_source"] = "CURVES"
             fields.append(public_field)
-        schemas[asset_class] = {**schema, "fields": fields}
+        schemas[asset_class] = {
+            **type_view(instrument_type),
+            "model": instrument_type.model,
+            "customizable": bool(instrument_type.term_fields),
+            "defaults": dict(instrument_type.term_defaults),
+            "fields": fields,
+            "needs_quote": instrument_type.needs_quote,
+            "needs_curve": instrument_type.needs_curve,
+            "underlying_field": instrument_type.underlying_field,
+            "fixed_quantity": instrument_type.fixed_quantity,
+            "whole_quantity": instrument_type.whole_quantity,
+            "allowed_sides": list(instrument_type.allowed_sides),
+            "allows_negative_price": instrument_type.allows_negative_price,
+            "size_term": instrument_type.size_term,
+        }
     return schemas
 
 
@@ -122,13 +72,9 @@ def _use_label(field_name):
     return "project" if field_name == "projection_curve" else "discount"
 
 
-def _trade_use(asset_class, field_name):
-    role = "PROJECTION" if field_name == "projection_curve" else "DISCOUNT"
-    return f"{asset_class}:{role}"
-
-
-def _curve_guards(asset_class, terms, curves):
+def _curve_guards(instrument_type, terms, curves):
     by_name = {curve["curve_name"]: curve for curve in curves}
+    asset_class = instrument_type.asset_class
     currency = terms.get("settlement_currency") or terms.get("currency")
     for field_name in CURVE_FIELDS:
         curve_name = terms.get(field_name)
@@ -140,11 +86,12 @@ def _curve_guards(asset_class, terms, curves):
                 f"a {currency} {asset_class} cannot {_use_label(field_name)} on "
                 f"{curve_name} — it is a {curve['currency']} curve"
             )
-        if _trade_use(asset_class, field_name) not in curve.get("uses", ()):
-            return (
-                f"{curve_name} is not approved as the {_use_label(field_name)} curve "
-                f"for {asset_class}"
-            )
+        for role in instrument_type.curve_roles.get(field_name, ()):
+            if f"{asset_class}:{role}" not in curve.get("uses", ()):
+                return (
+                    f"{curve_name} is not approved as the {_use_label(field_name)} curve "
+                    f"for {asset_class}"
+                )
     projection = by_name.get(terms.get("projection_curve"))
     leg_tenor = terms.get("floating_rate_index_tenor")
     if projection is not None and leg_tenor is not None \
@@ -156,68 +103,74 @@ def _curve_guards(asset_class, terms, curves):
     return None
 
 
-def validate_terms(asset_class, raw, underlying_choices=(), curves=(),
-                   underlying_currency_of=None):
-    schema = TERM_SCHEMAS.get(asset_class)
-    if schema is None or not schema.get("customizable"):
+def _terms_currency(instrument_type, terms, spot_catalog):
+    if "settlement_currency" in terms:
+        return terms["settlement_currency"]
+    underlying = terms.get(instrument_type.underlying_field) if instrument_type.underlying_field else None
+    if underlying is not None:
+        return (spot_catalog.get(underlying) or {}).get("currency") or "USD"
+    return "USD"
+
+
+def _number(field, value):
+    if isinstance(value, bool):
+        raise ValueError(f"{field['name']} must be a number")
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field['name']} must be a number") from None
+    if not math.isfinite(number):
+        raise ValueError(f"{field['name']} must be a finite number")
+    if field["type"] == "integer":
+        if not number.is_integer():
+            raise ValueError(f"{field['name']} must be a whole number")
+        number = int(number)
+    if "gt" in field and not number > field["gt"]:
+        raise ValueError(f"{field['name']} must be greater than {field['gt']}")
+    if "ge" in field and not number >= field["ge"]:
+        raise ValueError(f"{field['name']} must be at least {field['ge']}")
+    if "max" in field and not number <= field["max"]:
+        raise ValueError(f"{field['name']} must be at most {field['max']}")
+    return number
+
+
+def validate_terms(asset_class, raw, spot_catalog=None, curves=()):
+    try:
+        instrument_type = instrument_type_for(asset_class)
+    except ValueError as exc:
+        return None, str(exc)
+    if not instrument_type.term_fields:
         return None, f"{asset_class} does not accept custom terms"
     if not isinstance(raw, dict):
         return None, "terms must be an object"
+    if raw.get("model", instrument_type.model) != instrument_type.model:
+        return None, f"unsupported pricing model for {asset_class}"
 
-    terms = dict(schema.get("defaults") or {})
-    for field in schema["fields"]:
+    spot_catalog = spot_catalog or {}
+    terms = dict(instrument_type.term_defaults)
+    for field in (*instrument_type.term_fields, *instrument_type.term_settings):
         name = field["name"]
-        value = raw.get(name)
+        value = raw.get(name, terms.get(name))
         if value is None or value == "":
             return None, f"missing term: {name}"
         if field["type"] == "choice":
-            if value not in _field_choices(field, underlying_choices, curves):
+            if value not in _field_choices(instrument_type, field, spot_catalog, curves):
                 return None, f"invalid {name}"
             terms[name] = value
             continue
         try:
-            number = float(value)
-        except (TypeError, ValueError):
-            return None, f"{name} must be a number"
-        if not math.isfinite(number):
-            return None, f"{name} must be a finite number"
-        if field["type"] == "integer":
-            if not number.is_integer():
-                return None, f"{name} must be a whole number"
-            number = int(number)
-        if "gt" in field and not number > field["gt"]:
-            return None, f"{name} must be greater than {field['gt']}"
-        if "ge" in field and not number >= field["ge"]:
-            return None, f"{name} must be at least {field['ge']}"
-        if "max" in field and not number <= field["max"]:
-            return None, f"{name} must be at most {field['max']}"
-        terms[name] = number
+            terms[name] = _number(field, value)
+        except ValueError as exc:
+            return None, str(exc)
 
-    if asset_class == "IRS":
-        terms["payments_per_year"] = IRS_PAYMENTS_PER_YEAR[
-            terms["floating_rate_index_tenor"]
-        ]
-        supplied_projection = raw.get("projection_curve")
-        if supplied_projection not in (None, "", terms["discount_curve"]):
-            return None, (
-                "IRS uses one selected risk-free curve for discounting and projection"
-            )
-        terms["projection_curve"] = terms["discount_curve"]
-        terms["pricing_approach"] = "SINGLE_CURVE_APPROXIMATION"
-
+    try:
+        terms = instrument_type.complete_terms(terms, raw)
+    except ValueError as exc:
+        return None, str(exc)
     terms["asset_class"] = asset_class
-    if "settlement_currency" in terms:
-        terms["currency"] = terms["settlement_currency"]
-    elif "underlying_symbol" in terms:
-        underlying_currency = (
-            underlying_currency_of.get(terms["underlying_symbol"])
-            if underlying_currency_of else None
-        )
-        terms["currency"] = underlying_currency or "USD"
-    else:
-        terms["currency"] = "USD"
+    terms["currency"] = _terms_currency(instrument_type, terms, spot_catalog)
 
-    guard_error = _curve_guards(asset_class, terms, curves)
+    guard_error = _curve_guards(instrument_type, terms, curves)
     if guard_error is not None:
         return None, guard_error
     return terms, None

@@ -29,8 +29,7 @@ class TwelveDataClient(ProviderClient):
             return f"{symbol[:3]}/{symbol[3:]}"
         return symbol
 
-    def auth_params(self):
-        return {"apikey": self.api_key} if self.api_key else {}
+    api_key_param = "apikey"
 
     def classify_body(self, payload):
         if not isinstance(payload, dict) or payload.get("status") != "error":

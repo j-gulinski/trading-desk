@@ -8,7 +8,7 @@ from pricing_service.config import SERVICE_NAME
 from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from desk_runtime.logging_config import get_logger
 from desk_domain.quotes import as_decimal
-from desk_domain.symbols import SPOT_ASSET_CLASSES
+from desk_domain.instruments import instrument_for
 
 log = get_logger(SERVICE_NAME)
 
@@ -45,6 +45,19 @@ def _revision(row, primary):
     return (str(row.get(primary) or ""), str(row.get("received_at") or ""))
 
 
+def _pricing_curve(tick):
+    if tick.get("tenors") and tick.get("rates"):
+        return tick
+    points = tick.get("points") or []
+    if not points:
+        return tick
+    return {
+        **tick,
+        "tenors": [float(point["tenor_years"]) for point in points],
+        "rates": [float(point["rate"]) / 100.0 for point in points],
+    }
+
+
 def update_spot(tick):
     parsed = _parsed_spot(tick)
     with data_lock:
@@ -58,13 +71,14 @@ def update_spot(tick):
 
 
 def update_curve(tick):
+    parsed = _pricing_curve(tick)
     with data_lock:
         key = tick["curve_name"]
         current = curves.get(key)
-        if current is not None and _revision(tick, "as_of_date") \
+        if current is not None and _revision(parsed, "as_of_date") \
                 <= _revision(current, "as_of_date"):
             return False
-        curves[key] = tick
+        curves[key] = parsed
         return True
 
 
@@ -85,11 +99,12 @@ def replace_market_state(snapshot_spots, snapshot_curves):
 
     replacement_curves = {}
     for row in (snapshot_curves or {}).values():
+        parsed = _pricing_curve(row)
         key = row["curve_name"]
         current = replacement_curves.get(key)
-        if current is None or _revision(row, "as_of_date") \
+        if current is None or _revision(parsed, "as_of_date") \
                 > _revision(current, "as_of_date"):
-            replacement_curves[key] = row
+            replacement_curves[key] = parsed
 
     global spots, curves
     with data_lock:
@@ -154,25 +169,14 @@ def trade_provider(trade):
     return DEFAULT_QUOTE_PROVIDER
 
 
-def needs_spot(trade):
-    return (
-        trade["asset_class"] in SPOT_ASSET_CLASSES
-        or trade["asset_class"] == "EUROPEAN_OPTION"
-    )
-
-
 def trades_for_quote(provider, symbol):
     with data_lock:
-        return [
-            trade
-            for trade in active_trades.values()
-            if needs_spot(trade)
-            and trade_provider(trade) == provider
-            and (
-                trade["symbol"] == symbol
-                or (trade.get("metadata") or {}).get("underlying_symbol") == symbol
-            )
-        ]
+        matches = []
+        for trade in active_trades.values():
+            instrument = instrument_for(trade["asset_class"], trade["symbol"], trade.get("metadata"))
+            if instrument.quote_symbol == symbol and trade_provider(trade) == provider:
+                matches.append(trade)
+        return matches
 
 
 def _trade_curves(trade):

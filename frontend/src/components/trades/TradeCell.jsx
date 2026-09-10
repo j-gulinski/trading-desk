@@ -1,18 +1,15 @@
 import StatusPill from '../status/StatusPill.jsx'
 import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
 import { providerLabel } from '../../config/providers.js'
-import { assetClassLabel } from '../../config/tradeActions.js'
+import { classLabelOf, formatMarkAmount } from '../../domain/catalogue.js'
 import {
   formatClockTime,
   formatDateTime,
   formatNumber,
   formatPercent,
-  formatSignedAmount,
-  formatUnitPrice,
 } from '../../domain/formatting.js'
 import {
   tradePositionLabel,
-  tradePriceForDisplay,
   tradeSize,
 } from '../../domain/trades.js'
 import { instrumentLabelOf } from '../../domain/contracts.js'
@@ -24,11 +21,7 @@ function withUnit(value, unit) {
 }
 
 function tradeValueText(trade, value) {
-  const display = tradePriceForDisplay(trade, value)
-  const amount = trade.assetClass === 'IRS'
-    ? formatSignedAmount(display)
-    : formatUnitPrice(display, trade.assetClass)
-  return withUnit(amount, priceUnitLabelOf(trade))
+  return withUnit(formatMarkAmount(trade, value), priceUnitLabelOf(trade))
 }
 
 export default function TradeCell({
@@ -60,7 +53,7 @@ export default function TradeCell({
       return (
         <span className="class-tag">
           <span className="class-tag__dot" />
-          {assetClassLabel(trade.assetClass)}
+          {classLabelOf(trade)}
         </span>
       )
     case 'symbol':
