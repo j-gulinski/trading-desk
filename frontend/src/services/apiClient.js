@@ -1,4 +1,4 @@
-import { WRITE_TIMEOUT_MS } from '../config/api.js'
+import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from '../config/api.js'
 
 class ApiError extends Error {
   constructor(message, { path, status = null, cause = null, body = null } = {}) {
@@ -23,7 +23,7 @@ function withTimeout(signal, timeoutMs) {
 }
 
 async function request(path, options = {}) {
-  const { headers, timeoutMs = null, signal, ...fetchOptions } = options
+  const { headers, timeoutMs = READ_TIMEOUT_MS, signal, ...fetchOptions } = options
   const timeout = withTimeout(signal, timeoutMs)
   let res
   try {

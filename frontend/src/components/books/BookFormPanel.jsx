@@ -105,12 +105,10 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
       onClose()
     } catch (err) {
       setSubmitError(
-        err?.status === 500
-          ? 'Could not save — the name may already be taken.'
-          : describeApiError(err, {
-              service: 'Books service',
-              outcome: 'the book was not saved.',
-            }),
+        describeApiError(err, {
+          service: 'Books service',
+          outcome: 'the book was not saved.',
+        }),
       )
       setPending(false)
     }

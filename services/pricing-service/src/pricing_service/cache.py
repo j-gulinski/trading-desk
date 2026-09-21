@@ -1,6 +1,5 @@
 """Thread-safe in-memory state for the pricing process."""
 
-import datetime
 import threading
 from decimal import Decimal
 
@@ -8,6 +7,7 @@ from pricing_service.config import SERVICE_NAME
 from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from desk_runtime.logging_config import get_logger
 from desk_domain.quotes import as_decimal
+from desk_domain.valuation_records import is_final, valued_at
 from desk_domain.instruments import instrument_for
 
 log = get_logger(SERVICE_NAME)
@@ -112,20 +112,10 @@ def replace_market_state(snapshot_spots, snapshot_curves):
         curves = replacement_curves
 
 
-def get_spot(provider, symbol):
-    with data_lock:
-        return spots.get((provider, symbol))
-
-
 def drop_spots(rows):
     with data_lock:
         for row in rows:
             spots.pop((row.get("provider"), row.get("symbol")), None)
-
-
-def get_curve(name):
-    with data_lock:
-        return curves.get(name)
 
 
 def record_market_event(event_time):
@@ -265,26 +255,15 @@ def all_book_risk():
         return list(book_risk_metrics.values())
 
 
-def _is_final(valuation):
-    return bool((valuation.get("valuation_payload") or {}).get("final"))
-
-
-def _valuation_time(valuation):
-    try:
-        return datetime.datetime.fromisoformat(str(valuation.get("valuation_time")))
-    except (TypeError, ValueError):
-        return None
-
-
 def record_valuation(valuation):
     """Keep a final close valuation from being overwritten by a stale live batch."""
     with data_lock:
         existing = latest_valuations.get(valuation["trade_id"])
-        if existing is not None and _is_final(existing) and not _is_final(valuation):
+        if existing is not None and is_final(existing) and not is_final(valuation):
             return False
-        if existing is not None and _is_final(existing) == _is_final(valuation):
-            existing_at = _valuation_time(existing)
-            incoming_at = _valuation_time(valuation)
+        if existing is not None and is_final(existing) == is_final(valuation):
+            existing_at = valued_at(existing)
+            incoming_at = valued_at(valuation)
             if (
                 existing_at is not None
                 and incoming_at is not None

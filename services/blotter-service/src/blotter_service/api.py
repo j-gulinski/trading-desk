@@ -1,25 +1,18 @@
 import bottle
 import uuid
-from bottle import request, response
 
 from blotter_service import cache, service, repository
 from blotter_service.config import SERVICE_NAME
-from desk_runtime.serialization import to_json
+from desk_runtime.http import json_error, json_response, query_text
 
 app = bottle.Bottle()
 MAX_TRADE_PAGE_SIZE = 500
 
 
-def _json(data, status=200):
-    response.status = status
-    response.content_type = "application/json"
-    return to_json(data)
-
-
 def _page():
     try:
-        limit = int(request.query.get("limit") or 100)
-        offset = int(request.query.get("offset") or 0)
+        limit = int(query_text("limit", 100))
+        offset = int(query_text("offset", 0))
     except (TypeError, ValueError):
         return None, "limit and offset must be integers"
     if not 1 <= limit <= MAX_TRADE_PAGE_SIZE:
@@ -30,7 +23,7 @@ def _page():
 
 
 def _book_filter():
-    raw = request.query.get("book_id") or None
+    raw = query_text("book_id")
     if raw is None:
         return None, None
     try:
@@ -56,9 +49,9 @@ def _trade_query():
     limit, offset = page
     return {
         "book_id": book_id,
-        "asset_class": request.query.get("asset_class") or None,
-        "status": request.query.get("status") or None,
-        "symbol": request.query.get("symbol") or None,
+        "asset_class": query_text("asset_class"),
+        "status": query_text("status"),
+        "symbol": query_text("symbol"),
         "limit": limit,
         "offset": offset,
     }, None
@@ -66,7 +59,7 @@ def _trade_query():
 
 @app.route("/health")
 def health():
-    return _json({
+    return json_response({
         "service": SERVICE_NAME,
         "status": "UP",
         "cached_trades": len(cache.trades),
@@ -76,15 +69,15 @@ def health():
 
 @app.route("/books/summary")
 def books_summary():
-    return _json(service.books_summary())
+    return json_response(service.books_summary())
 
 
 @app.route("/trades/overview")
 def trades_overview():
     query, error = _trade_query()
     if error is not None:
-        return _json({"error": error}, 400)
-    return _json({
+        return json_error(error, 400)
+    return json_response({
         "trades": service.list_trades(**query),
         "books": service.books_summary(),
     })
@@ -94,32 +87,32 @@ def trades_overview():
 def list_trades():
     query, error = _trade_query()
     if error is not None:
-        return _json({"error": error}, 400)
-    return _json(service.list_trades(**query))
+        return json_error(error, 400)
+    return json_response(service.list_trades(**query))
 
 
 @app.route("/trades/<trade_id>")
 def trade_detail(trade_id):
     normalized = _trade_id(trade_id)
     if normalized is None:
-        return _json({"error": "trade not found", "trade_id": trade_id}, 404)
+        return json_error("trade not found", 404, trade_id=trade_id)
     detail = service.trade_detail(normalized)
     if detail is None:
-        return _json({"error": "trade not found", "trade_id": trade_id}, 404)
-    return _json(detail)
+        return json_error("trade not found", 404, trade_id=trade_id)
+    return json_response(detail)
 
 
 @app.route("/trades/<trade_id>/valuations")
 def trade_valuations(trade_id):
     normalized = _trade_id(trade_id)
     if normalized is None:
-        return _json({"error": "trade not found", "trade_id": trade_id}, 404)
-    return _json(repository.valuation_history(normalized))
+        return json_error("trade not found", 404, trade_id=trade_id)
+    return json_response(repository.valuation_history(normalized))
 
 
 @app.route("/trades/<trade_id>/audit-logs")
 def trade_audit_logs(trade_id):
     normalized = _trade_id(trade_id)
     if normalized is None:
-        return _json({"error": "trade not found", "trade_id": trade_id}, 404)
-    return _json(repository.audit_logs(normalized))
+        return json_error("trade not found", 404, trade_id=trade_id)
+    return json_response(repository.audit_logs(normalized))

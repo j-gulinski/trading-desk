@@ -167,24 +167,21 @@ class ProviderClient(ABC):
         }
         if result_count is not None:
             fields["result_count"] = result_count
-        if error is not None:
-            fields["error_type"] = type(error).__name__
-            log.warning("provider_http_response", **fields)
-        else:
+        if error is None:
             log.info("provider_http_response", **fields)
-        event_type = (
-            "PROVIDER_FETCH_RATE_LIMITED"
-            if isinstance(error, ProviderRateLimited)
-            else "PROVIDER_FETCH_FAILED" if error else "PROVIDER_FETCH_SUCCEEDED"
-        )
+            return
+        fields["error_type"] = type(error).__name__
+        log.warning("provider_http_response", **fields)
+        # Only failures reach the audit trail; the per-request ledger is the log above.
         write_audit(
             SERVICE_NAME,
-            event_type,
-            f"{request_fields['provider']} GET {request_fields['endpoint']} "
-            f"{'failed' if error else 'succeeded'}",
+            "PROVIDER_FETCH_RATE_LIMITED"
+            if isinstance(error, ProviderRateLimited)
+            else "PROVIDER_FETCH_FAILED",
+            f"{request_fields['provider']} GET {request_fields['endpoint']} failed",
             entity_type="PROVIDER",
             entity_id=request_fields["provider"],
-            severity="WARNING" if error else "INFO",
+            severity="WARNING",
             payload={
                 "provider": request_fields["provider"],
                 "method": request_fields["method"],
@@ -192,11 +189,7 @@ class ProviderClient(ABC):
                 "http_status": status,
                 "duration_ms": fields["duration_ms"],
                 "outcome": fields["outcome"],
-                **(
-                    {"result_count": result_count}
-                    if result_count is not None else {}
-                ),
-                **({"error_type": type(error).__name__} if error else {}),
+                "error_type": type(error).__name__,
             },
         )
 

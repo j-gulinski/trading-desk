@@ -30,7 +30,8 @@ Open [localhost:3000](http://localhost:3000). Add instruments from Market Data, 
 book for the intended asset class, then open a trade. Quote-priced instruments need a usable
 provider quote; model contracts also need an eligible curve. Missing API keys disable their feeds.
 
-`.env.example` lists the main settings; optional defaults live in each service's `config.py`.
+`.env.example` lists the main settings; optional defaults live in `desk-runtime`'s
+`config.py` and in each service's `config.py`.
 The main storage defaults are 90 days of quote observations
 and at most one ordinary persisted valuation per trade per 60 seconds. Live updates are more frequent.
 
@@ -50,7 +51,7 @@ This removes the local database and cached frontend dependencies. There is no le
 | --- | --- |
 | `libs/desk-domain` | Instrument catalogue, contract terms, trade rules, storage models, provider vocabulary and domain queries |
 | `libs/desk-pricing` | Pure numerical functions for curves, bonds, swaps, options and risk |
-| `libs/desk-runtime` | Configuration, database sessions, logging and HTTP runtime |
+| `libs/desk-runtime` | Configuration, database sessions, logging, JSON responses and errors, HTTP runtime |
 | `services/market-data-service` · 8001 | Provider adapters, watchlist, quote/curve storage and streams |
 | `services/pricing-service` · 8002 | Pricing, valuation persistence, scenarios and valuation stream |
 | `services/monitoring-service` · 8003 | Health, audit and logs |
@@ -78,12 +79,12 @@ in `desk-pricing`, and approving its curves in `curves.py`. A new option engine 
 function plus one row in `OPTION_MODELS`. A new premium-style contract reuses the premium
 ticket. Provider response parsing stays in provider adapters.
 `valuation.py` shares position-value and P&L arithmetic. Trade actions share validation and
-one close operation. `desk-runtime` owns configuration, transactions and streams. The trade
+one close operation. `desk-runtime` owns configuration, transactions, streams and the HTTP
+edge: every handler answers through `json_response`/`json_error`, unhandled errors and
+unknown routes answer as JSON too, and services without their own `/health` get the default
+one. The trade
 ticket reads one options payload for schema, tradeable instruments and curves, then shows the
 execution value, the total and its key assumptions above a compact price-source list.
-
-Course architecture notes for this phase (schema, inheritance, composition) are in
-[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Database
 
@@ -132,8 +133,7 @@ done
 Load configuration with a local database URL before running a service entry point.
 Service addresses default to Compose hostnames. For local processes, set the corresponding
 `MARKET_DATA_SERVICE_URL=http://localhost:8001`, `PRICING_SERVICE_URL=http://localhost:8002`,
-and other `<NAME>_SERVICE_URL` values. Health and stream URLs are derived from those addresses;
-the old separate `*_HEALTHCHECK_URL` and `*_STREAM_URL` settings are replaced.
+and other `<NAME>_SERVICE_URL` values. Health and stream URLs are derived from those addresses.
 The Vite proxy in `frontend/vite.config.js` uses Compose service names by default.
 
 ```sh

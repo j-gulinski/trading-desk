@@ -11,4 +11,10 @@ LOG_BUFFER_LINES = 10_000
 LOG_MINUTE_BUCKETS = 15
 LOG_WARM_START_TAIL_BYTES = 64_000
 
-TARGETS = {name: url + "/health" for name, url in SERVICE_URLS.items()}
+# Own health is reported from local state; polling itself over HTTP would spend one
+# of this process's own handler threads on every cycle.
+TARGETS = {
+    name: url + "/health"
+    for name, url in SERVICE_URLS.items()
+    if name != SERVICE_NAME
+}

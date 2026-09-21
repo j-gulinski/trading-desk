@@ -1,7 +1,6 @@
-import json
 import uuid
 import bottle
-from bottle import request, response
+from bottle import request
 
 from trade_action_service import action_queue, repository
 from trade_action_service.config import QUOTE_PROVIDER_CHOICES, TRADE_ACTION_BATCH_SIZE
@@ -13,6 +12,7 @@ from desk_runtime.db import session_scope
 from desk_domain.providers import supports_quotes
 from desk_domain.symbols import watchlist_spot_catalog
 from desk_domain.term_schemas import public_term_schemas
+from desk_runtime.http import json_error, json_response
 
 app = bottle.Bottle()
 
@@ -101,12 +101,6 @@ def _normalize(body):
     return intent, None
 
 
-def _json(data, status=200):
-    response.status = status
-    response.content_type = "application/json"
-    return json.dumps(data)
-
-
 def _accept(intent):
     ack = {
         "status": "accepted",
@@ -182,7 +176,7 @@ def term_schemas():
         spot_catalog = watchlist_spot_catalog(session)
         curves = latest_curve_sets(session)
         instruments = _tradeable_instruments(session)
-    return _json({
+    return json_response({
         "instruments": instruments,
         "schemas": public_term_schemas(spot_catalog, curves),
         "curves": curves,
@@ -193,28 +187,28 @@ def term_schemas():
 def trade_action():
     intent, normalize_error = _normalize(request.json)
     if normalize_error is not None:
-        return _json({"error": normalize_error}, 400)
+        return json_error(normalize_error, 400)
     replay = _idempotent_open_ack(intent)
     if replay is not None:
-        return _json(replay, 202)
+        return json_response(replay, 202)
     error = _rejection(intent)
     if error is not None:
-        return _json({"error": error}, 422)
+        return json_error(error, 422)
     accepted = _accept(intent)
     if accepted is None:
-        return _json({"error": "trade action queue is full; retry later"}, 503)
-    return _json(accepted, 202)
+        return json_error("trade action queue is full; retry later", 503)
+    return json_response(accepted, 202)
 
 
 @app.route("/trade-actions/batch", method="POST")
 def trade_action_batch():
     body = request.json or []
     if not isinstance(body, list):
-        return _json({"error": "batch body must be an array"}, 400)
+        return json_error("batch body must be an array", 400)
     if len(body) > TRADE_ACTION_BATCH_SIZE:
-        return _json({
-            "error": f"batch cannot exceed {TRADE_ACTION_BATCH_SIZE} actions"
-        }, 413)
+        return json_error(
+            f"batch cannot exceed {TRADE_ACTION_BATCH_SIZE} actions", 413,
+        )
     accepted, rejected = [], []
     for item in body:
         intent, normalize_error = _normalize(item)
@@ -239,22 +233,22 @@ def trade_action_batch():
     status = 202 if accepted else (503 if rejected and all(
         item["error"].startswith("trade action queue") for item in rejected
     ) else 422)
-    return _json({"accepted": len(accepted), "rejected": rejected}, status)
+    return json_response({"accepted": len(accepted), "rejected": rejected}, status)
 
 
 @app.route("/trade-actions/close-all", method="POST")
 def trade_action_close_all():
     raw_body = request.json
     if raw_body is not None and not isinstance(raw_body, dict):
-        return _json({"error": "request body must be an object"}, 400)
+        return json_error("request body must be an object", 400)
     intent, normalize_error = _normalize({**(raw_body or {}), "action_type": "CLOSE_ALL"})
     if normalize_error is not None:
-        return _json({"error": normalize_error}, 400)
+        return json_error(normalize_error, 400)
     if not action_queue.enqueue(intent):
-        return _json({"error": "trade action queue is full; retry later"}, 503)
-    return _json({"status": "accepted", "action_type": "CLOSE_ALL"}, 202)
+        return json_error("trade action queue is full; retry later", 503)
+    return json_response({"status": "accepted", "action_type": "CLOSE_ALL"}, 202)
 
 
 @app.route("/queue/status")
 def queue_status():
-    return _json(action_queue.queue_status())
+    return json_response(action_queue.queue_status())

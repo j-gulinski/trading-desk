@@ -10,8 +10,6 @@ import { toNum, toTime } from './values.js'
 
 const STATUS_RANK = { LIVE: 3, MARKET_CLOSED: 2, STALE: 1, CLOSED: 0 }
 
-const DEFAULT_QUOTE_PROVIDER = 'FINNHUB'
-
 export function valuationOf(data) {
   if (!data || typeof data.trade_id !== 'string' || data.trade_id.length === 0) return null
   const payload = data.valuation_payload ?? {}
@@ -19,12 +17,6 @@ export function valuationOf(data) {
 
   const signedQuantity = toNum(data.quantity)
   const entryPrice = toNum(data.trade_price)
-  const multiplier = toNum(payload.multiplier) ?? 1
-  const unrealizedPnl = toNum(data.unrealized_pnl)
-  const notional =
-    Number.isFinite(signedQuantity) && Number.isFinite(entryPrice)
-      ? Math.abs(signedQuantity * entryPrice * multiplier)
-      : null
 
   return {
     id: data.trade_id,
@@ -37,14 +29,11 @@ export function valuationOf(data) {
     currency: data.currency ?? null,
     signedQuantity,
     entryPrice,
-    notional,
+    notional: toNum(data.notional),
     fairValue: toNum(data.fair_value),
-    unrealizedPnl,
+    unrealizedPnl: toNum(data.unrealized_pnl),
     realizedPnl: toNum(data.realized_pnl),
-    returnPercent:
-      Number.isFinite(unrealizedPnl) && Number.isFinite(notional) && notional !== 0
-        ? (unrealizedPnl / notional) * 100
-        : null,
+    returnPercent: toNum(data.return_percent),
     price: toNum(payload.current_price ?? payload.close_price),
     closed: payload.final === true,
     marketDataProvider: data.market_data_provider ?? null,
@@ -83,8 +72,8 @@ export function bookRiskOf(data) {
     rSquared: toNum(data.r_squared),
     capitalBase: toNum(data.capital_base),
     observations: toNum(data.observations) ?? 0,
-    minimumObservations: toNum(data.minimum_observations) ?? 20,
-    window: toNum(data.window) ?? 100,
+    minimumObservations: toNum(data.minimum_observations),
+    window: toNum(data.window),
     status: data.status ?? 'INSUFFICIENT_DATA',
     calculatedAtMs: toTime(data.calculated_at),
   }
@@ -106,7 +95,7 @@ export function benchmarkOf(riskMetrics) {
   if (!chosen) return null
   return {
     symbol: chosen.benchmark,
-    provider: chosen.benchmarkProvider ?? DEFAULT_QUOTE_PROVIDER,
+    provider: chosen.benchmarkProvider,
     level: chosen.benchmarkLevel,
     windowReturn: chosen.benchmarkWindowReturn,
     observations: chosen.observations,
@@ -116,7 +105,7 @@ export function benchmarkOf(riskMetrics) {
 
 export function benchmarkDayChangeOf(instruments, benchmark) {
   if (benchmark?.symbol == null) return null
-  const provider = benchmark.provider ?? DEFAULT_QUOTE_PROVIDER
+  const provider = benchmark.provider
   const instrument = instruments?.[`${provider}:${benchmark.symbol}`]
   const previousClose = toNum(instrument?.previousClose)
   const value = toNum(instrument?.value)
@@ -185,7 +174,7 @@ export function mergeValuations(previous, updates) {
 function feedInstrumentOf(valuation, instruments) {
   const symbol = valuation.underlyingSymbol ?? valuation.symbol
   if (symbol == null) return null
-  const provider = valuation.marketDataProvider ?? DEFAULT_QUOTE_PROVIDER
+  const provider = valuation.marketDataProvider
   return instruments?.[`${provider}:${symbol}`] ?? null
 }
 

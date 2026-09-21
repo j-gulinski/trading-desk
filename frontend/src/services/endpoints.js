@@ -47,8 +47,6 @@ export const endpoints = {
     book: (bookId) => `/api/books/books/${encodeURIComponent(bookId)}`,
   },
   blotter: {
-    // Books without the trade payload; Trades uses the heavier `tradesOverview`
-    // aggregate because it needs both.
     booksSummary: '/api/blotter/books/summary',
     trades: (params) => withQuery('/api/blotter/trades', params),
     trade: (tradeId) => `/api/blotter/trades/${encodeURIComponent(tradeId)}`,

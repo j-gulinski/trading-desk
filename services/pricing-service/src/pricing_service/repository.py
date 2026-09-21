@@ -5,7 +5,7 @@ import uuid
 from decimal import Decimal
 
 from pricing_service.config import SERVICE_NAME, VALUATION_WRITE_INTERVAL_SECONDS
-from desk_pricing.valuation import pnl, position_value, signed_quantity
+from desk_pricing.valuation import pnl, position_value, record_totals, signed_quantity
 from desk_domain.contract_data import trade_terms
 from desk_runtime.db import session_scope
 from desk_runtime.functions import get_iso_timestamp, utcnow
@@ -197,6 +197,12 @@ def load_terminal_valuations():
                 "unrealized_pnl": valuation.unrealized_pnl,
                 "realized_pnl": valuation.realized_pnl,
                 "total_pnl": valuation.total_pnl,
+                **record_totals(
+                    trade.trade_price,
+                    trade.quantity,
+                    int((valuation.valuation_payload or {}).get("multiplier", 1)),
+                    valuation.total_pnl or Decimal("0"),
+                ),
                 "market_data_provider": valuation.market_data_provider,
                 "market_data_timestamp": (
                     valuation.market_data_timestamp.isoformat()
@@ -281,6 +287,7 @@ def finalize_closed_trades():
                 "unrealized_pnl": Decimal("0"),
                 "realized_pnl": realized,
                 "total_pnl": realized,
+                **record_totals(trade_price, quantity, multiplier, realized),
                 "market_data_provider": valuation_provider,
                 "market_data_timestamp": (
                     trade.close_price_timestamp.isoformat()

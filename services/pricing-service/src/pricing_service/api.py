@@ -16,6 +16,7 @@ from desk_domain.active_set import load_active_set
 from desk_domain.symbols import watchlist_spot_catalog
 from desk_domain.term_schemas import validate_terms
 from pricing_service.scenario import run_scenario
+from desk_runtime.http import json_error, json_response
 from desk_runtime.serialization import to_json
 from desk_runtime.logging_config import get_logger
 
@@ -72,27 +73,22 @@ def _revisions_match(expected, actual):
 
 @app.route("/valuations")
 def get_valuations():
-    response.content_type = "application/json"
-    return to_json(cache.all_valuations())
+    return json_response(cache.all_valuations())
 
 
 @app.route("/book-risk")
 def get_book_risk():
-    response.content_type = "application/json"
-    return to_json(cache.all_book_risk())
+    return json_response(cache.all_book_risk())
 
 
 @app.route("/price", method="POST")
 def price_preview():
-    response.content_type = "application/json"
     body = request.json
     if not isinstance(body, dict):
-        response.status = 400
-        return to_json({"error": "request body must be an object"})
+        return json_error("request body must be an object", 400)
     symbol = body.get("symbol")
     if symbol is not None and not isinstance(symbol, str):
-        response.status = 400
-        return to_json({"error": "symbol must be text"})
+        return json_error("symbol must be text", 400)
     if body.get("terms") is not None:
         with session_scope() as session:
             spot_catalog = watchlist_spot_catalog(session)
@@ -102,8 +98,7 @@ def price_preview():
         if terms is None:
             log.warning("price_preview_rejected", symbol=symbol,
                         asset_class=body.get("asset_class"), reason=error)
-            response.status = 400
-            return to_json({"error": error, "symbol": symbol})
+            return json_error(error, 400, symbol=symbol)
     else:
         with session_scope() as session:
             entry = load_active_set(session).get((symbol or "").strip().upper())
@@ -113,44 +108,40 @@ def price_preview():
         )
         if terms is None:
             log.warning("price_preview_rejected", symbol=symbol, reason="instrument not found")
-            response.status = 404
-            return to_json({"error": "instrument not found", "symbol": symbol})
+            return json_error("instrument not found", 404, symbol=symbol)
     raw_provider = body.get("market_data_provider")
     if raw_provider is not None and not isinstance(raw_provider, str):
-        response.status = 400
-        return to_json({"error": "market_data_provider must be text"})
+        return json_error("market_data_provider must be text", 400)
     provider = (raw_provider or "").strip().upper() or None
     try:
         instrument = instrument_for(terms["asset_class"], symbol, terms)
     except (TypeError, ValueError) as exc:
-        response.status = 400
-        return to_json({"error": str(exc), "symbol": symbol})
+        return json_error(str(exc), 400, symbol=symbol)
     inputs = market_inputs(instrument, provider)
     priced = instrument.price(inputs)
     if priced is None:
         log.warning("price_preview_unavailable", symbol=symbol,
                     asset_class=terms["asset_class"], provider=provider)
-        response.status = 503
-        return to_json({
-            "error": f"{provider or DEFAULT_QUOTE_PROVIDER} has no current quote for {symbol}"
+        return json_error(
+            f"{provider or DEFAULT_QUOTE_PROVIDER} has no current quote for {symbol}"
             if not instrument.uses_curve()
             else "the selected curve (or the underlying quote) is not available yet",
-            "symbol": symbol,
-        })
+            503,
+            symbol=symbol,
+        )
     revisions = _preview_revisions(terms, inputs)
     if not _revisions_match(body.get("expected_market_revisions"), revisions):
-        response.status = 409
-        return to_json({
-            "error": "pricing market data is catching up; retry the preview",
-            "market_revisions": revisions,
-        })
+        return json_error(
+            "pricing market data is catching up; retry the preview", 409,
+            market_revisions=revisions,
+        )
     needs_spot = instrument.needs_quote
     provenance = pricing_provenance(
         instrument.model, inputs.get("curve"), inputs.get("projection_curve"),
     )
     log.info("price_preview", symbol=symbol, asset_class=terms["asset_class"],
              provider=provider, price=str(priced["price"]))
-    return to_json({
+    return json_response({
         "symbol": symbol,
         "asset_class": terms["asset_class"],
         "currency": terms.get("currency", "USD"),
@@ -163,12 +154,10 @@ def price_preview():
 
 @app.route("/valuations/<trade_id>")
 def get_valuation(trade_id):
-    response.content_type = "application/json"
     valuation = cache.get_valuation(trade_id)
     if valuation is None:
-        response.status = 404
-        return to_json({"error": "valuation not found", "trade_id": trade_id})
-    return to_json(valuation)
+        return json_error("valuation not found", 404, trade_id=trade_id)
+    return json_response(valuation)
 
 
 @app.route("/valuation-stream")
@@ -201,17 +190,14 @@ def valuation_stream():
 
 @app.route("/scenario", method="POST")
 def post_scenario():
-    response.content_type = "application/json"
     body = request.json
     if body is None:
-        response.status = 400
-        return to_json({"error": "invalid JSON or missing Content-Type: application/json"})
+        return json_error("invalid JSON or missing Content-Type: application/json", 400)
 
     try:
         req = ScenarioRequest.from_body(body)
     except ValueError as e:
-        response.status = 400
-        return to_json({"error": str(e)})
+        return json_error(str(e), 400)
 
     if type(req.instrument).fields:
         with session_scope() as session:
@@ -221,8 +207,7 @@ def post_scenario():
             req.instrument.asset_class, req.instrument.as_terms(), spot_catalog, curves,
         )
         if terms is None:
-            response.status = 400
-            return to_json({"error": error})
+            return json_error(error, 400)
         req.instrument = instrument_for(
             req.instrument.asset_class, req.instrument.symbol, terms,
         )
@@ -230,19 +215,17 @@ def post_scenario():
     try:
         result = run_scenario(req)
     except (ValueError, ArithmeticError) as error:
-        response.status = 400
-        return to_json({"error": str(error)})
+        return json_error(str(error), 400)
     if result is None:
-        response.status = 404
-        return to_json({"error": "market data not found for instrument"})
+        return json_error("market data not found for instrument", 404)
 
-    return to_json(result)
+    return json_response(result)
 
 
 @app.route("/health")
 def health():
-    return {
+    return json_response({
         "service": SERVICE_NAME,
         "status": "UP",
         **cache.health_snapshot(),
-    }
+    })

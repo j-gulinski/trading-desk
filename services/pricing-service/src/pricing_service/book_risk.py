@@ -8,7 +8,7 @@ from pricing_service.config import (
     PORTFOLIO_CAPITAL_BASE,
 )
 from pricing_service.valuation_publisher import publish_book_risk
-from desk_runtime.config import BENCHMARK_SYMBOL
+from desk_runtime.config import BENCHMARK_PROVIDER, BENCHMARK_SYMBOL
 from desk_runtime.functions import get_iso_timestamp
 from desk_pricing.risk import alpha_beta
 
@@ -108,6 +108,7 @@ class BookRiskEngine:
             "book_name": book_name,
             "is_portfolio": book_id == PORTFOLIO_ID,
             "benchmark": BENCHMARK_SYMBOL,
+            "benchmark_provider": BENCHMARK_PROVIDER,
             **self._benchmark_context(benchmark_returns),
             "capital_base": capital,
             "observations": observations,

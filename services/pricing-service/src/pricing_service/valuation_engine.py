@@ -5,7 +5,7 @@ import threading
 
 from pricing_service import cache, repository
 from decimal import Decimal
-from desk_pricing.valuation import pnl, position_value, signed_quantity
+from desk_pricing.valuation import pnl, position_value, record_totals, signed_quantity
 from pricing_service.market_inputs import market_inputs
 from desk_domain.instruments import instrument_for, type_view_for
 from pricing_service.valuation_publisher import publish_valuation
@@ -85,6 +85,7 @@ def value_trade(trade):
         "unrealized_pnl": unrealized,
         "realized_pnl": Decimal(0),
         "total_pnl": unrealized,
+        **record_totals(trade["trade_price"], quantity, multiplier, unrealized),
         "market_data_provider": spot.get("provider") or curve.get("provider"),
         "market_data_timestamp": spot.get("provider_timestamp") or (
             f"{curve['as_of_date']}T00:00:00+00:00" if curve.get("as_of_date") else None

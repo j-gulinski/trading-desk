@@ -85,17 +85,21 @@ def store_quote(quote, classifier):
         return _store_quote(quote, classifier)
 
 
-def board_rows():
+def board_rows(provider=None, symbol=None):
     with session_scope() as session:
-        rows = (
-            session.query(MarketDataSpotPrice, MarketDataSnapshot.raw_payload)
-            .outerjoin(
-                MarketDataSnapshot,
-                MarketDataSnapshot.snapshot_id == MarketDataSpotPrice.latest_snapshot_id,
-            )
-            .order_by(MarketDataSpotPrice.provider, MarketDataSpotPrice.symbol)
-            .all()
+        query = session.query(
+            MarketDataSpotPrice, MarketDataSnapshot.raw_payload
+        ).outerjoin(
+            MarketDataSnapshot,
+            MarketDataSnapshot.snapshot_id == MarketDataSpotPrice.latest_snapshot_id,
         )
+        if provider is not None:
+            query = query.filter(MarketDataSpotPrice.provider == provider)
+        if symbol is not None:
+            query = query.filter(MarketDataSpotPrice.symbol == symbol)
+        rows = query.order_by(
+            MarketDataSpotPrice.provider, MarketDataSpotPrice.symbol
+        ).all()
         return [
             {
                 **{field: getattr(row, field) for field in QUOTE_FIELDS + BOARD_EXTRA_FIELDS},

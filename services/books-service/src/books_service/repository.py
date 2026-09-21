@@ -1,5 +1,7 @@
 import uuid
 
+from sqlalchemy.exc import IntegrityError
+
 from desk_runtime.db import session_scope
 from desk_domain.models import Book, Trade
 from desk_runtime.functions import utcnow
@@ -9,6 +11,10 @@ from books_service.schemas import book_to_dict
 from books_service.config import SERVICE_NAME
 
 log = get_logger(SERVICE_NAME)
+
+
+class DuplicateBookName(Exception):
+    """books.name is unique; a retaken name is a client conflict, not a server fault."""
 
 
 def _audit(session, event_type, book, message):
@@ -38,6 +44,13 @@ def active_trade_count(book_id):
 
 def create_book(body):
     now = utcnow()
+    try:
+        return _create_book(body, now)
+    except IntegrityError as exc:
+        raise DuplicateBookName(body.get("name")) from exc
+
+
+def _create_book(body, now):
     with session_scope() as session:
         book = Book(
             book_id=uuid.uuid4(),
@@ -57,6 +70,13 @@ def create_book(body):
 
 
 def update_book(book_id, body):
+    try:
+        return _update_book(book_id, body)
+    except IntegrityError as exc:
+        raise DuplicateBookName(body.get("name")) from exc
+
+
+def _update_book(book_id, body):
     with session_scope() as session:
         book = session.get(Book, uuid.UUID(book_id))
         if book is None:

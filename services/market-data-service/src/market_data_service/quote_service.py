@@ -10,14 +10,14 @@ from desk_runtime.logging_config import get_logger
 log = get_logger(SERVICE_NAME)
 
 
-def board_rows():
+def board_rows(provider=None, symbol=None):
     active = load_active_set()
     official_fixings = official_fixing_set.official_fixing_board_symbols()
     rows = []
-    for row in quote_store.board_rows():
-        provider, symbol = row["provider"], row["symbol"]
-        if provider in official_fixings:
-            if symbol not in official_fixings[provider]:
+    for row in quote_store.board_rows(provider, symbol):
+        row_provider, row_symbol = row["provider"], row["symbol"]
+        if row_provider in official_fixings:
+            if row_symbol not in official_fixings[row_provider]:
                 continue
             origin = {
                 "watched": False,
@@ -26,19 +26,19 @@ def board_rows():
                 "reference": True,
             }
         else:
-            entry = active.get(symbol)
-            if entry is None or not entry.serves(provider):
+            entry = active.get(row_symbol)
+            if entry is None or not entry.serves(row_provider):
                 continue
-            origin = {**entry.origin(provider), "reference": False}
+            origin = {**entry.origin(row_provider), "reference": False}
         row["event_time"] = row["received_at"]
         row.update(origin)
         rows.append(row)
     return rows
 
 
-def quote_rows():
+def quote_rows(provider=None, symbol=None):
     now = utcnow()
-    rows = board_rows()
+    rows = board_rows(provider, symbol)
     for row in rows:
         row["freshness"] = classify(
             True,
@@ -54,23 +54,15 @@ def quote_rows():
 
 def list_quotes(symbol=None, asset_class=None, provider=None):
     return [
-        row for row in quote_rows()
-        if (symbol is None or row["symbol"] == symbol)
-        and (asset_class is None or row["asset_class"] == asset_class)
-        and (provider is None or row["provider"] == provider)
+        row for row in quote_rows(provider, symbol)
+        if asset_class is None or row["asset_class"] == asset_class
     ]
 
 
 def get_quote(provider, symbol):
     if provider not in scheduler.wired_providers():
         return None, f"unknown or unwired provider: {provider}", 404
-    row = next(
-        (
-            item for item in quote_rows()
-            if item["provider"] == provider and item["symbol"] == symbol
-        ),
-        None,
-    )
+    row = next(iter(quote_rows(provider, symbol)), None)
     if row is None:
         return None, f"no active quote for {provider}:{symbol}", 404
     return row, None, 200

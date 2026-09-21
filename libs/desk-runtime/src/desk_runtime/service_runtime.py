@@ -4,6 +4,7 @@ from wsgiref.simple_server import WSGIServer, make_server
 
 from bottle import ServerAdapter
 
+from desk_runtime.http import install_json_errors, json_response
 from desk_runtime.logging_config import configure_logging, get_logger
 
 
@@ -19,13 +20,16 @@ class ThreadedServer(ServerAdapter):
 
 def install_default_health(app, service_name):
     if all(route.rule != "/health" for route in app.routes):
-        app.route("/health")(lambda: {"service": service_name, "status": "UP"})
+        app.route("/health")(
+            lambda: json_response({"service": service_name, "status": "UP"})
+        )
 
 
 def run_service(service_name, app, port, startup=(), background=()):
     configure_logging(service_name)
     get_logger(service_name).info("starting")
     install_default_health(app, service_name)
+    install_json_errors(app)
     for hook in startup:
         hook()
     for target in background:

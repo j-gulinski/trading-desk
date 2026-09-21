@@ -21,16 +21,20 @@ def _latest_rows(session):
             MarketDataCurve.as_of_date,
             MarketDataCurve.received_at,
         )
-        .order_by(MarketDataCurve.curve_name, MarketDataCurve.as_of_date.desc())
+        .distinct(MarketDataCurve.curve_name)
+        .order_by(
+            MarketDataCurve.curve_name,
+            MarketDataCurve.as_of_date.desc(),
+            MarketDataCurve.received_at.desc(),
+        )
         .all()
     )
+    today = utcnow().date()
     latest = {}
     for (
         curve_id, provider, name, curve_basis, currency, index_tenor, as_of, received_at
     ) in rows:
-        if name in latest:
-            continue
-        age_days = max(0, (utcnow().date() - as_of).days)
+        age_days = max(0, (today - as_of).days)
         stale_after_days = curve_stale_after_days(name)
         trade_uses = curve_trade_uses(name)
         latest[name] = {

@@ -166,25 +166,23 @@ def curve_revision(provider, curve_name, as_of_date, include_raw=False):
 
 def latest_curve_sets(provider=None, include_raw=False):
     with session_scope() as session:
-        curves = (
+        query = (
             session.query(MarketDataCurve)
             .filter(MarketDataCurve.curve_name.in_(tuple(CURVE_CATALOG)))
+            .distinct(MarketDataCurve.provider, MarketDataCurve.curve_name)
             .order_by(
                 MarketDataCurve.provider,
                 MarketDataCurve.curve_name,
                 MarketDataCurve.as_of_date.desc(),
+                MarketDataCurve.received_at.desc(),
             )
-            .all()
         )
-        latest = {}
-        for row in curves:
-            key = (row.provider, row.curve_name)
-            if key in latest:
-                continue
-            if provider is not None and row.provider != provider:
-                continue
-            latest[key] = _curve_entry(session, row, include_raw)
-        return sorted(latest.values(), key=lambda entry: entry["curve_name"])
+        if provider is not None:
+            query = query.filter(MarketDataCurve.provider == provider)
+        return sorted(
+            (_curve_entry(session, row, include_raw) for row in query.all()),
+            key=lambda entry: entry["curve_name"],
+        )
 
 
 def latest_curve_set(provider, curve_name, include_raw=False):

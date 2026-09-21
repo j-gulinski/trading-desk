@@ -1,7 +1,7 @@
 import threading
 from collections import defaultdict
-from datetime import datetime
-from decimal import Decimal
+
+from desk_domain.valuation_records import is_final, valued_at, with_decimals
 
 
 class Trade:
@@ -117,33 +117,16 @@ reconciliation_lock = threading.RLock()
 _val_lock = threading.Lock()
 valuations = {}
 
-_NUMERIC_FIELDS = ("fair_value", "market_value", "unrealized_pnl", "realized_pnl", "total_pnl")
-
-
-def _parsed_valuation(valuation):
-    parsed = dict(valuation)
-    for field in _NUMERIC_FIELDS:
-        if parsed.get(field) is not None:
-            parsed[field] = Decimal(str(parsed[field]))
-    return parsed
-
-
-def _valued_at(valuation):
-    try:
-        return datetime.fromisoformat(str(valuation.get("valuation_time")))
-    except (TypeError, ValueError):
-        return None
-
 
 def record_valuation(valuation):
     trade_id = valuation.get("trade_id")
     if trade_id is None:
         return False
-    parsed = _parsed_valuation(valuation)
+    parsed = with_decimals(valuation)
     with _val_lock:
         current = valuations.get(trade_id)
-        current_at = _valued_at(current or {})
-        incoming_at = _valued_at(parsed)
+        current_at = valued_at(current or {})
+        incoming_at = valued_at(parsed)
         if current_at is not None and incoming_at is not None and incoming_at < current_at:
             return False
         valuations[trade_id] = parsed
@@ -152,10 +135,9 @@ def record_valuation(valuation):
 
 def replace_valuations(rows, active_trade_ids):
     replacement = {
-        row["trade_id"]: _parsed_valuation(row)
+        row["trade_id"]: with_decimals(row)
         for row in rows
-        if row.get("trade_id") in active_trade_ids
-        and not bool((row.get("valuation_payload") or {}).get("final"))
+        if row.get("trade_id") in active_trade_ids and not is_final(row)
     }
     global valuations
     with _val_lock:

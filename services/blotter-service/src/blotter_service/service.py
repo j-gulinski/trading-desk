@@ -6,6 +6,7 @@ from blotter_service.config import SERVICE_NAME
 from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from desk_runtime.logging_config import get_logger
 from desk_domain.instruments import instrument_type_for, type_view_for
+from desk_domain.valuation_records import is_final
 
 log = get_logger(SERVICE_NAME)
 
@@ -27,8 +28,7 @@ def _handle_valuation(valuation: dict) -> None:
     if not trade_id:
         return
 
-    payload = valuation.get("valuation_payload") or {}
-    if bool(payload.get("final")):
+    if is_final(valuation):
         cache.trades.remove(trade_id)
         cache.drop_valuation(trade_id)
         return

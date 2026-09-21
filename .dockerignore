@@ -1,7 +1,5 @@
 .git
 .env
-docs/
-scenarios/
 frontend/
 logs/
 tmp/

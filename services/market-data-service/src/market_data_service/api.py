@@ -13,11 +13,15 @@ from market_data_service.publisher import (
 )
 from market_data_service.config import SERVICE_NAME
 from desk_domain import fx
+from desk_runtime.http import json_error, json_response, query_flag, query_text, query_upper
 from desk_runtime.serialization import to_json
 from desk_runtime.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
 app = bottle.Bottle()
+
+QUOTE_HISTORY_DEFAULT_LIMIT = 60
+QUOTE_HISTORY_MAX_LIMIT = 200
 
 
 def _provider_event(message, provider):
@@ -37,9 +41,7 @@ def _provider_event(message, provider):
 
 def _serve_stream(provider=None):
     if provider is not None and provider not in scheduler.wired_providers():
-        response.status = 404
-        response.content_type = "application/json"
-        return to_json({"error": f"unknown or unwired provider: {provider}"})
+        return json_error(f"unknown or unwired provider: {provider}", 404)
     response.content_type = "text/event-stream"
     response.set_header("Cache-Control", "no-cache")
     with clients_lock:
@@ -83,11 +85,10 @@ def provider_stream(provider):
 
 @app.route("/snapshot")
 def get_snapshot():
-    response.content_type = "application/json"
     # Every event at or below this watermark was persisted before it was published.
     checkpoint = last_event_id()
     rows = quote_service.board_rows()
-    return to_json({
+    return json_response({
         "stream_id": stream_id,
         "event_id": checkpoint or None,
         "spots": {f"{row['provider']}:{row['symbol']}": row for row in rows},
@@ -97,158 +98,123 @@ def get_snapshot():
 
 @app.route("/curves")
 def get_curves():
-    response.content_type = "application/json"
-    include_raw = (request.query.raw or "").strip() in ("1", "true")
-    curves, _, _ = curve_service.list_curves(include_raw=include_raw)
-    return to_json(curves)
+    curves, _, _ = curve_service.list_curves(include_raw=query_flag("raw"))
+    return json_response(curves)
 
 
 @app.route("/curves/<provider>")
 def get_provider_curves(provider):
-    response.content_type = "application/json"
-    normalized = provider.strip().upper()
-    include_raw = (request.query.raw or "").strip() in ("1", "true")
-    curves, error, status = curve_service.list_curves(normalized, include_raw)
+    curves, error, status = curve_service.list_curves(
+        provider.strip().upper(), query_flag("raw"),
+    )
     if error is not None:
-        response.status = status
-        return to_json({"error": error})
-    return to_json(curves)
+        return json_error(error, status)
+    return json_response(curves)
 
 
 @app.route("/curves/<provider>/<curve_name>/<as_of>")
 def get_curve_revision(provider, curve_name, as_of):
-    response.content_type = "application/json"
-    normalized_provider = provider.strip().upper()
-    normalized_curve = curve_name.strip().upper()
-    include_raw = (request.query.raw or "").strip() in ("1", "true")
     curve, error, status = curve_service.get_curve_revision(
-        normalized_provider,
-        normalized_curve,
+        provider.strip().upper(),
+        curve_name.strip().upper(),
         as_of.strip(),
-        include_raw,
+        query_flag("raw"),
     )
     if error is not None:
-        response.status = status
-        return to_json({"error": error})
-    return to_json(curve)
+        return json_error(error, status)
+    return json_response(curve)
 
 
 @app.route("/curves/refresh", method="POST")
 def refresh_curves():
-    response.content_type = "application/json"
-    curve = (request.query.curve or "").strip().upper() or None
-    provider = (request.query.provider or "").strip().upper() or None
-    result, error, status = curve_service.refresh(curve, provider)
+    curve = query_upper("curve")
+    result, error, status = curve_service.refresh(curve, query_upper("provider"))
     if error is not None:
-        response.status = status
-        return to_json({"error": error, "curve": curve})
-    return to_json(result)
+        return json_error(error, status, curve=curve)
+    return json_response(result)
 
 
 @app.route("/quotes")
 def get_quotes():
-    response.content_type = "application/json"
-    symbol = (request.query.symbol or "").strip().upper() or None
-    asset_class = (request.query.asset_class or "").strip().upper() or None
-    provider = (request.query.provider or "").strip().upper() or None
-    return to_json(quote_service.list_quotes(symbol, asset_class, provider))
+    return json_response(quote_service.list_quotes(
+        query_upper("symbol"), query_upper("asset_class"), query_upper("provider"),
+    ))
 
 
 @app.route("/quotes/<provider>/<symbol>")
 def get_quote(provider, symbol):
-    response.content_type = "application/json"
-    normalized_provider = provider.strip().upper()
-    normalized_symbol = symbol.strip().upper()
     row, error, status = quote_service.get_quote(
-        normalized_provider, normalized_symbol
+        provider.strip().upper(), symbol.strip().upper(),
     )
     if error is not None:
-        response.status = status
-        return to_json({"error": error})
-    return to_json(row)
+        return json_error(error, status)
+    return json_response(row)
 
 
 @app.route("/quotes/<provider>/<symbol>/history")
 def get_quote_history(provider, symbol):
-    response.content_type = "application/json"
-    normalized_provider = provider.strip().upper()
-    normalized_symbol = symbol.strip().upper()
     try:
-        limit = int(request.query.limit or 60)
+        limit = int(query_text("limit", QUOTE_HISTORY_DEFAULT_LIMIT))
     except (TypeError, ValueError):
-        response.status = 400
-        return to_json({"error": "limit must be an integer between 1 and 200"})
-    if not 1 <= limit <= 200:
-        response.status = 400
-        return to_json({"error": "limit must be between 1 and 200"})
-    include_raw = (request.query.raw or "").strip() in ("1", "true")
+        return json_error(
+            f"limit must be an integer between 1 and {QUOTE_HISTORY_MAX_LIMIT}", 400,
+        )
+    if not 1 <= limit <= QUOTE_HISTORY_MAX_LIMIT:
+        return json_error(f"limit must be between 1 and {QUOTE_HISTORY_MAX_LIMIT}", 400)
     history, error, status = quote_service.get_quote_history(
-        normalized_provider, normalized_symbol, limit, include_raw
+        provider.strip().upper(), symbol.strip().upper(), limit, query_flag("raw"),
     )
     if error is not None:
-        response.status = status
-        return to_json({"error": error})
-    return to_json(history)
+        return json_error(error, status)
+    return json_response(history)
 
 
 @app.route("/watchlist")
 def get_watchlist():
-    response.content_type = "application/json"
-    return to_json(quote_service.list_watchlist())
+    return json_response(quote_service.list_watchlist())
 
 
 @app.route("/watchlist", method="POST")
 def post_watchlist():
-    response.content_type = "application/json"
     raw_body = request.json
     if not isinstance(raw_body, dict):
-        response.status = 400
-        return to_json({"error": "request body must be an object"})
-    body = dict(raw_body)
-    item, error, status = quote_service.add_watchlist_item(body)
+        return json_error("request body must be an object", 400)
+    item, error, status = quote_service.add_watchlist_item(dict(raw_body))
     if error is not None:
-        response.status = status
-        return to_json({"error": error})
-    response.status = status
-    return to_json(item)
+        return json_error(error, status)
+    return json_response(item, status)
 
 
 @app.route("/watchlist/<symbol>", method="DELETE")
 def delete_watchlist(symbol):
-    response.content_type = "application/json"
-    provider = (request.query.provider or "").strip().upper() or None
-    result, error, status = quote_service.remove_watchlist_item(symbol, provider)
+    result, error, status = quote_service.remove_watchlist_item(
+        symbol, query_upper("provider"),
+    )
     if error is not None:
-        response.status = status
-        return to_json({"error": error})
-    return to_json(result)
+        return json_error(error, status)
+    return json_response(result)
 
 
 @app.route("/fx/rates")
 def get_fx_rates():
-    response.content_type = "application/json"
-    to_currency = (request.query.to or "").strip().upper()
+    to_currency = query_upper("to", "")
     if not watchlist.CURRENCY_PATTERN.match(to_currency):
-        response.status = 400
-        return to_json({"error": "to must be a 3-letter ISO currency code"})
-    return to_json({"to": to_currency, "rates": fx.rates_to(to_currency)})
+        return json_error("to must be a 3-letter ISO currency code", 400)
+    return json_response({"to": to_currency, "rates": fx.rates_to(to_currency)})
 
 
 @app.route("/symbols/search")
 def search_symbols():
-    response.content_type = "application/json"
-    query = (request.query.q or "").strip()
+    query = query_text("q", "")
     if len(query) < 2:
-        response.status = 400
-        return to_json({"error": "q must be at least 2 characters"})
+        return json_error("q must be at least 2 characters", 400)
     results, provider_errors = symbol_search.search(query)
     if len(provider_errors) == len(scheduler.wired_quote_providers()):
-        response.status = 503
-        return to_json({
-            "error": "symbol search is unavailable from every wired provider",
-            "provider_errors": provider_errors,
-        })
-    return to_json({
+        return json_error(
+            "symbol search is unavailable from every wired provider", 503,
+            provider_errors=provider_errors,
+        )
+    return json_response({
         "query": query.upper(),
         "results": results,
         "provider_errors": provider_errors,
@@ -257,27 +223,22 @@ def search_symbols():
 
 @app.route("/providers")
 def get_providers():
-    response.content_type = "application/json"
-    return to_json(scheduler.providers_overview())
+    return json_response(scheduler.providers_overview())
 
 
 @app.route("/providers/<name>/health")
 def get_provider_health(name):
-    response.content_type = "application/json"
-    detail = scheduler.provider_health(name.upper())
+    detail = scheduler.provider_health(name.strip().upper())
     if detail is None:
-        response.status = 404
-        return to_json({"error": f"unknown provider: {name}"})
-    return to_json(detail)
+        return json_error(f"unknown provider: {name}", 404)
+    return json_response(detail)
 
 
 @app.route("/refresh", method="POST")
 def refresh():
-    response.content_type = "application/json"
-    symbol = (request.query.symbol or "").strip().upper()
-    provider = (request.query.provider or "").strip().upper() or None
-    tick, error, status = quote_service.refresh(symbol or None, provider)
+    symbol = query_upper("symbol")
+    provider = query_upper("provider")
+    tick, error, status = quote_service.refresh(symbol, provider)
     if error is not None:
-        response.status = status
-        return to_json({"error": error, "symbol": symbol, "provider": provider})
-    return to_json(tick)
+        return json_error(error, status, symbol=symbol, provider=provider)
+    return json_response(tick)
