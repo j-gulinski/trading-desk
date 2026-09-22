@@ -17,11 +17,16 @@
 ## 2. System inventory (Stage 0)
 
 Six Bottle services in Docker Compose, one PostgreSQL database, one React frontend. Each
-service is one process in one container, served by Bottle's built-in threaded server, using
-a synchronous database driver (SQLAlchemy + psycopg). There are no automated tests.
+service is one process in one container, served by a small threaded server from `desk-runtime`
+(`wsgiref` with one thread per connection, `service_runtime.py`), using a synchronous
+database driver (SQLAlchemy + psycopg). There are no automated tests.
 
 Every service is **I/O-bound**: handlers wait on the database or on another service, never
 on computation. Endpoint details are in appendix A.
+
+The load is small. One browser polls a few endpoints every 2–10 s and holds three SSE streams;
+monitoring calls every `/health` every 5 s; pricing and blotter each hold one internal stream.
+No service has more than about five requests in flight at once.
 
 ### 2.1 Services
 
@@ -88,7 +93,7 @@ on computation. Endpoint details are in appendix A.
 Five services keep live data only in their own memory: pricing holds the latest valuations,
 trade-action holds its order queue, and so on. Running two copies of such a service would
 split that data between them — a request to one copy would not see what the other holds. So
-these five can only ever run as one copy each. books-service keeps nothing in memory; four
+these five can only ever run as one copy each. books-service keeps nothing in memory; several
 copies of it would behave exactly like one. That matters for the benchmark, which the PDF
 runs with several worker processes: for books-service that setup is real, for the others it
 could not exist.
@@ -114,18 +119,20 @@ monitoring's `/logs` needs the log collector.
 
 The PDF prescribes a small sample app, built in both frameworks, with a few endpoints. Three
 are artificial on purpose — each isolates one property — and one uses the real books code.
-Each runs at four concurrency levels — c = 1, 10, 50 and 200 clients sending requests at the
-same time — and with two process counts: N = 4 as the PDF's default, and N = 1 because that is
-how every service here actually runs (see 2.1). The thresholds each scenario has to meet are
-in `docs/decision_criteria.md`.
 
 | # | Endpoint | Does | Answers |
 | --- | --- | --- | --- |
-| S1 | `/health` | Returns tiny JSON, no I/O | Bare cost of the framework |
-| S2 | `/io` | Calls a stub that waits 30 ms | Waiting for another service — where ASGI should win |
-| S3 | `/cpu` | Hashes in a loop | Pure computation — where ASGI does not help. A control |
-| S4 | `/books`, `/books/<id>` | Real code, real DB, reads only | What migration does to *this* system. No gain expected — proves nothing breaks |
-| S5 | N held SSE clients + one GET | Holds N stream connections open, measures a normal request | Whether held connections slow everyone down. Three services stream; each client holds a thread |
+| S1 | `GET /health` | Returns tiny JSON, no I/O | Bare cost of the framework and server |
+| S2 | `GET /io` | Calls a stub service that waits 50 ms | Waiting for another service — where ASGI should win |
+| S3 | `GET /cpu` | 20 000 rounds of SHA-256 | Pure computation — where ASGI cannot help. A control |
+| S4 | `GET /books` | Real books-service code: one query, 20 books as JSON | What migration does to *this* system. No gain expected; shows nothing breaks |
+
+Each scenario runs at c = 1, 10, 50 and 200 against three variants: Bottle on sync workers,
+Bottle on threaded workers and FastAPI. The variants, the thresholds and the reason the
+threaded Bottle variant is included are in `docs/decision_criteria.md`.
+
+Held SSE connections are not measured. One browser and two internal consumers hold five
+streams in total — a load no server here notices.
 
 ---
 
