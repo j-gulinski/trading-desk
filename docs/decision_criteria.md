@@ -1,90 +1,73 @@
 # Decision criteria: Bottle (WSGI) to FastAPI (ASGI)
 
-Stage 2 of the plan, written in Stage 0 and committed before the first benchmark run
-(Stage 1). The sample and scenarios S1–S5 are defined in the report, section 2.
+Written in Stage 0 and committed on its own before the first benchmark run (Stage 1). The
+sample and the scenarios S1–S4 are described in the report, section 2.
 
 ## 1. The decision
 
 **GO** — migrate all six services to FastAPI, API contract unchanged.
 **NO-GO** — stay on Bottle and implement one item of an alternative plan.
 
-Both are valid outcomes. The benchmark results pass through four gates, in order. Failing
-any gate means NO-GO.
+Both are valid outcomes. GO requires all four gates below. Failing any gate means NO-GO.
 
-## 2. Terms
+## 2. What is compared
+
+| Variant | Server | Handlers |
+| --- | --- | --- |
+| **A** Bottle | gunicorn, N sync workers (`-w N`) | plain functions — the PDF's reference point |
+| **A′** Bottle + threads | gunicorn, N workers × 40 threads (`-w N --threads 40`) | the same code; 40 = FastAPI's default thread pool, so both sides can run the same number of blocking calls at once |
+| **B** FastAPI | uvicorn, N workers (`--workers N`) | `async def` where the I/O is non-blocking (S1, S2 via `httpx.AsyncClient`); `def` where it blocks (S3 computation, S4 synchronous database driver) |
+
+**WSGI** in the gates means the better of A and A′ at that point. Switching Bottle to
+threaded workers costs one flag, so that is what the migration has to beat.
+
+Same machine, same N, same Python and pinned versions, production mode, no reload, no
+access log. Bottle's development server is never measured.
+
+## 3. Terms
 
 | Term | Meaning |
 | --- | --- |
-| **c** | Concurrency — how many clients send requests at the same time. c = 1 is one client waiting for each answer; c = 200 is two hundred at once. Each scenario runs at c = 1, 10, 50 and 200 |
-| **N** | How many copies of the service process run behind one port. N = 4 is the PDF's default; N = 1 is how every service here runs today |
-| **p95** | The response time that 95 % of requests beat. Says how slow the slow requests are; an average would hide them |
+| **c** | Concurrency — how many clients send requests at the same time: 1, 10, 50, 200 |
+| **N** | Worker processes behind one port, the same for every variant |
 | **throughput** | Requests completed per second |
-| **spread** | The gap between the fastest and slowest of the three repeated runs of one measurement |
+| **p95** | The response time that 95 % of requests beat |
+| **spread** | Max − min of one measurement over its three runs |
 
-## 3. What counts as a result
+## 4. What counts as a result
 
-**Setup.** Bottle behind gunicorn (N processes) against FastAPI on uvicorn (N workers,
-`async def` handlers). Same machine, same N, production mode, no reload, no console
-logging, versions pinned. Bottle's built-in development server is never measured — it is
-single-purpose and would make any comparison unfair.
+- Each point is run three times, alternating A, A′, B, and reported as the median.
+- A difference counts only when the gap between medians is larger than the larger of the two
+  spreads. Anything smaller is *no difference*.
+- A variant that returns more than 1 % errors or timeouts at a point loses that point,
+  whatever its latency — failed requests do not appear in the percentiles.
 
-**Repetition.** Every point is measured three times per variant, alternating A, B, A, B, so
-that a busy moment on the machine hits both variants equally.
+## 5. The four gates
 
-**Uncertainty rule.** A difference counts only if the gap between the two medians is larger
-than the larger of the two spreads. Anything smaller is recorded as *no difference*.
+**Gate 1 — nothing gets worse.** At c = 10, B's throughput is no more than 10 % below WSGI in
+S1 (framework overhead), S3 (computation) and S4 (the real books code).
 
-## 4. The four gates
+**Gate 2 — it helps where it should.** In S2 (waiting 50 ms on another service) at c = 50,
+B cuts p95 by at least 30 % **or** at least doubles throughput against WSGI. This is the
+PDF's example criterion, applied to the only scenario where async can help at all.
 
-**Gate 1 — nothing gets worse.** Any one of these is NO-GO.
+**Gate 3 — the cost fits.** The Stage 2 estimate of the full migration is at most **40 hours**,
+including contract tests, which do not exist yet and are required before migrating. The
+estimate is built per service from the inventory: endpoints, background threads, SSE streams,
+in-memory state. 40 hours is one working week, the share of this assignment set aside for
+Stage 4.
 
-| Scenario | Point | Blocker | Why this limit |
-| --- | --- | --- | --- |
-| S3 `/cpu` | c = 10 | FastAPI slower by more than 10 % | 10 % is about the run-to-run noise on one machine |
-| S4 `/books` | c = 50 | FastAPI slower by more than 10 % | same |
-| S1 `/health` | c = 1 | FastAPI slower by more than 20 % | no I/O to hide behind — a loss here means the port is wrong |
+**Gate 4 — the system needs it.** The Gate 2 gain must also appear in S2 at c = 10. That is
+the measured point nearest twice today's peak: one browser, the monitoring health checks and
+two internal stream consumers keep at most about five requests in flight per service. A gain
+that appears only at c = 50 or 200 answers a load this system does not have.
 
-**Gate 2 — it helps where it should.** Both must pass.
+Pydantic validation, OpenAPI and the cost of learning `asyncio` are weighed in the decision
+record (report, section 6). They are not gates, because they cannot be measured here.
 
-| Scenario | Point | Required | Why this scenario |
-| --- | --- | --- | --- |
-| S2 `/io` | c = 50, at both N = 4 and N = 1 | p95 down by 30 % **or** throughput doubled | the one case where async can help at all: waiting for another service |
-| S5 held SSE clients | 200 clients, N = 1 | p95 of a plain GET down by 30 % | the one such case this system has: clients holding a stream, each on a thread |
+## 6. Revisit when
 
-The 30 % and 2x limits are the PDF's example criterion; c = 50 is far above today's traffic,
-so a gain must be large to mean anything.
-
-S4 is not in this gate. With a synchronous database driver no gain is expected there; a gain
-larger than the spread means the measurement is wrong, not that the migration helps.
-
-**Gate 3 — the change is manageable.** The books-service pilot in Stage 2 produces a list of
-what actually had to change: routing, request validation, error format, database access,
-start-up, Docker. That list is applied on paper to the other five services. GO requires that
-nothing on it lacks a known solution — in particular the three SSE streams, the background
-threads and the in-memory state that books-service does not have.
-
-**Gate 4 — there is a reason beyond the numbers.** The inventory found no performance
-problem: the system serves one browser and its own health checks. Gates 1–3 show the
-migration is safe, effective and manageable — not that it is needed. GO also requires a
-reason the numbers cannot give.
-
-For:
-
-- FastAPI checks incoming request data automatically. Today every service does it by hand.
-- FastAPI generates API documentation. Of little value here — the only client is our own
-  frontend.
-
-Against:
-
-- FastAPI code is written as `async`. One wrong call inside it — a blocking one — slows every
-  other request in the process. Every database call in this codebase is blocking today.
-- Bottle is simpler to read and to teach.
-
-GO needs at least one *for* judged decisive by the owner. Both *against* always count.
-
-## 5. Revisit when
-
-- traffic grows well beyond one browser plus health checks;
-- WebSocket or many concurrent SSE clients are required;
-- any service needs more than one process;
+- peak concurrency on any service grows past about ten requests in flight;
+- WebSocket or many concurrent SSE clients become a requirement;
+- a service needs more than one process;
 - an asynchronous database driver is adopted.
