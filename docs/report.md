@@ -283,12 +283,85 @@ they measure one sample service — the other five would add streams and backgro
 not new kinds of work.
 
 **Surprises.** The `TCP_NODELAY` defect in multi-worker uvicorn (section 3) would have added
-40 ms to every B request had the smoke test not caught it. And B lost the one scenario it was
-expected to win, by running out of CPU rather than threads.
+40 ms to every B request had the smoke test not caught it. And in the one scenario B was
+expected to win, it lost to threaded Bottle above c = 10 — by running out of CPU, not threads.
 
 ## 6. Criteria and decision (ADR)
 
-*Stage 2 (go / no-go decision), against the thresholds in `docs/decision_criteria.md`.*
+### ADR-001: Keep Bottle (WSGI); do not migrate to FastAPI (ASGI)
+
+**Date:** 2026-09-23. **Status:** accepted.
+
+**Context.** Six Bottle services, one process each, synchronous database driver, no tests
+(section 2). The load is one browser, health checks and two internal streams — at most about
+five requests in flight per service. The question is the one teams ask regularly: should we
+move to FastAPI?
+
+**Decision criteria.** Four gates, committed on their own in `237fd81` before any benchmark
+code existed (`docs/decision_criteria.md`). GO needs all four.
+
+**Cost estimate (Gate 3).** From the inventory, per service. Assumptions: contract tests
+0.25 h per endpoint (none exist, and GO requires them); porting 0.5 h per endpoint (Pydantic
+models in and out, the old status codes and `{"error": …}` format); 2 h per served SSE
+stream; 1.5 h per service with background threads or in-memory state (lifespan, ordering).
+
+| Service | Endpoints | Tests | Port | Streams | Threads, state | Hours |
+| --- | --- | --- | --- | --- | --- | --- |
+| market-data | 19 | 4.75 | 9.5 | 2 | 1.5 | 17.75 |
+| pricing | 7 | 1.75 | 3.5 | 2 | 1.5 | 8.75 |
+| monitoring | 5 | 1.25 | 2.5 | 2 | 1.5 | 7.25 |
+| books | 6 | 1.5 | 3 | — | — | 4.5 |
+| trade-action | 6 | 1.5 | 3 | — | 1.5 | 6 |
+| blotter | 7 | 1.75 | 3.5 | — | 1.5 | 6.75 |
+| shared: desk-runtime 4 h, Docker and README 2 h, after-benchmark 2 h | | | | | | 8 |
+| **Total** | **50** | **12.5** | **25** | **6** | **7.5** | **59** |
+
+Even at half the porting time (0.25 h per endpoint) the total is 46.5 h, above the 40 h limit.
+
+**Data.**
+
+| Gate | Measured | Verdict |
+| --- | --- | --- |
+| 1 — nothing gets worse | S3 no difference; S4 B +6 %; S1 B −14 % against threaded Bottle | fail (S1) |
+| 2 — gain where it should | S2, c = 50: B 451 req/s, p95 153 ms; threaded Bottle 723 req/s, p95 77 ms | fail |
+| 3 — cost ≤ 40 h | 59 h (46.5 h if porting is twice as fast) | fail |
+| 4 — the system needs it | S2, c = 10: 181 vs 182 req/s, p95 58 vs 57 ms — no difference | fail |
+
+Spreads are 1–5 %; no verdict sits near its threshold. The top three risks (section 7) are
+blocking calls on the event loop, silent contract changes and the absence of tests.
+
+**Options considered.**
+
+| Option | For | Against | Cost |
+| --- | --- | --- | --- |
+| 1. Full migration to FastAPI | Pydantic validation instead of hand-written checks; OpenAPI; ready for WebSocket and many streams | no measured gain at this load; every handler stays `def` until the database driver changes; 12 risks; `asyncio` to learn | 59 h |
+| 2. Stay on WSGI, fix the server | threaded gunicorn was the best variant in S1 and S2; production server instead of `wsgiref`; one file changes | no automatic validation or OpenAPI; a fixed pool of 40 threads | 2–3 h, measured in Stage 4 |
+| 3. Partial or deferred: books-service only, or wait for a trigger | keeps the FastAPI option warm | two runtimes to maintain (risk 10); still no gain | 4.5 h for books |
+
+**Decision.** **NO-GO.** All four gates fail, and the decisive one is Gate 4: at the
+concurrency this system actually has, FastAPI and threaded Bottle measure the same (181 vs
+182 req/s). Where async should shine — many clients waiting at once — threads already cover
+up to 40 in flight, and FastAPI ran out of CPU before it could pass them. Pydantic and
+OpenAPI are real benefits but do not buy back 59 hours of work with no measured gain.
+
+**Consequences.**
+
+- Code: `desk-runtime` moves from `wsgiref` to gunicorn with threads (Stage 4B). Services
+  keep Bottle and synchronous handlers; nothing about their endpoints changes.
+- Operation: a bounded pool of 40 threads per service. Every open SSE stream holds one, so
+  a few dozen browser tabs would starve the rest — a revisit condition below.
+- Team: no `asyncio` to learn; hand-written request validation stays.
+- The FastAPI sample stays in `benchmark/sample_asgi/` as a proof of concept for a future
+  revision.
+
+**Revisit when** any of these happens:
+
+- a service regularly has more than about 40 requests in flight — the thread limit where
+  threaded Bottle's p95 starts to grow in S2;
+- more than about 20 SSE clients per service, or WebSocket;
+- an asynchronous database driver is adopted — only then can FastAPI handlers stop using the
+  thread pool;
+- a service needs more than one process.
 
 ## 7. Risk analysis
 
