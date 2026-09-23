@@ -1,10 +1,11 @@
 [project]
 name = "desk-runtime"
 version = "0.1.0"
-description = "Service infrastructure: config, DB engine, logging, serialization, WSGI runtime"
+description = "Service infrastructure: config, DB engine, logging, serialization, WSGI runtime (gunicorn)"
 requires-python = ">=3.14"
 dependencies = [
     "bottle",
+    "gunicorn",
     "psycopg[binary]",
     "SQLAlchemy",
     "structlog",

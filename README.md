@@ -51,7 +51,7 @@ This removes the local database and cached frontend dependencies. There is no le
 | --- | --- |
 | `libs/desk-domain` | Instrument catalogue, contract terms, trade rules, storage models, provider vocabulary and domain queries |
 | `libs/desk-pricing` | Pure numerical functions for curves, bonds, swaps, options and risk |
-| `libs/desk-runtime` | Configuration, database sessions, logging, JSON responses and errors, HTTP runtime |
+| `libs/desk-runtime` | Configuration, database sessions, logging, JSON responses and errors, HTTP runtime (gunicorn: one worker process, `HTTP_THREADS` threads, default 40) |
 | `services/market-data-service` · 8001 | Provider adapters, watchlist, quote/curve storage and streams |
 | `services/pricing-service` · 8002 | Pricing, valuation persistence, scenarios and valuation stream |
 | `services/monitoring-service` · 8003 | Health, audit and logs |

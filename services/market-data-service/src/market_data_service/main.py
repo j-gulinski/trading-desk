@@ -6,8 +6,8 @@ from market_data_service.scheduler import POLL_LOOPS
 from desk_runtime.service_runtime import run_service
 
 def main():
-    prune_retired_curve_sets()
-    run_service(SERVICE_NAME, app, PORT, background=(*POLL_LOOPS, retention_sweep_loop))
+    run_service(SERVICE_NAME, app, PORT, startup=[prune_retired_curve_sets],
+                background=(*POLL_LOOPS, retention_sweep_loop))
 
 
 if __name__ == "__main__":

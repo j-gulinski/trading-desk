@@ -1,6 +1,7 @@
 alembic==1.19.1
 bottle==0.13.4
 greenlet==3.5.5
+gunicorn==26.2.0
 Mako==1.4.1
 MarkupSafe==3.0.3
 psycopg[binary]==3.3.4
