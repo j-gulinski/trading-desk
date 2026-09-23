@@ -23,13 +23,14 @@ HERE = Path(__file__).parent
 RESULTS = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "results"
 CHARTS = RESULTS / "charts"
 
-ORDER = ["A", "A-threads", "B", "before", "after"]
+ORDER = ["A", "A-threads", "B", "before", "after", "B-std"]
 LABELS = {
     "A": "A · Bottle, sync", "A-threads": "A′ · Bottle, 40 threads", "B": "B · FastAPI",
     "before": "before · wsgiref, thread per connection", "after": "after · gunicorn, 40 threads",
+    "B-std": "B-std · FastAPI on uvloop + httptools",
 }
 COLORS = {"A": "#2a78d6", "A-threads": "#eb6834", "B": "#1baf7a",
-          "before": "#2a78d6", "after": "#eb6834"}
+          "before": "#2a78d6", "after": "#eb6834", "B-std": "#1baf7a"}
 VARIANTS = []  # the ones present in RESULTS, set in main()
 SCENARIOS = {
     "s1": "S1 /health — framework overhead",
@@ -161,12 +162,12 @@ def fmt_range(point, metric, digits):
     return f"{m:.{digits}f} ({lo:.{digits}f}–{hi:.{digits}f})"
 
 
-def before_after(points):
-    """Stage 4B: change of `after` against `before`, uncertainty rule applied."""
+def versus(points, base, other):
+    """Change of `other` against `base` at every point, uncertainty rule applied."""
     out = ["| Scenario | c | Throughput | p95 |", "| --- | --- | --- | --- |"]
     for scenario in SCENARIOS:
         for c in LEVELS:
-            b, a = points[("before", scenario, c)], points[("after", scenario, c)]
+            b, a = points[(base, scenario, c)], points[(other, scenario, c)]
             cells = []
             for metric in ("rps", "p95"):
                 change = compare(a, b, metric)
@@ -266,7 +267,9 @@ def main():
     if {"A", "A-threads", "B"} <= set(VARIANTS):
         lines += ["## Gates", ""] + gates(points) + [""]
     if {"before", "after"} <= set(VARIANTS):
-        lines += ["## After against before", ""] + before_after(points) + [""]
+        lines += ["## After against before", ""] + versus(points, "before", "after") + [""]
+    if {"after", "B-std"} <= set(VARIANTS):
+        lines += ["## B-std against after", ""] + versus(points, "after", "B-std") + [""]
     if demo():
         lines += ["## Blocking demo", ""] + demo() + [""]
     (RESULTS / "summary.md").write_text("\n".join(lines))

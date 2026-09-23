@@ -11,11 +11,14 @@ differs. Criteria are in `../docs/decision_criteria.md`, interpretation in `../d
 | S3 | `GET /cpu` | computation: 20 000 rounds of SHA-256 |
 | S4 | `GET /books` | the real books-service code: one query, 20 books |
 
-| Variant | Command |
-| --- | --- |
-| A | `gunicorn -w 1 sample_wsgi.app:app` (sync worker) |
-| A-threads | `gunicorn -w 1 --threads 40 sample_wsgi.app:app` (gthread worker) |
-| B | `uvicorn sample_asgi.app:app --workers 1 --no-access-log` |
+| Variant | Command | Stage |
+| --- | --- | --- |
+| A | `gunicorn -w 1 sample_wsgi.app:app` (sync worker) | 1 |
+| A-threads | `gunicorn -w 1 --threads 40 sample_wsgi.app:app` (gthread worker) | 1 |
+| B | `uvicorn sample_asgi.app:app --no-access-log --loop asyncio --http h11` — a plain `pip install uvicorn` | 1 |
+| before | `python -m sample_wsgi.serve_wsgiref` — the wsgiref server the services ran on until 4B | 4B |
+| after | `python -m sample_wsgi.serve_runtime` — desk-runtime's gunicorn server since 4B | 4B |
+| B-std | as B, with `--loop uvloop --http httptools` — what `uvicorn[standard]` installs | 4B |
 
 ## Running it
 
@@ -25,8 +28,11 @@ pip install -r benchmark/requirements.txt
 # hey: brew install hey, or go install github.com/rakyll/hey@latest
 docker compose up -d postgres db-migrations          # or any migrated database
 export DATABASE_URL=postgresql+psycopg://trading:<password>@localhost:5432/trading_desk
-benchmark/run_benchmark.sh                          # about 1 h 45 min
+benchmark/run_benchmark.sh                          # Stage 1, about 1 h 45 min
 python benchmark/analyze.py                         # tables, charts, gate check
+VARIANTS="before after B-std" RESULTS=results-4b benchmark/run_benchmark.sh
+RESULTS=results-4b benchmark/blocking_demo.sh      # 6 min
+python benchmark/analyze.py benchmark/results-4b
 ```
 
 The script seeds 20 books if they are missing, starts the stub and all three variants,
@@ -40,7 +46,12 @@ Output, one file per measurement:
 - `results/<variant>_<scenario>_c<c>_run<n>.txt` — hey summary: throughput, percentiles,
   status codes, errors;
 - `results/….usage.csv` — CPU % and RSS of the server process, one sample per second;
-- `results/summary.md`, `results/summary.csv`, `charts/s1–s4.png` — from `analyze.py`.
+- `results/summary.md`, `results/summary.csv`, `results/charts/s1–s4.png` — from `analyze.py`.
+
+`results/` is Stage 1. `results-4b/` is Stage 4B: the services' old server against the new
+one on the same sample and scenarios, plus FastAPI with uvloop and httptools as a check on
+Stage 1, and `blocking_demo.sh` — `/health` on FastAPI while ten clients run a computation
+declared `def` and then, wrongly, `async def`.
 
 ## Decisions that differ from the PDF's example
 

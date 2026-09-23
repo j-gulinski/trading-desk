@@ -41,6 +41,13 @@ def cpu(n: int = 20000):  # def: computation would block the event loop, so it r
     return {"digest": h.hex()[:16]}
 
 
+# blocking_demo.sh only: the same work declared async def — a mistake on purpose, it blocks
+# the event loop and every other request with it.
+@app.get("/cpu-async")
+async def cpu_async(n: int = 20000):
+    return cpu(n)
+
+
 # S4: the same repository call as books-service. def: the database driver is synchronous.
 @app.get("/books")
 def list_books():
