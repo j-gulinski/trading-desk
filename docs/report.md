@@ -3,6 +3,7 @@
 | | |
 | --- | --- |
 | Repository | `trading-desk`, branch `hw-5.5-asgi-migration` |
+| Commits in stage order | criteria `237fd81` → benchmark `a3ed7f0`, results `339128b` → decision `3ef4b1c` → risks `9f5ae79` → alternative plan `dd9f522`, `5dfb3cf` and its results |
 | Development | Apple M3, 8 cores, 16 GB, Docker Desktop 29.4.3 |
 | Benchmark host | cloud VM, Intel Xeon 2.1 GHz, 4 vCPU, 15 GB, Ubuntu 24.04 (section 3) |
 | Versions | Python 3.14.7, Bottle 0.13.4, SQLAlchemy 2.0.52, psycopg 3.3.4, PostgreSQL 18.6 |
@@ -11,7 +12,13 @@
 
 ## 1. Summary
 
-*Written last, after Stage 2 (go / no-go decision).*
+**NO-GO: the services stay on Bottle.** At the concurrency this system actually has, FastAPI
+and Bottle on threaded workers serve the same when waiting on another service (181 vs
+182 req/s at c = 10); at c = 50 FastAPI runs out of CPU at 451 req/s where threads reach 723;
+and the migration would cost 59 hours against a 40-hour limit. Instead, `desk-runtime` now
+serves all six services with gunicorn threads instead of the hand-rolled `wsgiref` server:
++19–24 % throughput on the real books code at c ≥ 10, and no lost requests at c = 200 where
+the old server dropped up to 8.4 %.
 
 ---
 
@@ -255,7 +262,7 @@ and the asyncio loop of a plain uvicorn install. Above c = 50 B lost throughput 
 c = 200) while A′ held 723. The likely cause is `httpx`'s default pool of 100 connections:
 the other requests queue inside the client, and its bookkeeping eats the core. Stage 4
 repeats S1–S4 with `uvicorn[standard]` (uvloop, httptools) to check how much of this is the
-installation rather than ASGI.
+installation rather than ASGI (8.4: it doubles S1, and leaves S2 where it is).
 
 **Computation (S3) is the control, and it behaves.** Every variant does ~160 req/s — one
 core, ~6 ms of hashing per request. No server helps with that. Tails differ: A serves
@@ -363,7 +370,7 @@ OpenAPI are real benefits but do not buy back 59 hours of work with no measured 
   thread pool;
 - a service needs more than one process.
 
-## 7. Risk analysis (Stage 3)
+## 7. Risk analysis
 
 Risks of migrating to FastAPI, specific to this system. P = probability, I = impact,
 L / M / H = low / medium / high. The three most serious come first.
@@ -383,13 +390,174 @@ L / M / H = low / medium / high. The three most serious come first.
 | 11 | One developer new to `asyncio`: missing `await`, shared state across tasks, no timeouts | organizational | M | M | checklist in review; explicit timeouts on every network call; `asyncio` debug mode in development | "coroutine was never awaited" warnings; requests that hang |
 | 12 | Dependency drift between services (Pydantic, httpx, anyio) | technical | L | L | already one `requirements.txt` for the whole repository | different versions in `pip freeze` of two images |
 
-## 8. Refactor (GO) or alternative plan (NO-GO)
+## 8. Alternative plan (Stage 4B)
 
-*Stage 4A after GO, Stage 4B after NO-GO.*
+### 8.1 Why NO-GO, and when to look again
+
+The data that decided it: at c = 10 — twice today's peak — FastAPI and threaded Bottle
+measure the same in S2 (181 vs 182 req/s), and the migration costs 59 h against a 40 h limit.
+The gain async promises needs many clients waiting at once; this system has about five
+requests in flight per service. Revisit when a service regularly holds more than ~40 requests
+in flight, when more than ~20 SSE clients or WebSocket are needed, when an asynchronous
+database driver is adopted, or when a service needs a second process (section 6).
+
+### 8.2 The plan
+
+| # | Item | Cost | Expected effect | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Serve every service with gunicorn threads (1 worker × 40) instead of `wsgiref` | 2–3 h | the best WSGI variant of Stage 1 in production: HTTP/1.1 keep-alive, a bounded thread pool, a listen backlog of 2048 instead of 5, a graceful stop, no per-request log line on stderr | **done**, measured in 8.3 |
+| 2 | Contract tests for the 50 endpoints, recorded on today's code | 12.5 h | catch regressions in any later change, including a future migration | next |
+| 3 | Size the database pool to the thread count (`pool_size`) | 0.5 h | no 30 s waits for a connection when 40 threads burst at once (risk 7) | when load grows |
+| 4 | FastAPI with an async driver for market-data only, the one service with many waiting clients (streams) | ~20 h | the only place ASGI could pay off | only on a revisit trigger |
+
+### 8.3 Item 1: what changed and what it measured
+
+`desk-runtime`'s `service_runtime.py` is the only runtime file that changed (`dd9f522`):
+`ThreadedServer` (wsgiref + `ThreadingMixIn`) became `ServiceServer`, a gunicorn application
+with one worker and `HTTP_THREADS` threads. Startup hooks and background threads now start
+inside the worker, next to the handlers that read their state; market-data's curve pruning
+moved into a startup hook so no database connection is opened before the fork. The API
+contract is unchanged; so is every service's code apart from one line in market-data.
+
+Checked on all six services running locally: book create/read/update/delete with the old
+status codes and `{"error": …}` bodies for 400, 404, 405 and 409; the three SSE streams;
+pricing reconnecting when market-data restarts; keep-alive; a stop within 7 s with a stream
+held open. No tracebacks, no worker timeouts.
+
+**Before/after benchmark** — the same sample, scenarios and grid as Stage 1 (`results-4b/`).
+*before* is the sample on the old server, *after* on `ServiceServer`.
+
+| Scenario | c | before · wsgiref | after · gunicorn threads | Change |
+| --- | --- | --- | --- | --- |
+| S1 `/health` | 10 | 2614 req/s | 6360 req/s | **+143 %** |
+| S1 `/health` | 200 | 2633 req/s · p99 1039 ms · 0.4 % errors | 6458 req/s · p99 90 ms · no errors | +145 % |
+| S2 `/io` | 10 | 186 req/s | 185 req/s | no difference |
+| S2 `/io` | 50 | 604 req/s · p99 1083 ms | 728 req/s · p99 88 ms | +20 % |
+| S2 `/io` | 200 | 625 req/s · p95 1096 ms · 0.7 % errors | 723 req/s · p95 297 ms · no errors | +16 %, p95 −73 % |
+| S3 `/cpu` | 200 | 164 req/s · 8.4 % errors | 156 req/s · no errors | no difference in throughput |
+| S4 `/books` | 10 | 556 req/s | 663 req/s | **+19 %** |
+| S4 `/books` | 50 | 534 req/s · p95 1033 ms | 661 req/s · p95 245 ms | +24 %, p95 −76 % |
+| S4 `/books` | 200 | 525 req/s · 1.6 % errors | 627 req/s · no errors | +19 % |
+
+Full tables and charts: `benchmark/results-4b/summary.md` and `benchmark/results-4b/charts/`.
+
+![S1 before/after](../benchmark/results-4b/charts/s1.png)
+![S4 before/after](../benchmark/results-4b/charts/s4.png)
+
+What the old server was doing wrong shows in two numbers. It speaks HTTP/1.0, so every
+request opens a new connection; and `socketserver` listens with a queue of **five**. Above
+a handful of clients, connection attempts overflow that queue and the client retries after
+1 s, then 3 s — hence a p99 of about a second from c = 50 and timeouts at c = 200. Its p95
+at c ≥ 50 in S1 even looks *better* than the new server's (3.4 against 13.3 ms), and that is
+the trap: the waiting happens before `accept()`, where percentiles of answered requests do
+not see it. Little's law gives it away — 200 clients at 2633 req/s means 76 ms per request on
+average, while the median is 2 ms.
+
+The price is memory: 153 MB RSS instead of 90 MB, because gunicorn runs a master and a worker
+and both hold the application (RSS counts the pages they share twice). *after* also
+reproduces Stage 1's threaded variant, measured two hours earlier with the same settings:
+within 5 % in S1–S3 and within 10 % in S4, where the database adds its own variation.
+
+**Behaviour that differs, deliberately.** Connections stay open between requests (HTTP/1.1).
+A stop waits up to 5 s for requests in flight instead of cutting them. The per-request line
+that `wsgiref` printed to stderr is gone; the application's own logs, which monitoring
+collects, are unchanged.
+
+**Cost.** Estimated 2–3 h; actual about 1.5 h including the six-service check. The
+before/after run took 1 h 45 min of machine time.
+
+### 8.4 Two checks on Stage 1
+
+**FastAPI on uvloop and httptools** (`B-std`, what `uvicorn[standard]` installs), measured
+in the same run as *after*:
+
+| Point | after · threaded Bottle | B-std · FastAPI on uvloop | Stage 1's B · plain uvicorn |
+| --- | --- | --- | --- |
+| S1, c = 10 | 6360 req/s | **12 777** req/s (+101 %) | 5656 req/s |
+| S2, c = 10 | 185 req/s | 184 req/s (no difference) | 181 req/s |
+| S2, c = 50 | **728** req/s | 481 req/s (−34 %) | 451 req/s |
+| S4, c = 10 | 663 req/s | 738 req/s (+11 %) | 706 req/s |
+| S4, c = 50 | 661 req/s · p95 245 ms | 768 req/s · p95 102 ms (+16 %) | 732 req/s · p95 98 ms |
+
+The C event loop and parser double FastAPI's bare throughput, so Gate 1's failure in S1 came
+from the plain install and would pass with `uvicorn[standard]`. They do not change S2: FastAPI
+still loses to threads at c = 50 and still ties at c = 10. The cost there is the async HTTP
+client per request, not the server. Gates 2, 3 and 4 fail either way; the decision stands.
+
+**One blocking call on the event loop** (`blocking_demo.sh`, PDF appendix A): `/health` on
+FastAPI, one client, while ten others run the S3 computation.
+
+| Beside `/health` | p50 | p95 | `/health` req/s |
+| --- | --- | --- | --- |
+| nothing | 0.2 ms | 0.2 ms | 5755 |
+| `/cpu` declared `def` (thread pool) | 1.4 ms | 45.5 ms | 80 |
+| the same work declared `async def` | **57.4 ms** | 63.6 ms | 17 |
+
+With `def` the event loop stays free and the median barely moves; the tail still grows,
+because the hashing threads hold the GIL. With `async def` every `/health` waits behind the
+whole queue of computations — about ten of them at 6 ms each. That is risk 1 in numbers, and
+why every database handler in a FastAPI version of this system would have to stay `def`.
+
+### 8.5 Proof of concept
+
+`benchmark/sample_asgi/` stays in the repository: the four endpoints on FastAPI, with the
+lifespan-managed `httpx` client and `def` handlers for blocking work. It is the starting point
+if a revisit condition is ever met.
 
 ## 9. Conclusions and lessons
 
-*Written last.*
+**Answers to the assignment's questions.**
+
+1. *What problem would the migration solve, and does it exist here?* Many clients waiting on
+   I/O at once. It does not exist here: about five requests in flight per service, and at
+   c = 10 FastAPI and threaded Bottle measure the same (section 2, Gate 4).
+2. *What does each scenario measure, and why is it representative?* S1 framework overhead,
+   S2 waiting on another service (pricing and blotter call other services), S3 computation
+   as a control, S4 the real books-service code — one or two synchronous queries per request,
+   which is what every service does (section 2.3).
+3. *How large is the uncertainty?* Spreads of 1–5 % of the median; every difference the
+   decision rests on is many times larger, and the rest is reported as *no difference*
+   (section 5).
+4. *Which criterion decided it, and what would change it?* Gate 4. More than ~40 requests in
+   flight per service, many SSE clients or WebSocket, or an async database driver would
+   (section 6).
+5. *The three most serious risks?* Blocking calls on the event loop, silent contract changes,
+   no tests (section 7).
+6. *(GO) Cost against the estimate* — not applicable.
+7. *(NO-GO) What instead, what did it give, when to return?* A production server in
+   `desk-runtime`: gunicorn threads instead of `wsgiref`, which
+  gave +19–24 % throughput on the real books code at c ≥ 10, +143 % on bare requests, and no
+  lost requests at c = 200 where the old server dropped up to 8.4 % (section 8). Return on any revisit condition in section 6.
+8. *What did this teach about benchmarks and about async programming?* Below.
+
+**About benchmarks.**
+
+- Failed requests do not appear in percentiles. The old server looked fine at c = 200 by p95
+  while it was dropping requests on a listen queue of five; sync Bottle "had" a p95 of 9.6 s
+  while 78 % of its requests timed out. Always read errors next to latency.
+- The layer under the application can dominate the result: a missing `TCP_NODELAY` added
+  40 ms to every request, a listen backlog of five lost requests. A three-minute smoke test
+  found the first before it could spoil 144 measurements.
+- A good benchmark agrees with arithmetic. 1 / 54 ms = 18 req/s for a sync worker,
+  40 threads / 55 ms = 727 req/s for the threaded one — measured 18 and 723. When the numbers
+  do not match the model, something in the setup is wrong, or the model is.
+- The fair baseline is the cheapest alternative, not the weakest. Against sync Bottle,
+  FastAPI wins S2 by 25×; against threaded Bottle, one flag away, it loses.
+
+**About async.**
+
+- Async saves threads, not CPU. The event loop waited on any number of requests, but each
+  cost 2 ms of CPU against 1.3 ms for threads, and on one core the CPU ran out first.
+- With a synchronous database driver a FastAPI handler is a `def` in a thread pool — the same
+  model as threaded Bottle, with more layers. The framework alone makes nothing asynchronous.
+- One blocking call in `async def` stalls everything: `/health` went from 0.2 ms to about
+  57 ms at the median while ten clients ran a computation on the event loop.
+
+**What I would do differently.** Put the server the services actually ran on into Stage 1
+from the start; it turned out to be the weakest variant, and Stage 4 found that only by
+measuring it. Write the contract tests before anything else — every path of this assignment
+needed them. Run the grid once more on the development laptop, to show the ratios hold on
+other hardware.
 
 ---
 
@@ -475,3 +643,24 @@ return `text/event-stream`.
 | GET | `/trades/<trade_id>/valuations`, `…/audit-logs` | — | 200, 404 | list |
 | GET | `/books/summary` | — | 200 | list of book summaries |
 | GET | `/health` | — | 200 | `{service, status, …}` |
+
+### B. Versions and commands
+
+Pinned in `benchmark/requirements.txt` (benchmark) and `requirements.txt` (services): Python
+3.14.7, Bottle 0.13.4, gunicorn 26.2.0, FastAPI 0.141.1, Starlette 1.6.0, uvicorn 0.53.0
+(with uvloop 0.22.1 and httptools 0.8.0 for B-std only), httpx 0.28.1, requests 2.34.2,
+SQLAlchemy 2.0.52, psycopg 3.3.4; hey 0.1.5; PostgreSQL 16.13.
+
+```sh
+benchmark/run_benchmark.sh                                                  # Stage 1
+VARIANTS="before after B-std" RESULTS=results-4b benchmark/run_benchmark.sh   # Stage 4B
+RESULTS=results-4b benchmark/blocking_demo.sh                               # demo, 8.4
+python benchmark/analyze.py [benchmark/results-4b]                          # tables, charts, gates
+```
+
+### C. Full results
+
+`benchmark/results/summary.md` (Stage 1) and `benchmark/results-4b/summary.md` (Stage 4B):
+every point with median and min–max of throughput and p95, p50, p99, error rate, CPU and RSS.
+Raw hey output for each of the 288 measurements and the per-second CPU/RSS samples sit next
+to them.

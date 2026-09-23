@@ -1,0 +1,47 @@
+
+Summary:
+  Total:	33.2705 secs
+  Slowest:	8.7995 secs
+  Fastest:	0.0079 secs
+  Average:	0.2547 secs
+  Requests/sec:	509.2807
+  
+  Total data:	125530618 bytes
+  Size/request:	7489 bytes
+
+Response time histogram:
+  0.008 [1]	|
+  0.887 [14091]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.766 [2059]	|■■■■■■
+  2.645 [406]	|■
+  3.525 [122]	|
+  4.404 [42]	|
+  5.283 [10]	|
+  6.162 [12]	|
+  7.041 [2]	|
+  7.920 [10]	|
+  8.800 [7]	|
+
+
+Latency distribution:
+  10%% in 0.0171 secs
+  25%% in 0.0203 secs
+  50%% in 0.0244 secs
+  75%% in 0.0307 secs
+  90%% in 1.0447 secs
+  95%% in 1.2561 secs
+  99%% in 2.9144 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	0.2014 secs, 0.0000 secs, 5.1230 secs
+  DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0000 secs
+  req write:	0.0000 secs, 0.0000 secs, 0.0027 secs
+  resp wait:	0.0529 secs, 0.0025 secs, 6.8978 secs
+  resp read:	0.0003 secs, 0.0000 secs, 0.0302 secs
+
+Status code distribution:
+  [200]	16762 responses
+
+Error distribution:
+  [182]	Get "http://127.0.0.1:9004/books": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+

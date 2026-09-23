@@ -1,0 +1,47 @@
+
+Summary:
+  Total:	31.3454 secs
+  Slowest:	9.8029 secs
+  Fastest:	0.0242 secs
+  Average:	0.3206 secs
+  Requests/sec:	170.2960
+  
+  Total data:	146730 bytes
+  Size/request:	30 bytes
+
+Response time histogram:
+  0.024 [1]	|
+  1.002 [4268]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.980 [334]	|■■■
+  2.958 [135]	|■
+  3.936 [64]	|■
+  4.914 [46]	|
+  5.891 [26]	|
+  6.869 [9]	|
+  7.847 [5]	|
+  8.825 [2]	|
+  9.803 [1]	|
+
+
+Latency distribution:
+  10%% in 0.0444 secs
+  25%% in 0.0491 secs
+  50%% in 0.0544 secs
+  75%% in 0.0610 secs
+  90%% in 1.0676 secs
+  95%% in 2.0933 secs
+  99%% in 4.6014 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	0.2256 secs, 0.0000 secs, 7.1420 secs
+  DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0000 secs
+  req write:	0.0000 secs, 0.0000 secs, 0.0012 secs
+  resp wait:	0.0778 secs, 0.0053 secs, 6.6433 secs
+  resp read:	0.0071 secs, 0.0000 secs, 0.0501 secs
+
+Status code distribution:
+  [200]	4891 responses
+
+Error distribution:
+  [447]	Get "http://127.0.0.1:9004/cpu": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
