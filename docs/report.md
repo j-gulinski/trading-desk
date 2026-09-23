@@ -363,9 +363,25 @@ OpenAPI are real benefits but do not buy back 59 hours of work with no measured 
   thread pool;
 - a service needs more than one process.
 
-## 7. Risk analysis
+## 7. Risk analysis (Stage 3)
 
-*Stage 3 (risk matrix).*
+Risks of migrating to FastAPI, specific to this system. P = probability, I = impact,
+L / M / H = low / medium / high. The three most serious come first.
+
+| # | Risk | Category | P | I | Mitigation | Warning signal |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | A blocking call inside `async def` stalls every request in the process. All 54 database sessions (`session_scope()`) are synchronous, and so are the provider clients and the stream consumers | technical | H | H | `async def` only for non-blocking I/O, `def` everywhere the database is touched; ruff `ASYNC` rules; load test per service | p99 jumps under load while CPU stays low; section 8.3 measures how much |
+| 2 | Silent contract changes: 422 instead of 400, `{"detail"}` instead of `{"error"}`, 307 redirects for trailing slashes, string-to-int coercion. The frontend reads `body.error` from failures | technical | H | M | contract tests recorded on Bottle first; custom exception handlers returning `{"error": …}` with the old codes; `redirect_slashes=False` | the frontend shows empty or `undefined` error messages |
+| 3 | No automated tests today, so regressions go unnoticed. Writing them is 12.5 h of the 59 h estimate | process | H | H | contract tests before the first migrated service — worth doing even without the migration | an endpoint changes behaviour and nobody sees it until the browser does |
+| 4 | SSE streams read `queue.Queue` from a sync generator. Under FastAPI each open stream holds one of the 40 thread-pool slots that `def` handlers also need | technical | M | H | rewrite the three streams as async generators over an async queue, or cap stream count | `/health` slows down when a few browser tabs are open |
+| 5 | `uvicorn --workers` above 1 leaves `TCP_NODELAY` off: +40 ms on every keep-alive request (measured in Stage 1) | operational | M | M | one worker (services cannot run more anyway), or gunicorn with `UvicornWorker` | p50 near 40 ms on a trivial endpoint |
+| 6 | Background threads and in-memory state (pricing cache, trade queue, stream subscribers) must start in the lifespan, in the same process as the handlers | operational | M | H | start threads in the lifespan; one worker; test restart and ordering (blotter bootstraps before serving) | empty blotter or duplicate polling after a restart |
+| 7 | Thread pool and database pool disagree: 40 `def` threads share a pool of 5 + 10 connections, so bursts wait up to 30 s for a connection | performance | M | M | size `pool_size` to the thread count, or cap threads | `QueuePool limit … timed out` in logs; flat throughput with idle CPU |
+| 8 | `httpx.AsyncClient` costs more CPU per call than `requests` on one core; in S2 B ran out of CPU at 451 req/s where threaded Bottle did 723 | performance | M | M | one shared client from the lifespan, explicit limits, measure before and after | CPU at 100 % with throughput below the Bottle baseline |
+| 9 | The estimate is low: market-data alone has 19 endpoints and seven provider adapters | process | M | M | books-service first as the pilot; extrapolate its real time; stop and return to NO-GO if the pilot exceeds 1.5× its estimate | the pilot overruns |
+| 10 | Half-migrated system under time pressure: some services on Bottle, some on FastAPI, two runtimes to maintain | organizational | M | M | service by service with a fixed stop rule; shared `desk-runtime` pieces migrated first | after half the time, fewer than half the services are done |
+| 11 | One developer new to `asyncio`: missing `await`, shared state across tasks, no timeouts | organizational | M | M | checklist in review; explicit timeouts on every network call; `asyncio` debug mode in development | "coroutine was never awaited" warnings; requests that hang |
+| 12 | Dependency drift between services (Pydantic, httpx, anyio) | technical | L | L | already one `requirements.txt` for the whole repository | different versions in `pip freeze` of two images |
 
 ## 8. Refactor (GO) or alternative plan (NO-GO)
 
