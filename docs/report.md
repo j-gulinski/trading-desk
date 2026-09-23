@@ -3,7 +3,8 @@
 | | |
 | --- | --- |
 | Repository | `trading-desk`, branch `hw-5.5-asgi-migration` |
-| Hardware | Apple M3, 8 cores, 16 GB, Docker Desktop 29.4.3 |
+| Development | Apple M3, 8 cores, 16 GB, Docker Desktop 29.4.3 |
+| Benchmark host | cloud VM, Intel Xeon 2.1 GHz, 4 vCPU, 15 GB, Ubuntu 24.04 (section 3) |
 | Versions | Python 3.14.7, Bottle 0.13.4, SQLAlchemy 2.0.52, psycopg 3.3.4, PostgreSQL 18.6 |
 
 ---
@@ -138,16 +139,152 @@ streams in total — a load no server here notices.
 
 ## 3. Benchmark method
 
-*Stage 1 (benchmark on a small sample). Starts only after `docs/decision_criteria.md` is
-committed.*
+The criteria were committed on their own (`237fd81`) before any benchmark code existed.
+Everything below is in `benchmark/` and runs with one command, `benchmark/run_benchmark.sh`;
+`benchmark/README.md` says how to reproduce it.
+
+**Sample.** One small app written twice, with the same four endpoints (2.3). `sample_wsgi`
+is Bottle; its `/books` is the real books-service app merged in unchanged. `sample_asgi` is
+FastAPI; its `/books` calls the same repository function and the same JSON serializer. S2
+calls a stub that sleeps 50 ms: Bottle with `requests`, FastAPI with one shared
+`httpx.AsyncClient` created in the lifespan — the PDF's appendix A, unchanged.
+
+**Variants.** Handler types follow the rule the migration would follow: `async def` only
+where the I/O does not block.
+
+| Variant | Server | S1 | S2 | S3 | S4 |
+| --- | --- | --- | --- | --- | --- |
+| A | gunicorn, 1 sync worker | def | def | def | def |
+| A′ (`A-threads`) | gunicorn, 1 worker × 40 threads | def | def | def | def |
+| B | uvicorn, 1 worker, plain install (asyncio loop, h11 parser) | `async def` | `async def` + httpx | def (thread pool) | def (thread pool) |
+
+**Grid.** 4 scenarios × c = 1, 10, 50, 200 × 3 variants × 3 runs = 144 measurements. Each is
+10 s of warm-up, discarded, then 30 s with `hey -z 30s -c <c> -t 10`. The three variants run
+one after another at every point, so a slow moment on the machine hits all of them. A
+monitor samples CPU and RSS of the server once a second.
+
+**Fairness rules from the PDF (5.1).**
+
+| Pitfall | Here |
+| --- | --- |
+| Bottle's development server | never used — gunicorn for A and A′ |
+| debug, reload, console access log | none on either side |
+| no warm-up, short or single runs | 10 s warm-up, 30 s runs, 3 repetitions, median and min–max |
+| client on the same cores as the server | server pinned to core 0; client, stub and database on cores 1–3 |
+| blocking calls inside `async def` | only S1 and S2 are `async`; S3 and S4 are `def` |
+| different process counts | one worker everywhere |
+| default client timeout hiding failures | `-t 10`; errors reported next to latency, > 1 % loses the point |
+| a stub that is itself the bottleneck | checked alone at c = 200 before the grid |
+
+**Two changes from the PDF's example, both found in the smoke test.**
+
+1. *One worker, not four.* Every service runs as one process today, so N = 1 is the
+   representative setting. And with `--workers` above 1, uvicorn 0.53 creates its socket
+   without the TCP protocol number, so asyncio never turns on `TCP_NODELAY`. Each keep-alive
+   request then waits about 40 ms for a delayed ACK: `/health` at c = 1 had p95 0.3 ms with
+   one worker and 44 ms with two. Measuring that would compare a socket option, not WSGI
+   and ASGI.
+2. *One stub process, not two* — the same defect added 40 ms to every call from B's
+   keep-alive `httpx` client, and to none from A's `requests`, which opens a new connection
+   each time.
+
+**Hardware and versions.** A cloud VM, not the development laptop: Intel Xeon 2.1 GHz,
+4 vCPU, 15 GB, Ubuntu 24.04. Python 3.14.7, Bottle 0.13.4, gunicorn 26.2.0, FastAPI 0.141.1,
+uvicorn 0.53.0, httpx 0.28.1, SQLAlchemy 2.0.52, psycopg 3.3.4, hey 0.1.5. PostgreSQL 16.13 on
+the same VM. Full list: `benchmark/requirements.txt`.
+
+**Limitations.**
+
+- One core per server makes the numbers small. Ratios between variants matter here, not
+  absolute throughput; on the laptop they will be larger.
+- The load generator, the stub and PostgreSQL share three cores. At a few thousand requests
+  per second they compete with each other, though never with the server.
+- A shared cloud VM has noisy neighbours. The min–max bars show how much that mattered.
+- PostgreSQL 16 instead of the project's 18.6. S4 reads 20 rows with one simple query,
+  which behaves the same on both.
 
 ## 4. Results
 
-*Stage 1 (benchmark on a small sample).*
+144 measurements on 2026-09-22, 22:26–00:10 UTC. Median of three runs, min–max in brackets.
+The only errors in the whole grid are A's timeouts in S2 at c = 200. Full tables with p50,
+p99, CPU and RSS: `benchmark/results/summary.md`; raw hey output: `benchmark/results/`.
+
+| Scenario | c | A · Bottle sync | A′ · Bottle 40 threads | B · FastAPI |
+| --- | --- | --- | --- | --- |
+| S1 `/health` | 10 | 4990 req/s · p95 2.9 ms | **6569** req/s · p95 2.2 ms | 5656 req/s · p95 2.4 ms |
+| S2 `/io` (50 ms wait) | 10 | 18 req/s · p95 548 ms | 182 req/s · p95 57 ms | 181 req/s · p95 58 ms |
+| S2 `/io` | 50 | 18 req/s · p95 2724 ms | **723** req/s · p95 77 ms | 451 req/s · p95 153 ms |
+| S2 `/io` | 200 | 19 req/s · 78 % timeouts | **723** req/s · p95 293 ms | 225 req/s · p95 1026 ms |
+| S3 `/cpu` | 10 | 164 req/s · p95 72 ms | 165 req/s · p95 108 ms | 160 req/s · p95 120 ms |
+| S4 `/books` | 10 | 541 req/s · p95 23 ms | 668 req/s · p95 22 ms | **706** req/s · p95 23 ms |
+| S4 `/books` | 50 | 548 req/s · p95 108 ms | 710 req/s · p95 227 ms | 732 req/s · p95 **98** ms |
+
+Memory barely differs: 103 MB (A), 113 MB (A′), 118 MB (B) at the highest load.
+
+![S1](../benchmark/results/charts/s1.png)
+![S2](../benchmark/results/charts/s2.png)
+![S3](../benchmark/results/charts/s3.png)
+![S4](../benchmark/results/charts/s4.png)
+
+**Gates** (computed by `benchmark/analyze.py` from the rules in `docs/decision_criteria.md`):
+
+| Gate | Point | Result | Verdict |
+| --- | --- | --- | --- |
+| 1 | S1, c = 10 | B −14 % throughput against A′ | fail |
+| 1 | S3, c = 10 | no difference | pass |
+| 1 | S4, c = 10 | B +6 % against A′ | pass |
+| 2 | S2, c = 50 | B against A′: p95 +99 %, throughput −38 % | fail |
+| 3 | cost ≤ 40 h | Stage 2 | see 6 |
+| 4 | S2, c = 10 | no difference | fail |
 
 ## 5. Interpretation
 
-*Stage 1 (benchmark on a small sample).*
+**Waiting (S2) is where WSGI and ASGI really differ, and the numbers follow simple
+arithmetic.** A sync worker holds one request for its whole 54 ms, so it serves
+1 / 0.054 = 18 requests a second at any concurrency; everyone else queues, and p95 grows as
+c × 54 ms: 548 ms at c = 10, 2.7 s at c = 50, timeouts at c = 200. Threads remove that limit
+up to their number: A′ matches B at c = 10 (182 vs 181 req/s = 10 / 0.055 s), and at c = 50
+it stops at 40 threads / 0.055 s ≈ 727 req/s — measured 723. That is the textbook WSGI
+problem, and one server flag solves it for this range.
+
+**The event loop waits for free, but each request still costs CPU.** B has no thread limit,
+yet at c = 50 it did 451 req/s with its core at 89 %: about 2.0 ms of CPU per `/io` request,
+against 1.3 ms for A′. On one core the CPU ran out before the unlimited waiting could pay
+off. The extra cost sits in the pure-Python layers of B — the `httpx` client, the h11 parser
+and the asyncio loop of a plain uvicorn install. Above c = 50 B lost throughput (225 req/s at
+c = 200) while A′ held 723. The likely cause is `httpx`'s default pool of 100 connections:
+the other requests queue inside the client, and its bookkeeping eats the core. Stage 4
+repeats S1–S4 with `uvicorn[standard]` (uvloop, httptools) to check how much of this is the
+installation rather than ASGI.
+
+**Computation (S3) is the control, and it behaves.** Every variant does ~160 req/s — one
+core, ~6 ms of hashing per request. No server helps with that. Tails differ: A serves
+requests one after another (p95 72 ms at c = 10); in A′ and B threads share the GIL and every
+request is stretched (108 and 120 ms).
+
+**The real code (S4) shows neither a gain nor a loss.** B is 6 % ahead of A′ at c = 10,
+equal at c = 50 and 200, and keeps a shorter tail under saturation (p95 98 ms against A′'s
+227 ms at c = 50). With a synchronous database driver FastAPI runs the handler in a thread
+pool, exactly like A′ — so there is nothing for async to win, which is what the plan
+predicted.
+
+**The bare framework (S1)** is fastest on threaded gunicorn. B beats sync Bottle by 13 % but
+trails A′ by 14 %, failing Gate 1 at that point.
+
+**Uncertainty.** Spreads are mostly 1–5 % of the median (the widest: B in S2 at c = 50,
+418–454 req/s). Every difference the gates rely on is many times the spread, except where the
+table says *no difference*. The verdict would not change with a 10 % error in either
+direction.
+
+**What the results do not say.** They are one core per server on a shared cloud VM, so the
+absolute numbers are small; the ratios are the result. They do not cover an asynchronous
+database driver, several processes, or FastAPI on uvloop (Stage 4 adds the last one). And
+they measure one sample service — the other five would add streams and background threads,
+not new kinds of work.
+
+**Surprises.** The `TCP_NODELAY` defect in multi-worker uvicorn (section 3) would have added
+40 ms to every B request had the smoke test not caught it. And B lost the one scenario it was
+expected to win, by running out of CPU rather than threads.
 
 ## 6. Criteria and decision (ADR)
 

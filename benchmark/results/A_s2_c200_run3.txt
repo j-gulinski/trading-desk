@@ -1,0 +1,47 @@
+
+Summary:
+  Total:	39.9763 secs
+  Slowest:	9.9645 secs
+  Fastest:	0.8013 secs
+  Average:	5.3832 secs
+  Requests/sec:	19.2614
+  
+  Total data:	5780 bytes
+  Size/request:	34 bytes
+
+Response time histogram:
+  0.801 [1]	|■■
+  1.718 [16]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  2.634 [17]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  3.550 [17]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  4.467 [17]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  5.383 [17]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  6.299 [17]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  7.216 [17]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  8.132 [17]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  9.048 [17]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  9.964 [17]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+
+
+Latency distribution:
+  10%% in 1.7241 secs
+  25%% in 3.1344 secs
+  50%% in 5.4115 secs
+  75%% in 7.7393 secs
+  90%% in 9.0964 secs
+  95%% in 9.5835 secs
+  99%% in 9.9645 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	0.0011 secs, 0.0000 secs, 0.0043 secs
+  DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0000 secs
+  req write:	0.0008 secs, 0.0000 secs, 0.0025 secs
+  resp wait:	5.3770 secs, 0.7980 secs, 9.9555 secs
+  resp read:	0.0002 secs, 0.0001 secs, 0.0003 secs
+
+Status code distribution:
+  [200]	170 responses
+
+Error distribution:
+  [600]	Get "http://127.0.0.1:9001/io": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
