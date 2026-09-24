@@ -15,7 +15,7 @@ time.sleep(2)
 answered = 0
 for sock in streams:
     try:
-        answered += sock.recv(65536).startswith(b"HTTP/1.1 200")
+        answered += sock.recv(65536).startswith((b"HTTP/1.1 200", b"HTTP/1.0 200"))
     except BlockingIOError:
         pass
 with open(out_path, "w") as out:

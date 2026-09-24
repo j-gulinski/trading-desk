@@ -177,7 +177,7 @@ Throughput and p95 against concurrency.
 
 ## 6. Criteria and decision (ADR)
 
-**ADR-001 · Bottle (WSGI) → FastAPI (ASGI) for all six services · 24 September 2026**
+**ADR-001 · Bottle (WSGI) → FastAPI (ASGI), all six services · 24 September 2026**
 
 > **Decision: NO-GO. At today's load and for this application, stay on Bottle.**
 >
@@ -185,57 +185,104 @@ Throughput and p95 against concurrency.
 
 **Why**
 
-- **No need today: no service has a performance problem** (2.3). One UI polling every 2–10 s
-  with 2–3 streams.
-- **FastAPI wins only above Bottle's 40-thread cap, and the cap is one gunicorn flag.** Below
-  the cap all variants are equal (S2, c = 10: 66–69 ms); 256 threads served `/health` in 1.1 ms
-  beside 200 streams (checked once, outside the grid).
-- **The framework alone changes nothing.** FastAPI `def` = Bottle threads (S2: 719 vs
-  711 req/s; S4: 1 343 each).
-- **Gate 1 fails only against `bottle-sync`, which cannot run our services.** It passes against
-  `bottle-threads` (table below).
+- **No need for migration.** Bottle with enough threads stays under 100 ms and handles waiting
+  better than FastAPI (S2: 918 vs 697 req/s; at c = 200: 2 966 vs 380).
+- **The framework alone changes nothing.** FastAPI `def` = Bottle threads (S2: 719 vs 711 req/s;
+  S4: 1 343 each).
+- **The weak spot is today's server.** `wsgiref` has a 1 s tail and timeouts under load;
+  gunicorn threads has neither.
+- **No performance problem today.** One UI polling every 2–10 s with 2–3 streams (2.3).
 
-**Context**: six Bottle services on `wsgiref`, a development server (2.1). Question: does ASGI
-scale the backend better, and is migrating worth it now?
+**Context**: six Bottle services on `wsgiref`, a development server (2.1). Does ASGI let them
+scale better, and is migrating worth it now?
 
-**Criteria**: [`docs/decision_criteria.md` at commit 174eb35](https://github.com/j-gulinski/trading-desk/blob/174eb351700b3fec30dff70c421b1ac1e7980609/docs/decision_criteria.md),
+**Criteria**: [`docs/decision_criteria.md`, commit 174eb35](https://github.com/j-gulinski/trading-desk/blob/174eb351700b3fec30dff70c421b1ac1e7980609/docs/decision_criteria.md),
 committed before the first run. GO needs all four gates.
 
-**Gates** at c = 50: median of 3 runs (min–max); every difference exceeds the spread.
+**Gates** at c = 50
 
-| Gate | Committed rule | Against `bottle-threads` only |
+| Gate: GO needs | Stage 1: FastAPI vs the better Bottle (sync or 40 threads) | Extra run: FastAPI vs Bottle with 256 threads |
 | --- | --- | --- |
-| 1. No regression | **FAIL**: S3 p95 380 ms (348–385) vs `bottle-sync` 256 ms (251–259); limit 282 ms | **PASS**: S3 380 vs 555 ms; S4 57.6 vs 120 ms |
-| 2. Real gain | PASS: S5 `/health` 0.4 ms beside 50 streams; Bottle: all timeouts | PASS: same |
-| 3. Cost | not scored: scope below, no hour estimate | – |
-| 4. Need | PASS: S2 p95 90.5 ms (90.4–91.4) vs 105 ms (105–106); S5 | PASS: same |
+| **1. No regression**: FastAPI within 10 % of Bottle in S3, S4 | **FAIL**: S3 p95 FastAPI 380 ms, Bottle 256 ms | **FAIL**: S4 FastAPI 1 134 req/s, Bottle 1 346 req/s |
+| **2. Real gain**: FastAPI p95 30 % lower or 2× throughput in S2 or S5 | **PASS**: S5 FastAPI 0.4 ms; Bottle answers nothing beside 50 streams | PASS on paper: S5 FastAPI 0.4 ms, Bottle 0.8 ms; in S2 Bottle is faster |
+| **3. Cost**: ≤ 3 h per service | not scored; scope below | – |
+| **4. Need**: Bottle over 100 ms, FastAPI under | **PASS**: S2 Bottle 105 ms, FastAPI 90.5 ms | **FAIL**: Bottle under 100 ms in S2, S4, S5 (S2: 59.2 ms) |
+| **Result** | **NO-GO**: gate 1 fails | **NO-GO**: gates 1 and 4 fail |
 
-- **Weakness of the rule: "Bottle" is the better Bottle variant at each point** (`bottle-sync` in
-  S3 and S4, `bottle-threads` in S2 and S5). A service runs one worker type, and `bottle-sync`
-  cannot serve streams or waiting requests (S2: p95 2.9 s).
-- **The S3 gap does not matter at today's load**: at c = 1 every variant answers in 4.9–5.2 ms.
-- **Top 3 risks** (section 7): an order skips the price check, prices go stale, PostgreSQL runs
-  out of connections.
+- **Why two columns**: stage 1 compared FastAPI with the better Bottle variant at each point:
+  `bottle-sync` in S3 and S4, `bottle-threads` in S2 and S5. A service runs one worker type, so
+  the extra run compares with one Bottle, with enough threads that no request waits for one.
+- **Uncertainty**: stage 1 is the median of 3 runs, spread 1–7 % (S4 up to 25 %), every
+  difference larger than the spread. The extra run is one run per point; `fastapi-async` came
+  within 5 % of stage 1.
+- **Risks** (section 7): the worst are an order skipping the price check, stale prices and
+  PostgreSQL running out of connections.
+
+**Today's server vs gunicorn threads** (extra run, c = 50 unless noted)
+
+| | today: `wsgiref` | planned: 256 threads | `fastapi-async` |
+| --- | --- | --- | --- |
+| S2, waits 50 ms | 656 req/s, p99 1 094 ms | 918 req/s, p99 61.7 ms | 697 req/s, p99 104 ms |
+| S2 at c = 200 | 1 700 req/s, p99 1 308 ms, timeouts | 2 966 req/s, p99 116 ms | 380 req/s, p99 782 ms |
+| S4, database | 1 249 req/s, p99 1 050 ms | 1 346 req/s, p99 98.9 ms | 1 134 req/s, p99 90.4 ms |
+| S1, `/health` | 7 016 req/s | 14 013 req/s | 33 960 req/s |
+
+- **What fails today**: `wsgiref`'s listen queue of 5 drops connections under load; they retry
+  after 1 s, so p99 is about 1 s from c = 10, with timeouts at c = 200. It also logs every
+  request, as the services do today.
+- **Charts** below show p95, which hides that tail. All five charts:
+  `benchmark/results/threads-check/`.
+
+![S2 extra run](../benchmark/results/threads-check/charts/s2.png)
+![S4 extra run](../benchmark/results/threads-check/charts/s4.png)
+![S5 extra run](../benchmark/results/threads-check/charts/s5.png)
 
 **Scope of a migration (gate 3)**
 
-- 50 endpoints in six `api.py`
-- every error kept as `{"error": …}`, same status
-- contract tests before and after: none today; about 100 endpoint × status cases
-- `desk_runtime`: uvicorn; `lifespan` for startup hooks and background threads
-- three streams rewritten as `async` generators
-- handlers on the async database driver; background jobs keep the synchronous one (54
-  `session_scope()` call sites in total; risks 5, 6)
-- calls between services via `httpx.AsyncClient` (pricing, blotter, monitoring; risk 4)
+- 50 endpoints in six `api.py`, errors kept as `{"error": …}`; uvicorn and `lifespan` in
+  `desk_runtime`
+- contract tests before and after: none today, about 100 endpoint × status cases
+- async where requests wait: handlers on the async database driver, three streams, calls between
+  services on `httpx.AsyncClient`
+- background jobs stay threads on the synchronous driver (54 `session_scope()` call sites in
+  total; risks 5, 6)
 
 **Options**
 
 | Option | For | Against |
 | --- | --- | --- |
-| 1. **Full migration** | no thread cap; Pydantic validation, OpenAPI | no gain at today's load; async libraries cost more CPU (risk 7); about +30 MB RAM per service; full scope above |
-| 2. **Bottle on gunicorn threads (chosen)** | one file changes (`service_runtime.py`); production server: keep-alive, listen queue 2 048 instead of 5 | one thread per open stream; no Pydantic or OpenAPI |
-| 3. **FastAPI trial in market-data only** (after 2) | only service whose requests wait on external APIs; shows how FastAPI fits the rest | two frameworks at once; largest service (19 endpoints) |
+| 1. **Full migration** | no thread limit; Pydantic, OpenAPI | no gain at today's load; more CPU per call; about +30 MB RAM per service; the scope above |
+| 2. **gunicorn threads (chosen)** | one file changes (`service_runtime.py`); removes `wsgiref`'s tail | a thread per open stream; no Pydantic or OpenAPI |
+| 3. **FastAPI trial in market-data** (after 2) | the only service whose requests wait on external APIs; shows how FastAPI fits the rest | two frameworks at once; the largest service |
 
+**If built from scratch for heavy traffic: FastAPI, fully async**
+
+| Gains | Costs |
+| --- | --- |
+| open streams cost almost nothing: 200 streams, `/health` 0.4 ms, memory flat | more CPU per call: httpx 0.73 vs 0.43 ms, async driver 0.8–1.0 vs 0.7 ms |
+| waits need no threads: 1 000 req/s × 0.3 s wait = 300 threads (calculated) | short database requests gain nothing: S4 1 134 vs 1 346 req/s |
+| lowest overhead: S1 33 960 vs 14 013 req/s | computation still needs processes: S3 about 200 req/s per core everywhere |
+| Pydantic, OpenAPI, WebSocket built in | one blocking call freezes the whole service |
+
+- **Heavy traffic needs more than a framework**: state out of memory, many processes behind a
+  load balancer, computation on a queue. **Our one-process limit comes from in-memory state, not
+  from Bottle.**
+
+## 7. Risk analysis
+
+What could work worse than today after an async migration (`fastapi-async`), one process per
+service. P = probability, I = impact: L / M / H.
+
+| # | Risk | Category | P | I | Mitigation | Warning signal |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | **Error messages disappear from the UI.** FastAPI answers `{"detail": …}` and 422 by default; the UI shows `{"error": …}`; no tests would catch a missed path | process | H | M | contract tests on Bottle before the first change | error responses without an `error` key |
+| 2 | **An order skips the price check.** A Pydantic model drops fields it does not list; without `client_seen_price` trade-action does not check how far the price moved | technical | M | H | models that reject unknown fields; a contract test with a moved price | an order with a moved `client_seen_price` is accepted |
+| 3 | **Market-data freezes during a symbol search.** Search and refresh call the providers synchronously, up to 1.8 s; in `async def` that stops the stream that pricing and every UI read | technical | M | H | run provider calls with `asyncio.to_thread` | market-data `/health` p99 > 100 ms during a search |
+| 4 | **Prices go stale.** Pricing and blotter read their streams on `httpx.AsyncClient`; an error ends an async task silently, where today's thread reconnects | technical | M | H | reconnect loop inside the task; restart test per stream | pricing `/health`: `market_data_connection` not `CONNECTED` |
+| 5 | **A fix reaches only one copy of a query.** Background jobs stay threads on the synchronous driver, handlers move to the async one, so shared queries exist twice | technical | H | M | build each query once, run it on either session | queries defined in two places |
+| 6 | **PostgreSQL runs out of connections.** A second pool per service allows 6 × 2 × 15 = 180 connections; PostgreSQL allows 100 (today up to 90) | operational | M | H | smaller pools, total under 100 | open connections > 80 |
+| 7 | **More CPU per request.** Async database driver 0.8–1.0 vs 0.7 ms, httpx 0.73 vs 0.43 ms | performance | H | L | benchmark each service before and after | CPU per request above Bottle's at the same load |
+| 8 | **Migration stops halfway.** Services then differ in error handling and startup: two frameworks side by side | organisational | M | M | one service per commit; stop point agreed in advance | under half the services done at half the time |
 
 ## 8. Refactor (GO) or alternative plan (NO-GO)
 

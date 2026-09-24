@@ -12,7 +12,7 @@ CPU_ROUNDS = 20_000
 
 configure_logging()
 stub = requests.Session()
-stub.mount("http://", HTTPAdapter(pool_maxsize=40))
+stub.mount("http://", HTTPAdapter(pool_maxsize=256))
 
 
 def call_stub():

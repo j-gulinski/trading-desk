@@ -54,6 +54,14 @@ services:
     <<: *server
     command: gunicorn -w 1 -k gthread --threads 40 -b 0.0.0.0:8000 sample_wsgi.app:app
 
+  bottle-wsgiref:
+    <<: *server
+    command: ["python", "-c", "from desk_runtime.service_runtime import ThreadedServer; from sample_wsgi.app import app; app.run(host='0.0.0.0', port=8000, server=ThreadedServer)"]
+
+  bottle-threads-256:
+    <<: *server
+    command: gunicorn -w 1 -k gthread --threads 256 -b 0.0.0.0:8000 sample_wsgi.app:app
+
   fastapi-async:
     <<: *server
     command: uvicorn sample_asgi.app:app --host 0.0.0.0 --port 8000 --no-access-log

@@ -2,6 +2,9 @@
 # Full grid: S1–S4 × c = 1, 10, 50, 200 × four variants, then S5, repeated RUNS times.
 # Variants alternate at every point. Smoke test: DURATION=3 WARMUP=1 RUNS=1 PAUSE=1 RESULTS=smoke
 # One scenario again: SCENARIOS=s4
+# Stage-2 check, today's server vs 256 threads vs async: RUNS=1 RESULTS=results/threads-check \
+#   VARIANTS="bottle-wsgiref bottle-threads-256 fastapi-async" \
+#   STREAM_VARIANTS="bottle-wsgiref bottle-threads-256 fastapi-async"
 set -euo pipefail
 cd "$(dirname "$0")"
 export COMPOSE_FILE=infra/compose.yml
@@ -12,7 +15,8 @@ RUNS=${RUNS:-3}
 PAUSE=${PAUSE:-5}
 RESULTS=${RESULTS:-results}
 SCENARIOS=${SCENARIOS:-"s1 s2 s3 s4 s5"}
-VARIANTS="bottle-sync bottle-threads fastapi-async fastapi-sync"
+VARIANTS=${VARIANTS:-"bottle-sync bottle-threads fastapi-async fastapi-sync"}
+STREAM_VARIANTS=${STREAM_VARIANTS:-"bottle-threads fastapi-async"}
 
 in_loadgen() { docker compose exec -T loadgen "$@"; }
 
@@ -65,7 +69,7 @@ for run in $(seq "$RUNS"); do
   done
   for streams in 10 50 200; do
     wanted s5 || break
-    for variant in bottle-threads fastapi-async; do
+    for variant in $STREAM_VARIANTS; do
       name="${variant}_s5_streams${streams}_run${run}"
       docker compose exec -d loadgen python tools/hold_streams.py "http://$variant:8000/stream" "$streams" "$RESULTS/$name.streams"
       sleep 3

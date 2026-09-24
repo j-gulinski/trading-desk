@@ -14,13 +14,14 @@ from matplotlib.ticker import FuncFormatter, LogLocator, NullLocator
 
 RESULTS = Path(sys.argv[1] if len(sys.argv) > 1 else "results")
 COLORS = {"bottle-sync": "#2a78d6", "bottle-threads": "#eb6834",
-          "fastapi-async": "#1baf7a", "fastapi-sync": "#eda100"}
-MARKERS = dict(zip(COLORS, "osD^"))
+          "fastapi-async": "#1baf7a", "fastapi-sync": "#eda100",
+          "bottle-wsgiref": "#e87ba4", "bottle-threads-256": "#008300"}
+MARKERS = dict(zip(COLORS, "osD^vP"))
 BOTTLE, FASTAPI = ("bottle-sync", "bottle-threads"), ("fastapi-async", "fastapi-sync")
 TITLES = {"s1": "S1 GET /health", "s2": "S2 GET /io, stub waits 50 ms", "s3": "S3 GET /cpu",
           "s4": "S4 POST /db, write then read", "s5": "S5 GET /health at c = 10 beside open streams"}
 BUDGET_MS, MAX_ERRORS = 100, 1.0
-NAME = re.compile(r"(?P<variant>[a-z-]+)_(?P<scenario>s\d)_(?:c|streams)(?P<level>\d+)_run\d+\.json")
+NAME = re.compile(r"(?P<variant>[a-z0-9-]+)_(?P<scenario>s\d)_(?:c|streams)(?P<level>\d+)_run\d+\.json")
 COLUMNS = (("rps", "req/s", True), ("p50", "p50 ms", False), ("p95", "p95 ms", True), ("p99", "p99 ms", False),
            ("errors", "errors %", True), ("cpu", "CPU %", False), ("cpu_ms", "CPU ms/req", False),
            ("rss", "RSS MB", False))
@@ -51,7 +52,7 @@ def load_points():
         runs[match["scenario"], match["variant"], int(match["level"])].append(read_run(path))
     points = {}
     for key, point_runs in runs.items():
-        points[key] = {"kinds": sum((run["kinds"] for run in point_runs), Counter()),
+        points[key] = {"kinds": sum((run["kinds"] for run in point_runs), Counter()), "runs": len(point_runs),
                        "streams": " ".join(run["streams"] for run in point_runs)}
         for metric, _, _ in COLUMNS:
             values = [run[metric] for run in point_runs if run[metric] is not None]
@@ -110,7 +111,8 @@ def chart(points, scenario):
         ax.grid(alpha=0.3)
         ax.spines[["top", "right"]].set_visible(False)
     axes[1].legend(frameon=False)
-    figure.suptitle(TITLES[scenario] + " — median, bars = min–max of runs")
+    runs = max(p["runs"] for (s, _, _), p in points.items() if s == scenario)
+    figure.suptitle(TITLES[scenario] + (" — median, bars = min–max of runs" if runs > 1 else " — one run"))
     figure.tight_layout()
     figure.savefig(RESULTS / "charts" / f"{scenario}.png", dpi=120)
     plt.close(figure)
@@ -178,7 +180,9 @@ def main():
     parts = ["# Benchmark summary", "",
              "Median of runs; (min–max) where shown. Errors include timeouts. RSS: the serving process.", "",
              f"Stub alone at c = 200: {stub_ok / stub['summary']['total']:.0f} req/s, p50 {pct['p50'] * 1000:.1f} ms, "
-             f"p99 {pct['p99'] * 1000:.1f} ms", "", "## Gates", "", gates(points)]
+             f"p99 {pct['p99'] * 1000:.1f} ms"]
+    if {v for _, v, _ in points} >= {*BOTTLE, *FASTAPI}:
+        parts += ["", "## Gates", "", gates(points)]
     for scenario in sorted({s for s, _, _ in points}):
         chart(points, scenario)
         parts += ["", f"## {TITLES[scenario]}", "", table(points, scenario), "", f"![{scenario}](charts/{scenario}.png)"]
