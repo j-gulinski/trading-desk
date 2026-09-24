@@ -4,111 +4,81 @@
 | --- | --- |
 | Repository | `trading-desk`, branch `hw-5.5-asgi-migration` |
 | Machine | Apple M3, 8 cores, 16 GB |
-| Versions | Docker 29.5.0, Python 3.14 (`python:3.14-slim`), Bottle 0.13.4, SQLAlchemy 2.0.52, psycopg 3.3.4, PostgreSQL 18.6 |
+| Stack | Python 3.14, Bottle 0.13.4, SQLAlchemy 2.0.52, psycopg 3.3.4, PostgreSQL 18.6, Docker Compose |
 
 ---
 
 ## 1. Summary
 
-*Written last, after Stage 2 (go / no-go decision).*
+*Written last, after Stage 2.*
 
 ---
 
 ## 2. System inventory (Stage 0)
 
-Six Bottle services in Docker Compose, one PostgreSQL database and a React frontend. The
-browser reaches the services through the Vite development server, which proxies
-`/api/<service>/…` to each of them. All endpoints: appendix A.
+Six Bottle services, one PostgreSQL database, a React UI behind the Vite proxy. Endpoints:
+appendix A.
 
-### 2.1 Shared runtime
-
-All six start through `desk_runtime.service_runtime.run_service`.
+### 2.1 How the services run
 
 | | |
 | --- | --- |
-| Server | `wsgiref` (standard library) with `ThreadingMixIn`: a new thread per connection, no limit on their number. HTTP/1.0, so every request opens a new TCP connection. Listen queue of 5 (the `socketserver` default). A development server, not a production one: no gunicorn, no waitress |
-| Processes | One per container. Start-up hooks and background threads run in the same process as the request handlers. Five services keep live data only in their own memory, so each can run as one process only: a second copy would hold different data. books-service is the exception |
-| Database | SQLAlchemy 2.0 ORM, synchronous sessions (`session_scope()`, 54 call sites), psycopg 3, default pool of 5 + 10 connections per process. psycopg 3 also has an asynchronous API; nothing uses it |
-| Other services | Standard-library `urllib`: blocking, with explicit timeouts |
-| Framework coupling | Bottle is imported only in each service's `api.py` and in `desk_runtime` (`http.py`, `service_runtime.py`). Domain logic and repositories do not depend on it |
-| Errors | JSON `{"error": "…"}` for every status, including unknown routes and 500 (`desk_runtime.http`) |
-| Tests | None. Behaviour is checked by hand in the UI |
-| Containers | One image (`docker/service.Dockerfile`), a Compose healthcheck per service |
+| Server | `wsgiref`: a new thread per connection, no limit; HTTP/1.0; listen queue of 5. A development server |
+| Processes | One per container. Five services keep live data in memory, so each runs as one process only (books-service could run more) |
+| Database | SQLAlchemy ORM, synchronous sessions (54 call sites), psycopg 3, pool of 5 + 10 connections |
+| Calls to other services | `urllib`: blocking, with timeouts |
+| Bottle used in | each service's `api.py` and `desk_runtime` (`http.py`, `service_runtime.py`); domain logic does not depend on it |
+| Errors | JSON `{"error": "…"}` for every status |
+| Tests | None; checked by hand in the UI |
+| Containers | One image, a healthcheck per service |
 
 ### 2.2 Services
 
-Endpoint counts include `/health`.
-
-| Service | Port | Endpoints | Does | Depends on |
-| --- | --- | --- | --- | --- |
-| market-data-service | 8001 | 19 | Polls seven external market-data APIs, stores quotes and curves, streams updates | PostgreSQL; Finnhub, Twelve Data, FRED, NBP, ECB, EIOPA, Alpha Vantage |
-| pricing-service | 8002 | 7 | Revalues active trades on every market update; serves and streams valuations and book risk | PostgreSQL; market-data-service (`/stream` held open, `/snapshot` on reconnect) |
-| monitoring-service | 8003 | 5 | Checks every service and the database, collects the log files, streams log lines | PostgreSQL; `/health` of the five other services; the shared log directory |
-| books-service | 8004 | 6 | Stores trading books; refuses to deactivate a book that still has open trades | PostgreSQL only |
-| trade-action-service | 8008 | 6 | Validates trade orders, acknowledges them, executes them from a queue | PostgreSQL only |
-| blotter-service | 8006 | 7 | Lists trades with their latest valuations, book summaries and audit history | PostgreSQL; pricing-service (`/valuation-stream` held open, `/valuations` on reconnect) |
+| Service (port, endpoints) | Does | Depends on | In the background |
+| --- | --- | --- | --- |
+| market-data (8001, 19) | Polls seven market-data APIs, stores quotes and curves, streams updates | PostgreSQL; 7 external APIs | provider polling, retention sweep |
+| pricing (8002, 7) | Revalues trades on every market update; valuations and book risk | PostgreSQL; market-data stream | stream consumer, trade refresh |
+| monitoring (8003, 5) | Checks every service, collects and streams logs | PostgreSQL; other services' `/health`; log files | pollers every 1–5 s |
+| books (8004, 6) | Trading books | PostgreSQL | nothing |
+| trade-action (8008, 6) | Validates and executes trade orders | PostgreSQL | order worker |
+| blotter (8006, 7) | Trades with valuations, book summaries, audit history | PostgreSQL; pricing stream | stream consumer, trade refresh |
 
 ### 2.3 Load character
 
-All six services are **I/O-bound**.
-
-| Service | Request handlers | In the background |
-| --- | --- | --- |
-| market-data-service | Most read the database. Symbol search and the two manual refreshes call external APIs | A polling thread per provider loop, a retention sweep; stream subscribers in memory |
-| pricing-service | Mostly memory reads. `POST /price` and `POST /scenario` compute, one instrument at a time: the only computation in any handler | A stream consumer, a trade refresh loop; prices and valuations in memory |
-| monitoring-service | Read memory or the database | A poller per target every 5 s, a database poller, a log collector every 1 s |
-| books-service | One or two queries per request | Nothing; nothing in memory |
-| trade-action-service | Validation queries the database; the write happens on the worker | One worker thread; the order queue in memory |
-| blotter-service | Several queries per request, joined with the valuation cache | A stream consumer, an active-trades refresh loop; trades and valuations in memory |
-
-- **Request handlers** wait on the database: short waits.
-- **Background threads** hold the long waits: external APIs, other services' streams, health
-  polling. The framework does not change them; under FastAPI the threads would do the same work.
-- **The only handlers that wait on external APIs** inside a request are market-data's symbol
-  search and two manual refreshes (`GET /symbols/search`, `POST /refresh`,
-  `POST /curves/refresh`). External APIs answer in 83–378 ms at the median and up to 1.8 s at
-  p95 (61 000 calls in market-data's logs).
-
-So a migration can change only the waits inside requests: database access in most handlers,
-the three streams served to the UI, and market-data's in-request provider calls.
-
-**Today's load is small**: one UI polling every 2–10 s and holding two streams (three on the Logs view), health
-checks every 5 s, two internal streams. No service has a performance problem at this load, so
-the benchmark asks how the backend scales beyond it.
+- **All six are I/O-bound** (from the code and 61 000 provider calls in the logs).
+- **Request handlers**: short database queries. The only computation: pricing's `POST /price`
+  and `POST /scenario`.
+- **Long waits run in background threads** (external APIs, other services' streams, health
+  polling). The framework does not change them.
+- **External APIs inside a request**: only market-data's `GET /symbols/search`, `POST /refresh`,
+  `POST /curves/refresh`; they answer in 83–378 ms at the median, up to 1.8 s at p95.
+- **Streams to the UI**: market-data, pricing, monitoring; every open UI holds two or three.
+- **Today's load is small**: one UI polling every 2–10 s. No service has a performance problem,
+  so the benchmark asks how the backend scales.
+- **A migration can change only**: database waits in handlers, the UI streams, market-data's
+  in-request API calls.
 
 ### 2.4 Benchmark sample
 
-**books-service**, plus a stub standing in for another service.
+**books-service** and a stub standing in for another service.
 
-- **Can be kept identical** in Bottle and FastAPI: no background threads, nothing in memory,
-  only the database. Every other service needs its streams, caches, providers or log collector
-  running.
-- **Representative**: request → synchronous database access → JSON is what nearly every
-  handler here does.
-- **The stub adds what it lacks**: a handler that waits on another service (S2).
+- **Identical in both frameworks**: no background threads, nothing in memory, only the database.
+- **Representative**: request → synchronous database access → JSON, like nearly every handler.
+- **The stub adds the missing case**: waiting on another service.
 
 ### 2.5 Scenarios
 
-| # | Request | Does | Shows |
+| # | Request | Shows | In this system |
 | --- | --- | --- | --- |
-| S1 | `GET /health` | Small JSON, no I/O | Framework and server overhead |
-| S2 | `GET /io` | Calls the stub, which waits 50 ms | Waiting on another service — where ASGI should help |
-| S3 | `GET /cpu` | 20 000 rounds of SHA-256 | Computation — where ASGI cannot help (control) |
-| S4 | Create and read a book | Inserts a book, then reads it back by id, through books-service's repository | This system's typical work: synchronous database writes and reads |
-| S5 | `GET /health` beside open streams | 10, 50 or 200 clients hold an SSE stream (one message a second) while 10 others call `/health` | Whether open streams block other requests — in Bottle each holds a thread |
+| S1 | `GET /health` | framework and server overhead | every request |
+| S2 | `GET /io`: the stub waits 50 ms | waiting on another service — where ASGI should help | market-data's symbol search and refreshes |
+| S3 | `GET /cpu`: 20 000 × SHA-256 | computation — where ASGI cannot help | pricing's `POST /price` |
+| S4 | insert a book, read it by id | synchronous database work | most handlers |
+| S5 | `GET /health` beside 10, 50, 200 open streams | whether open streams block other requests | the UI streams |
 
-In this system:
-
-- **S2** is market-data's symbol search and manual refreshes. It stands for any remote call,
-  to a microservice or a third-party API: only the wait matters, not who answers. Real
-  third-party APIs are not called: rate limits, variable latency and API keys would make runs
-  neither comparable nor reproducible.
-- **S4** is the database wait most handlers have. Each request inserts a book with a unique
-  name and reads it back by id, so its cost does not grow with the table. `fastapi-async` runs
-  the same two queries over the async driver. The database is dedicated to the benchmark, and
-  its books and audit rows are emptied before each point.
-- **S5** is the streams three services serve. Every open UI holds two, so their number grows
-  with the number of users. The sample gets a minimal `/stream` for it.
+- Real external APIs are not called: rate limits and variable latency make runs irreproducible;
+  only the wait matters, not who answers.
+- S4 uses a separate database, emptied before each point.
 
 Variants, parameters and thresholds: `docs/decision_criteria.md`.
 
@@ -116,16 +86,94 @@ Variants, parameters and thresholds: `docs/decision_criteria.md`.
 
 ## 3. Benchmark method
 
-*Stage 1 (benchmark on a small sample). Starts only after `docs/decision_criteria.md` is
-committed.*
+| Variant | Server | Handlers and clients |
+| --- | --- | --- |
+| `bottle-sync` | gunicorn, sync worker | one request at a time |
+| `bottle-threads` | gunicorn, 40 threads | `requests`, sync database driver |
+| `fastapi-async` | uvicorn | `async def`, httpx, async database driver |
+| `fastapi-sync` | uvicorn | `def` in a 40-thread pool, `requests`, sync database driver |
+
+- **Sample**: books-service code and a stub (2.4), behind Bottle and FastAPI; identical responses.
+- **Load**: c = 1, 10, 50, 200; S5: 10, 50, 200 open streams.
+- **One point**: 10 s warm-up, 30 s measured, 3 runs, variants alternating; client timeout 10 s.
+- **Setup**: one process per variant, server on its own CPU; separate PostgreSQL, emptied
+  before each S4 point.
+- **Metrics**: successful req/s; p50, p95, p99; errors and timeouts; server CPU and memory (RSS).
+- **Load generator**: oha — listed in the assignment, reports percentiles and error types; used
+  a quarter of one core at 31 000 req/s.
+- **Fair comparison** (PDF 5.1): same host, N and Python; production mode; same generator;
+  pinned versions.
+- **Run**: `benchmark/run_benchmark.sh`, Docker only, about 2 h 45 min. Commands and
+  versions: appendix B.
+
+### 3.1 Fixes made during the measurement
+
+| Problem | Fix |
+| --- | --- |
+| httpx spent 20 % of the CPU on a missing package (`sniffio`) | package installed |
+| httpx with an unlimited connection pool collapsed at c = 200 | default pool |
+| Warm-up requests still running during the measurement | warm-up waits for them |
+| Load generator ran out of ports: `bottle-sync` closes every connection | port reuse; first full run discarded |
+| Database pool kept reopening connections, FastAPI 2–4× more often | 15 connections kept open; S4 measured again |
+
+### 3.2 Limitations
+
+- One laptop; macOS decides whether the server's CPU is a fast or a slow core.
+- Each client waits for its answer before the next request: overload latency is understated.
+- The stub waits a fixed 50 ms; the real external APIs take 83–378 ms.
+- The sample has no background threads and no in-memory state.
 
 ## 4. Results
 
-*Stage 1 (benchmark on a small sample).*
+Median of 3 runs. Spread: typically 1–7 % of the median, S4 up to 25 %; min–max bars on the
+charts, every range in `benchmark/results/summary.md`.
+
+### 4.1 Target load: c = 50 (S5: 50 open streams)
+
+Successful req/s / p95 in ms (budget 100 ms):
+
+| | `bottle-sync` | `bottle-threads` | `fastapi-async` | `fastapi-sync` |
+| --- | --- | --- | --- | --- |
+| S2 `/io` | 17 / 2 886 | 711 / 105 | 693 / 90.5 | 719 / 101 |
+| S3 `/cpu` | 201 / 256 | 201 / 555 | 216 / 380 | 212 / 460 |
+| S4 `/db` | 1 117 / 48.5 | 1 343 / 120 | 1 094 / 73.2 | 1 343 / 57.6 |
+| S5 `/health` | – | 0 / all timeouts | 29 074 / 0.4 | – |
+
+- **Errors**: none, except `bottle-threads` in S5.
+- **CPU per request**: `/health` 0.03–0.08 ms · `/io` 0.43 ms (`requests`), 0.73 ms (httpx) ·
+  `/cpu` ~5 ms · `/db` 0.7 ms (sync driver), 0.8–1.0 ms (async driver).
+- **Memory**: Bottle 77–87 MB, FastAPI 110–117 MB.
+
+### 4.2 Other loads
+
+- **c = 1**: all variants within 2 ms of each other.
+- **c = 200, S2**: `fastapi-async` 360 req/s, `bottle-threads` 705; `bottle-sync` 71 % timeouts.
+- **c = 200, S3**: `fastapi-async` 3.8 % timeouts.
+- **S1, c = 50**: `fastapi-async` 33 000 req/s, the others 11 500–17 400.
+
+### 4.3 Charts
+
+Throughput and p95 against concurrency.
+
+![S1](../benchmark/results/charts/s1.png)
+![S2](../benchmark/results/charts/s2.png)
+![S3](../benchmark/results/charts/s3.png)
+![S4](../benchmark/results/charts/s4.png)
+![S5](../benchmark/results/charts/s5.png)
 
 ## 5. Interpretation
 
-*Stage 1 (benchmark on a small sample).*
+- **S1, framework overhead** — lowest in FastAPI async; every variant answers in 0.1 ms at
+  c = 1, so it does not matter at this system's load.
+- **S2, waiting on another service** — equal up to 40 concurrent requests. Bottle threads and
+  FastAPI `def` both stop at 40 threads (≈ 710 req/s). FastAPI async has no thread limit: p95
+  90.5 vs 105 ms at c = 50; at c = 200 it is slower, because httpx costs 70 % more CPU per call.
+- **S3, computation** — same throughput on one core; only the order of service changes p95.
+- **S4, database** — a short query is CPU work (0.7 ms): FastAPI `def` = Bottle threads. The
+  async driver is slower: nothing to overlap, extra CPU.
+- **S5, open streams** — Bottle threads serve nothing from 40 open streams; FastAPI async is
+  unaffected. Bottle with 256 threads (checked once) also served `/health` in 1.1 ms beside 200.
+- **Longer waits** favour async: at the real APIs' 200 ms, 40 threads stop at 200 req/s.
 
 ## 6. Criteria and decision (ADR)
 
@@ -227,3 +275,28 @@ return `text/event-stream`.
 | GET | `/trades/<trade_id>/valuations`, `…/audit-logs` | — | 200, 404 | list |
 | GET | `/books/summary` | — | 200 | list of book summaries |
 | GET | `/health` | — | 200 | `{service, status, …}` |
+
+### B. Benchmark commands and versions
+
+| | Command |
+| --- | --- |
+| `bottle-sync` | `gunicorn -w 1 sample_wsgi.app:app` |
+| `bottle-threads` | `gunicorn -w 1 -k gthread --threads 40 sample_wsgi.app:app` |
+| `fastapi-async` | `uvicorn sample_asgi.app:app --no-access-log` |
+| `fastapi-sync` | `uvicorn sample_asgi.app:sync_app --no-access-log` |
+| Stub | `uvicorn downstream_stub.app:app --no-access-log` (one process) |
+| Load, per point | `oha -z 10s -w -c <c> -t 10s <url>` (warm-up), then `oha -z 30s -c <c> -t 10s --output-format json <url>` |
+
+```sh
+benchmark/run_benchmark.sh                            # full grid, about 2 h 45 min
+SCENARIOS=s4 benchmark/run_benchmark.sh               # one scenario again
+docker compose -f benchmark/infra/compose.yml down    # removes the benchmark database
+```
+
+- **Versions**: Python 3.14.7, Bottle 0.13.4, gunicorn 26.2.0, FastAPI 0.141.1, uvicorn 0.53.0
+  (uvloop 0.22.1, httptools 0.8.0), httpx 0.28.1, requests 2.34.2, SQLAlchemy 2.0.52,
+  psycopg 3.3.4, PostgreSQL 18.6, oha 1.16.0. All pins: `benchmark/infra/requirements.txt`.
+- **Machine**: Apple M3 (4 fast + 4 efficient cores), 16 GB, macOS 27.0, mains power; Docker
+  Desktop 29.4, VM with 8 CPUs and 8 GB. Server on CPU 7, stub 6, PostgreSQL 4–5, load 0–3.
+- **Benchmark settings** (`benchmark/infra/compose.yml`): 15 database connections kept open,
+  log level WARNING, load generator may reuse closed ports.
