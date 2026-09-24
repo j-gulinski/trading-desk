@@ -177,11 +177,65 @@ Throughput and p95 against concurrency.
 
 ## 6. Criteria and decision (ADR)
 
-*Stage 2 (go / no-go decision), against the thresholds in `docs/decision_criteria.md`.*
+**ADR-001 · Bottle (WSGI) → FastAPI (ASGI) for all six services · 24 September 2026**
 
-## 7. Risk analysis
+> **Decision: NO-GO. At today's load and for this application, stay on Bottle.**
+>
+> **Next: replace the `wsgiref` development server with gunicorn threads (stage 4B).**
 
-*Stage 3 (risk matrix).*
+**Why**
+
+- **No need today: no service has a performance problem** (2.3). One UI polling every 2–10 s
+  with 2–3 streams.
+- **FastAPI wins only above Bottle's 40-thread cap, and the cap is one gunicorn flag.** Below
+  the cap all variants are equal (S2, c = 10: 66–69 ms); 256 threads served `/health` in 1.1 ms
+  beside 200 streams (checked once, outside the grid).
+- **The framework alone changes nothing.** FastAPI `def` = Bottle threads (S2: 719 vs
+  711 req/s; S4: 1 343 each).
+- **Gate 1 fails only against `bottle-sync`, which cannot run our services.** It passes against
+  `bottle-threads` (table below).
+
+**Context**: six Bottle services on `wsgiref`, a development server (2.1). Question: does ASGI
+scale the backend better, and is migrating worth it now?
+
+**Criteria**: [`docs/decision_criteria.md` at commit 174eb35](https://github.com/j-gulinski/trading-desk/blob/174eb351700b3fec30dff70c421b1ac1e7980609/docs/decision_criteria.md),
+committed before the first run. GO needs all four gates.
+
+**Gates** at c = 50: median of 3 runs (min–max); every difference exceeds the spread.
+
+| Gate | Committed rule | Against `bottle-threads` only |
+| --- | --- | --- |
+| 1. No regression | **FAIL**: S3 p95 380 ms (348–385) vs `bottle-sync` 256 ms (251–259); limit 282 ms | **PASS**: S3 380 vs 555 ms; S4 57.6 vs 120 ms |
+| 2. Real gain | PASS: S5 `/health` 0.4 ms beside 50 streams; Bottle: all timeouts | PASS: same |
+| 3. Cost | not scored: scope below, no hour estimate | – |
+| 4. Need | PASS: S2 p95 90.5 ms (90.4–91.4) vs 105 ms (105–106); S5 | PASS: same |
+
+- **Weakness of the rule: "Bottle" is the better Bottle variant at each point** (`bottle-sync` in
+  S3 and S4, `bottle-threads` in S2 and S5). A service runs one worker type, and `bottle-sync`
+  cannot serve streams or waiting requests (S2: p95 2.9 s).
+- **The S3 gap does not matter at today's load**: at c = 1 every variant answers in 4.9–5.2 ms.
+- **Top 3 risks** (section 7): an order skips the price check, prices go stale, PostgreSQL runs
+  out of connections.
+
+**Scope of a migration (gate 3)**
+
+- 50 endpoints in six `api.py`
+- every error kept as `{"error": …}`, same status
+- contract tests before and after: none today; about 100 endpoint × status cases
+- `desk_runtime`: uvicorn; `lifespan` for startup hooks and background threads
+- three streams rewritten as `async` generators
+- handlers on the async database driver; background jobs keep the synchronous one (54
+  `session_scope()` call sites in total; risks 5, 6)
+- calls between services via `httpx.AsyncClient` (pricing, blotter, monitoring; risk 4)
+
+**Options**
+
+| Option | For | Against |
+| --- | --- | --- |
+| 1. **Full migration** | no thread cap; Pydantic validation, OpenAPI | no gain at today's load; async libraries cost more CPU (risk 7); about +30 MB RAM per service; full scope above |
+| 2. **Bottle on gunicorn threads (chosen)** | one file changes (`service_runtime.py`); production server: keep-alive, listen queue 2 048 instead of 5 | one thread per open stream; no Pydantic or OpenAPI |
+| 3. **FastAPI trial in market-data only** (after 2) | only service whose requests wait on external APIs; shows how FastAPI fits the rest | two frameworks at once; largest service (19 endpoints) |
+
 
 ## 8. Refactor (GO) or alternative plan (NO-GO)
 
