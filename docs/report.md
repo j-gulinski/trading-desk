@@ -186,7 +186,7 @@ Throughput and p95 against concurrency.
 **Why**
 
 - **No need for migration.** Bottle with enough threads stays under 100 ms and handles waiting
-  better than FastAPI (S2: 918 vs 697 req/s; at c = 200: 2 966 vs 380).
+  better than FastAPI (S2: 918 vs 697 req/s; at c = 200: 2 966 vs 380; extra run below).
 - **The framework alone changes nothing.** FastAPI `def` = Bottle threads (S2: 719 vs 711 req/s;
   S4: 1 343 each).
 - **The weak spot is today's server.** `wsgiref` has a 1 s tail and timeouts under load;
@@ -199,39 +199,46 @@ scale better, and is migrating worth it now?
 **Criteria**: [`docs/decision_criteria.md`, commit 174eb35](https://github.com/j-gulinski/trading-desk/blob/174eb351700b3fec30dff70c421b1ac1e7980609/docs/decision_criteria.md),
 committed before the first run. GO needs all four gates.
 
-**Gates** at c = 50
+**Gates** (stage 1, as committed; c = 50)
 
-| Gate: GO needs | Stage 1: FastAPI vs the better Bottle (sync or 40 threads) | Extra run: FastAPI vs Bottle with 256 threads |
-| --- | --- | --- |
-| **1. No regression**: FastAPI within 10 % of Bottle in S3, S4 | **FAIL**: S3 p95 FastAPI 380 ms, Bottle 256 ms | **FAIL**: S4 FastAPI 1 134 req/s, Bottle 1 346 req/s |
-| **2. Real gain**: FastAPI p95 30 % lower or 2× throughput in S2 or S5 | **PASS**: S5 FastAPI 0.4 ms; Bottle answers nothing beside 50 streams | PASS on paper: S5 FastAPI 0.4 ms, Bottle 0.8 ms; in S2 Bottle is faster |
-| **3. Cost**: ≤ 3 h per service | not scored; scope below | – |
-| **4. Need**: Bottle over 100 ms, FastAPI under | **PASS**: S2 Bottle 105 ms, FastAPI 90.5 ms | **FAIL**: Bottle under 100 ms in S2, S4, S5 (S2: 59.2 ms) |
-| **Result** | **NO-GO**: gate 1 fails | **NO-GO**: gates 1 and 4 fail |
+| Gate: GO needs | Result: FastAPI vs the better Bottle (sync or 40 threads) |
+| --- | --- |
+| **1. No regression**: FastAPI within 10 % of Bottle in S3, S4 | **FAIL**: S3 p95 FastAPI 380 ms, Bottle 256 ms |
+| **2. Real gain**: FastAPI p95 30 % lower or 2× throughput in S2 or S5 | **PASS**: S5 FastAPI 0.4 ms; Bottle answers nothing beside 50 streams |
+| **3. Cost**: ≤ 3 h per service | not scored; scope below |
+| **4. Need**: Bottle over 100 ms, FastAPI under | **PASS**: S2 Bottle 105 ms, FastAPI 90.5 ms |
+| **Result** | **NO-GO**: gate 1 fails |
 
-- **Why two columns**: stage 1 compared FastAPI with the better Bottle variant at each point:
-  `bottle-sync` in S3 and S4, `bottle-threads` in S2 and S5. A service runs one worker type, so
-  the extra run compares with one Bottle, with enough threads that no request waits for one.
-- **Uncertainty**: stage 1 is the median of 3 runs, spread 1–7 % (S4 up to 25 %), every
-  difference larger than the spread. The extra run is one run per point; `fastapi-async` came
-  within 5 % of stage 1.
+- **Uncertainty**: median of 3 runs, spread 1–7 % (S4 up to 25 %); every difference above is
+  larger than the spread.
 - **Risks** (section 7): the worst are an order skipping the price check, stale prices and
   PostgreSQL running out of connections.
 
-**Today's server vs gunicorn threads** (extra run, c = 50 unless noted)
+**Extra run: Bottle with more threads, a quick win**
 
-| | today: `wsgiref` | planned: 256 threads | `fastapi-async` |
+- **Why**: FastAPI won gates 2 and 4 only where Bottle ran out of its 40 threads (S2 above 40
+  clients, S5). Raising the limit is one gunicorn flag. Stage-1 "Bottle" also mixed two worker
+  types (`bottle-sync` in S3, S4; `bottle-threads` in S2, S5); a service runs one.
+- **What**: S1–S5 once more, one run per point: today's `wsgiref`, gunicorn with 256 threads (no
+  request waits for a thread), `fastapi-async`. `fastapi-async` came within 5 % of stage 1.
+
+| c = 50 unless noted | today: `wsgiref` | gunicorn, 256 threads | `fastapi-async` |
 | --- | --- | --- | --- |
 | S2, waits 50 ms | 656 req/s, p99 1 094 ms | 918 req/s, p99 61.7 ms | 697 req/s, p99 104 ms |
 | S2 at c = 200 | 1 700 req/s, p99 1 308 ms, timeouts | 2 966 req/s, p99 116 ms | 380 req/s, p99 782 ms |
 | S4, database | 1 249 req/s, p99 1 050 ms | 1 346 req/s, p99 98.9 ms | 1 134 req/s, p99 90.4 ms |
 | S1, `/health` | 7 016 req/s | 14 013 req/s | 33 960 req/s |
 
-- **What fails today**: `wsgiref`'s listen queue of 5 drops connections under load; they retry
-  after 1 s, so p99 is about 1 s from c = 10, with timeouts at c = 200. It also logs every
-  request, as the services do today.
-- **Charts** below show p95, which hides that tail. All five charts:
-  `benchmark/results/threads-check/`.
+- **Quick win over today's server**: gunicorn threads cuts p99 from about 1 s to under 120 ms;
+  throughput 2× in S1, +40 % in S2, +8 % in S4.
+- **Better than FastAPI where requests wait**: S2 918 vs 697 req/s; at c = 200, 2 966 vs 380.
+- **Gates against this Bottle**: gate 4 **fails, no need**: Bottle stays under 100 ms in S2, S4,
+  S5 (S2: 59.2 ms). Gate 1 still fails (S4: FastAPI 1 134 vs Bottle 1 346 req/s). Gate 2 passes
+  only on paper (S5: 0.4 vs 0.8 ms).
+- **What fails today**: `wsgiref`'s listen queue of 5 drops new connections under load; they
+  retry after 1 s, so p99 is about 1 s from c = 10. It also logs every request, as the services
+  do today.
+- **Charts** show p95, which hides that tail. All five: `benchmark/results/threads-check/`.
 
 ![S2 extra run](../benchmark/results/threads-check/charts/s2.png)
 ![S4 extra run](../benchmark/results/threads-check/charts/s4.png)
