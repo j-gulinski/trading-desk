@@ -37,14 +37,12 @@ class TwelveDataClient(ProviderClient):
         code = payload.get("code")
         message = str(payload.get("message") or f"error code {code}")
         if code == 429:
-            raise ProviderRateLimited(self.provider, message, response=payload)
+            raise ProviderRateLimited(self.provider, message)
         if _data_error_detail(message) != message:
-            raise ProviderDataError(
-                self.provider, _data_error_detail(message), response=payload
-            )
+            raise ProviderDataError(self.provider, _data_error_detail(message))
         if code in (401, 403):
-            raise ProviderAuthError(self.provider, message, response=payload)
-        raise ProviderDataError(self.provider, message, response=payload)
+            raise ProviderAuthError(self.provider, message)
+        raise ProviderDataError(self.provider, message)
 
     def _raise_for_status(self, error, body=None):
         if error.code == 404 and body:
@@ -57,7 +55,6 @@ class TwelveDataClient(ProviderClient):
                 raise ProviderDataError(
                     self.provider,
                     _data_error_detail(provider_message),
-                    response=payload,
                     http_status=error.code,
                 )
         super()._raise_for_status(error, body)

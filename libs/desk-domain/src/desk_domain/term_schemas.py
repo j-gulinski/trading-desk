@@ -3,7 +3,10 @@ the ticket reads. Nothing here knows a specific asset class."""
 
 import math
 
+from desk_domain.curve_registry import latest_curve_sets
 from desk_domain.instruments import CURVE_FIELDS, INSTRUMENT_TYPES, instrument_type_for, type_view
+from desk_domain.pricing import public_models
+from desk_domain.symbols import watchlist_spot_catalog
 
 
 def curve_currencies(curves):
@@ -56,8 +59,8 @@ def _model_choice_field(models):
         "name": "model",
         "label": "PRICING MODEL",
         "type": "choice",
-        "choices": [model["name"] for model in models],
-        "labels": {model["name"]: model["label"] for model in models},
+        "choices": list(models),
+        "labels": {name: spec["label"] for name, spec in models.items()},
     }
 
 
@@ -77,7 +80,7 @@ def public_term_schemas(spot_catalog, curves=()):
             "customizable": bool(instrument_type.fields),
             "defaults": {**instrument_type.defaults, **({"model": default_model} if models else {})},
             "fields": fields,
-            "models": list(models),
+            "models": public_models(models),
             "needs_quote": instrument_type.needs_quote,
             "needs_curve": instrument_type.needs_curve,
             "underlying_field": instrument_type.underlying_field,
@@ -90,37 +93,26 @@ def public_term_schemas(spot_catalog, curves=()):
     return schemas
 
 
-def _use_label(field_name):
-    return "project" if field_name == "projection_curve" else "discount"
-
-
 def _curve_guards(instrument_type, terms, curves):
-    by_name = {curve["curve_name"]: curve for curve in curves}
+    curve_name = terms.get("discount_curve")
+    if curve_name is None:
+        return None
+    curve = next(curve for curve in curves if curve["curve_name"] == curve_name)
     asset_class = instrument_type.asset_class
     currency = terms.get("settlement_currency") or terms.get("currency")
-    for field_name in CURVE_FIELDS:
-        curve_name = terms.get(field_name)
-        if curve_name is None:
-            continue
-        curve = by_name[curve_name]
-        if currency is not None and curve["currency"] != currency:
-            return (
-                f"a {currency} {asset_class} cannot {_use_label(field_name)} on "
-                f"{curve_name} — it is a {curve['currency']} curve"
-            )
-        for role in instrument_type.curve_roles.get(field_name, ()):
-            if f"{asset_class}:{role}" not in curve.get("uses", ()):
-                return (
-                    f"{curve_name} is not approved as the {_use_label(field_name)} curve "
-                    f"for {asset_class}"
-                )
-    projection = by_name.get(terms.get("projection_curve"))
+    if currency is not None and curve["currency"] != currency:
+        return (
+            f"a {currency} {asset_class} cannot discount on "
+            f"{curve_name} — it is a {curve['currency']} curve"
+        )
+    for role in instrument_type.curve_roles.get("discount_curve", ()):
+        if f"{asset_class}:{role}" not in curve.get("uses", ()):
+            return f"{curve_name} is not approved as the discount curve for {asset_class}"
     leg_tenor = terms.get("floating_rate_index_tenor")
-    if projection is not None and leg_tenor is not None \
-            and projection.get("index_tenor") not in (None, leg_tenor):
+    if leg_tenor is not None and curve.get("index_tenor") not in (None, leg_tenor):
         return (
             f"the floating leg pays a {leg_tenor} index but "
-            f"{projection['curve_name']} is a {projection['index_tenor']} index curve"
+            f"{curve_name} is a {curve['index_tenor']} index curve"
         )
     return None
 
@@ -161,10 +153,9 @@ def _selected_model(instrument_type, raw):
     if not models:
         return None
     name = raw.get("model") or instrument_type.model
-    for spec in models:
-        if spec["name"] == name:
-            return spec
-    raise ValueError(f"unsupported pricing model {name} for {instrument_type.asset_class}")
+    if name not in models:
+        raise ValueError(f"unsupported pricing model {name} for {instrument_type.asset_class}")
+    return name
 
 
 def validate_terms(asset_class, raw, spot_catalog=None, curves=()):
@@ -180,7 +171,8 @@ def validate_terms(asset_class, raw, spot_catalog=None, curves=()):
         selected = _selected_model(instrument_type, raw)
     except ValueError as exc:
         return None, str(exc)
-    skip = set(CURVE_FIELDS) | {"volatility"} if selected and not selected["needs_curve"] else set()
+    needs_curve = selected is None or instrument_type.models[selected]["needs_curve"]
+    skip = set() if needs_curve else set(CURVE_FIELDS) | {"volatility"}
 
     spot_catalog = spot_catalog or {}
     terms = dict(instrument_type.defaults)
@@ -203,7 +195,7 @@ def validate_terms(asset_class, raw, spot_catalog=None, curves=()):
         except ValueError as exc:
             return None, str(exc)
     if selected is not None:
-        terms["model"] = selected["name"]
+        terms["model"] = selected
 
     terms["asset_class"] = asset_class
     terms["currency"] = _terms_currency(instrument_type, terms, spot_catalog)
@@ -216,3 +208,12 @@ def validate_terms(asset_class, raw, spot_catalog=None, curves=()):
     if guard_error is not None:
         return None, guard_error
     return terms, None
+
+
+def checked_terms(session, asset_class, raw):
+    terms, error = validate_terms(
+        asset_class, raw, watchlist_spot_catalog(session), latest_curve_sets(session),
+    )
+    if terms is None:
+        raise ValueError(error)
+    return terms

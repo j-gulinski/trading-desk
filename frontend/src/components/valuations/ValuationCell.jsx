@@ -17,12 +17,7 @@ function currentValueText(valuation) {
   return amount === '—' || !unit ? amount : `${amount} ${unit}`
 }
 
-export default function ValuationCell({
-  column,
-  row,
-  comparisonValue,
-  comparisonCurrency,
-}) {
+export default function ValuationCell({ column, row }) {
   const { valuation, status } = row
 
   switch (column.id) {
@@ -48,8 +43,6 @@ export default function ValuationCell({
         <MoneyCell
           value={valuation.fairValue}
           currency={valuation.currency}
-          comparisonValue={comparisonValue}
-          comparisonCurrency={comparisonCurrency}
         />
       )
     case 'notional':
@@ -57,8 +50,6 @@ export default function ValuationCell({
         <MoneyCell
           value={valuation.notional}
           currency={valuation.currency}
-          comparisonValue={comparisonValue}
-          comparisonCurrency={comparisonCurrency}
         />
       )
     case 'unrealized':
@@ -69,8 +60,6 @@ export default function ValuationCell({
               value={valuation.unrealizedPnl}
               currency={valuation.currency}
               signed
-              comparisonValue={comparisonValue}
-              comparisonCurrency={comparisonCurrency}
             />
           )
     case 'return':

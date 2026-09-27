@@ -5,7 +5,6 @@ from market_data_service.providers.base import ProviderDataError
 from desk_domain.providers import ALPHA_VANTAGE, quote_grade
 from desk_domain.quotes import build_quote
 
-# The daily quote names only the trading day; the price is that day's US session close.
 US_SESSION_CLOSE = time(16, 0)
 US_SESSION_TZ = ZoneInfo("America/New_York")
 

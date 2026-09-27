@@ -8,7 +8,7 @@ from collections import deque
 from pathlib import Path
 
 from desk_runtime.logging_config import get_logger
-from monitoring_service import log_publisher
+from desk_runtime.streams import EventHub
 from monitoring_service.config import (
     LOG_BUFFER_LINES,
     LOG_DIR,
@@ -19,6 +19,7 @@ from monitoring_service.config import (
 )
 
 log = get_logger(SERVICE_NAME)
+hub = EventHub(log)
 
 LEVELS = ("debug", "info", "warning", "error", "critical")
 
@@ -64,7 +65,7 @@ def _ingest(service, raw):
         record["id"] = next(_ids)
         _buffers.setdefault(service, deque(maxlen=LOG_BUFFER_LINES)).append(record)
         _bump_minute(service, level)
-    log_publisher.publish_line(record)
+    hub.publish("log_line", record)
 
 
 def _seed_offset(path, size):
@@ -113,7 +114,10 @@ def _scan(seed=False):
             log.exception("log_scan_failed", file=path.name)
 
 
-def _collector_loop():
+def collect_loop():
+    if not LOG_DIR:
+        log.warning("log_collector_disabled", reason="LOG_DIR not set")
+        return
     _scan(seed=True)
     with lock:
         _minutes.clear()
@@ -122,15 +126,6 @@ def _collector_loop():
     while True:
         time.sleep(LOG_SCAN_INTERVAL_SECONDS)
         _scan()
-
-
-def start_collector():
-    if not LOG_DIR:
-        log.warning("log_collector_disabled", reason="LOG_DIR not set")
-        return None
-    thread = threading.Thread(target=_collector_loop, name="log-collector", daemon=True)
-    thread.start()
-    return thread
 
 
 SEARCH_KEYS = ("event", "message", "msg", "correlation_id", "trade_id", "book_id", "symbol")
@@ -144,7 +139,7 @@ def _matches(record, needle):
     return False
 
 
-def snapshot(*, services=None, levels=None, since_id=None, q=None, limit=200):
+def snapshot(*, services=None, levels=None, q=None, limit=200):
     wanted_levels = set(levels) if levels else None
     needle = q.lower() if q else None
     with lock:
@@ -157,8 +152,6 @@ def snapshot(*, services=None, levels=None, since_id=None, q=None, limit=200):
         taken = 0
         # newest first, so a buffer can be abandoned as soon as limit is filled
         for record in reversed(pool):
-            if since_id is not None and record["id"] <= since_id:
-                break
             if wanted_levels is not None and record["level"] not in wanted_levels:
                 continue
             if needle is not None and not _matches(record, needle):

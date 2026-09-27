@@ -1,4 +1,3 @@
-export const QUEUE_POLL_INTERVAL_MS = 2000
 export const FEED_POLL_INTERVAL_MS = 3000
 
 export const FEED_LIMIT = 50

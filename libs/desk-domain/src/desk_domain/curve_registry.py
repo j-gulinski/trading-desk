@@ -1,6 +1,7 @@
 from desk_domain.curves import (
     curve_metadata,
     curve_stale_after_days,
+    curve_stale_at,
     curve_trade_roles,
     curve_trade_uses,
 )
@@ -9,8 +10,9 @@ from desk_runtime.functions import utcnow
 from desk_domain.models import MarketDataCurve, MarketDataCurvePoint
 
 
-def _latest_rows(session):
-    rows = (
+def latest_revisions(session):
+    """The newest stored revision of each curve name, ordered by curve name."""
+    return (
         session.query(
             MarketDataCurve.curve_id,
             MarketDataCurve.provider,
@@ -29,13 +31,16 @@ def _latest_rows(session):
         )
         .all()
     )
-    today = utcnow().date()
+
+
+def _latest_rows(session):
+    now = utcnow()
     latest = {}
     for (
         curve_id, provider, name, curve_basis, currency, index_tenor, as_of, received_at
-    ) in rows:
-        age_days = max(0, (today - as_of).days)
-        stale_after_days = curve_stale_after_days(name)
+    ) in latest_revisions(session):
+        age_days = max(0, (now.date() - as_of).days)
+        stale_at = curve_stale_at(name, as_of)
         trade_uses = curve_trade_uses(name)
         latest[name] = {
             "curve_id": curve_id,
@@ -50,8 +55,8 @@ def _latest_rows(session):
             "as_of_date": str(as_of),
             "received_at": received_at.isoformat(),
             "age_days": age_days,
-            "stale_after_days": stale_after_days,
-            "stale": stale_after_days is not None and age_days > stale_after_days,
+            "stale_after_days": curve_stale_after_days(name),
+            "stale": stale_at is not None and now >= stale_at,
         }
     return latest
 

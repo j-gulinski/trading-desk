@@ -29,8 +29,6 @@ class Book(Base):
     is_active = Column(Boolean, nullable=False, server_default="TRUE")
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
-    created_by = Column(Text, nullable=True)
-    updated_by = Column(Text, nullable=True)
 
 
 class Instrument(Base):

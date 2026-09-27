@@ -72,12 +72,7 @@ export default function SystemOverview() {
     now,
   )
   const valuationSummary = summarizeValuations(
-    valuationRowsOf(
-      Object.values(valuationFeed.valuations),
-      now,
-      marketFeed.instruments,
-      marketFeed.curves,
-    ),
+    valuationRowsOf(Object.values(valuationFeed.valuations), now),
   )
   const streamsLastUpdateMs = Math.max(
     marketSummary.lastUpdateMs ?? 0,

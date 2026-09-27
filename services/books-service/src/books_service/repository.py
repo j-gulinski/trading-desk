@@ -13,13 +13,30 @@ from books_service.config import SERVICE_NAME
 log = get_logger(SERVICE_NAME)
 
 
-class DuplicateBookName(Exception):
-    """books.name is unique; a retaken name is a client conflict, not a server fault."""
+class BookConflict(Exception):
+    def __init__(self, message, **fields):
+        super().__init__(message)
+        self.fields = fields
 
 
 def _audit(session, event_type, book, message):
     write_audit(SERVICE_NAME, event_type, message,
                 entity_type="BOOK", entity_id=book.book_id, session=session)
+
+
+def _locked_book(session, book_id):
+    return (
+        session.query(Book).filter(Book.book_id == uuid.UUID(book_id))
+        .with_for_update().one_or_none()
+    )
+
+
+def _open_trades(session, book):
+    return (
+        session.query(Trade)
+        .filter(Trade.book_id == book.book_id, Trade.status == "ACTIVE")
+        .count()
+    )
 
 
 def list_books():
@@ -33,65 +50,53 @@ def get_book(book_id):
         return book_to_dict(book) if book else None
 
 
-def active_trade_count(book_id):
-    with session_scope() as session:
-        return (
-            session.query(Trade)
-            .filter(Trade.book_id == uuid.UUID(book_id), Trade.status == "ACTIVE")
-            .count()
-        )
-
-
-def create_book(body):
+def create_book(fields):
     now = utcnow()
     try:
-        return _create_book(body, now)
+        with session_scope() as session:
+            book = Book(book_id=uuid.uuid4(), is_active=True, created_at=now, updated_at=now,
+                        **fields)
+            session.add(book)
+            session.flush()
+            _audit(session, "BOOK_CREATED", book, f"Book {book.name} created")
+            log.info("book_created", book_id=str(book.book_id), name=book.name,
+                     asset_class=book.expected_asset_class)
+            return book_to_dict(book)
     except IntegrityError as exc:
-        raise DuplicateBookName(body.get("name")) from exc
+        raise BookConflict("a book with this name already exists", name=fields.get("name")) from exc
 
 
-def _create_book(body, now):
-    with session_scope() as session:
-        book = Book(
-            book_id=uuid.uuid4(),
-            name=body.get("name"),
-            description=body.get("description"),
-            expected_asset_class=body.get("expected_asset_class"),
-            is_active=True,
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(book)
-        session.flush()
-        _audit(session, "BOOK_CREATED", book, f"Book {book.name} created")
-        log.info("book_created", book_id=str(book.book_id), name=book.name,
-                 asset_class=book.expected_asset_class)
-        return book_to_dict(book)
-
-
-def update_book(book_id, body):
+def update_book(book_id, fields):
     try:
-        return _update_book(book_id, body)
+        with session_scope() as session:
+            book = _locked_book(session, book_id)
+            if book is None:
+                return None
+            changes_class = fields.get("expected_asset_class", book.expected_asset_class) \
+                != book.expected_asset_class
+            if changes_class and (open_trades := _open_trades(session, book)):
+                raise BookConflict("book has open trades", book_id=book_id,
+                                   active_trades=open_trades)
+            for field, value in fields.items():
+                setattr(book, field, value)
+            book.updated_at = utcnow()
+            session.flush()
+            _audit(session, "BOOK_UPDATED", book, f"Book {book.name} updated")
+            log.info("book_updated", book_id=book_id, name=book.name)
+            return book_to_dict(book)
     except IntegrityError as exc:
-        raise DuplicateBookName(body.get("name")) from exc
-
-
-def _update_book(book_id, body):
-    with session_scope() as session:
-        book = session.get(Book, uuid.UUID(book_id))
-        if book is None:
-            return None
-        for field in ("name", "description", "expected_asset_class", "is_active"):
-            if field in body:
-                setattr(book, field, body[field])
-        book.updated_at = utcnow()
-        session.flush()
-        event = "BOOK_DELETED" if body.get("is_active") is False else "BOOK_UPDATED"
-        _audit(session, event, book, f"Book {book.name} updated")
-        log.info("book_deactivated" if event == "BOOK_DELETED" else "book_updated",
-                 book_id=str(book.book_id), name=book.name)
-        return book_to_dict(book)
+        raise BookConflict("a book with this name already exists", name=fields.get("name")) from exc
 
 
 def deactivate_book(book_id):
-    return update_book(book_id, {"is_active": False})
+    with session_scope() as session:
+        book = _locked_book(session, book_id)
+        if book is None:
+            return None
+        if open_trades := _open_trades(session, book):
+            raise BookConflict("book has open trades", book_id=book_id, active_trades=open_trades)
+        book.is_active = False
+        book.updated_at = utcnow()
+        _audit(session, "BOOK_DELETED", book, f"Book {book.name} updated")
+        log.info("book_deactivated", book_id=book_id, name=book.name)
+        return book_to_dict(book)

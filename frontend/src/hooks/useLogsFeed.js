@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { apiGet } from '../services/apiClient.js'
 import { endpoints } from '../services/endpoints.js'
 import { useBufferedUpdates } from './useBufferedUpdates.js'
 import { useSseStream } from './useSseStream.js'
 import { useStreamSeed } from './useStreamSeed.js'
 import { LOG_SEED_LIMIT } from '../config/logs.js'
-import { STREAM_STATUS } from '../config/stream.js'
 import { mergeLogLines, normalizeLogLine, normalizeLogLines } from '../domain/logLines.js'
 
 export function useLogsFeed() {
@@ -57,13 +56,8 @@ export function useLogsFeed() {
       const seeded = normalizeLogLines(payload?.lines)
       setLines((previous) => mergeLogLines(reset ? [] : previous, seeded))
     }),
+    { reconnect },
   )
-
-  useEffect(() => {
-    if (seedStatus !== 'error' || status !== STREAM_STATUS.connected) return undefined
-    const timer = window.setTimeout(reconnect, 2000)
-    return () => window.clearTimeout(timer)
-  }, [reconnect, seedStatus, status])
 
   const setPaused = useCallback((next) => {
     pausedRef.current = next

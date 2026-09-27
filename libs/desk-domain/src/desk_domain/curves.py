@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, DecimalException
 
 from desk_domain.providers import ECB, EIOPA, FRED
@@ -150,6 +150,15 @@ def curve_metadata(curve_name):
 def curve_stale_after_days(curve_name):
     definition = CURVE_CATALOG.get(curve_name)
     return definition.get("stale_after_days") if definition else None
+
+
+def curve_stale_at(curve_name, as_of_date):
+    """Midnight UTC of the first day a curve revision counts as stale; None without a limit."""
+    days = curve_stale_after_days(curve_name)
+    if days is None:
+        return None
+    first_stale_day = date.fromisoformat(str(as_of_date)) + timedelta(days=days + 1)
+    return datetime.combine(first_stale_day, time(0), tzinfo=timezone.utc)
 
 
 @dataclass(frozen=True)

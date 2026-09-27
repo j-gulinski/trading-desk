@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMarketFeedContext, useValuationFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
-import { useFxRates } from '../../hooks/useFxRates.js'
 import { STORAGE_KEYS } from '../../config/storage.js'
-import { DEFAULT_SORT_CURRENCY } from '../../config/marketData.js'
 import { usePolling } from '../../hooks/usePolling.js'
 import { useTableState } from '../../hooks/useTableState.js'
 import { apiGet } from '../../services/apiClient.js'
@@ -16,7 +14,6 @@ import {
   TRADE_FALLBACK_SORT,
   TRADE_HISTORY_FETCH_LIMIT,
   TRADE_PAGE_SIZE,
-  TRADE_CURRENCY_SORT_COLUMNS,
 } from '../../config/trades.js'
 import {
   bookNamesOf,
@@ -62,10 +59,9 @@ function emptyTableMessage({ snapshot, rows, lifecycleRows, lifecycle }) {
 
 export default function Trades() {
   const { valuations, status, seedStatus } = useValuationFeedContext()
-  const { instruments, curves } = useMarketFeedContext()
+  const { instruments } = useMarketFeedContext()
   const { activePanel, openPanel, closePanel } = usePanelCoordinator()
   const { now } = useElapsedTime()
-  const sortFx = useFxRates(DEFAULT_SORT_CURRENCY)
   const [historyLimit, setHistoryLimit] = useState(TRADE_HISTORY_FETCH_LIMIT)
   const snapshot = usePolling(
     async ({ signal }) => {
@@ -133,7 +129,7 @@ export default function Trades() {
     () => tradesFromSnapshot(snapshot.data?.trades, bookNames),
     [snapshot.data?.trades, bookNames],
   )
-  const rows = tradeRowsOf(trades, valuations, now, instruments, curves)
+  const rows = tradeRowsOf(trades, valuations, now)
   const summary = summarizeTradeRows(rows)
   const isBothLifecycles = lifecycle === 'BOTH'
   const lifecycleRows = isBothLifecycles ? rows : rows.filter((row) => row.lifecycle === lifecycle)
@@ -145,23 +141,9 @@ export default function Trades() {
     defaultVisibleColumns: DEFAULT_TRADE_COLUMNS,
     defaultSort: DEFAULT_TRADE_SORT,
     fallbackSort: TRADE_FALLBACK_SORT,
-    captureSnapshot: (column) => captureTradeSnapshot(
-      rows,
-      column,
-      sortFx.rates,
-      TRADE_CURRENCY_SORT_COLUMNS.has(column) ? DEFAULT_SORT_CURRENCY : null,
-    ),
-    hasRows: rows.length > 0 && sortFx.rates != null,
-    isSortable: (column) => Boolean(column?.sortable) && (
-      !TRADE_CURRENCY_SORT_COLUMNS.has(column.id) || sortFx.rates != null
-    ),
+    captureSnapshot: (column) => captureTradeSnapshot(rows, column),
+    hasRows: rows.length > 0,
   })
-  const approximateSortCurrency = (
-    TRADE_CURRENCY_SORT_COLUMNS.has(table.sort.column) &&
-    rows.some((row) => (
-      row.valuation?.currency ?? row.trade.currency
-    ) !== DEFAULT_SORT_CURRENCY)
-  ) ? DEFAULT_SORT_CURRENCY : null
 
   const search = query.trim().toLowerCase()
   const matchingRows = sortTradeRows(
@@ -200,12 +182,6 @@ export default function Trades() {
         selectedTradeId={selectedTradeId}
         onSelect={selectTrade}
         caption={`${lifecycleLabel} trades with live valuation and PnL`}
-        comparisonCurrency={approximateSortCurrency}
-        sortDisabledReason={(column) => (
-          TRADE_CURRENCY_SORT_COLUMNS.has(column.id) && sortFx.rates == null
-            ? 'USD comparison rates are loading'
-            : null
-        )}
       />
     ) : (
       <EmptyState message={emptyTableMessage({ snapshot, rows, lifecycleRows, lifecycle })} />
@@ -319,10 +295,7 @@ export default function Trades() {
         </header>
 
         <div className="blotter-table-panel__sort">
-          <SortCaptureStatus
-            sort={table.sort}
-            approximateCurrency={approximateSortCurrency}
-          />
+          <SortCaptureStatus sort={table.sort} />
           {pageCount > 1 && (
             <div className="blotter-pager" role="navigation" aria-label="Trade pages">
               <button
@@ -356,7 +329,6 @@ export default function Trades() {
           row={selectedRow}
           bookNames={bookNames}
           instruments={instruments}
-          curves={curves}
           onClose={closeTradeDetail}
         />
       )}

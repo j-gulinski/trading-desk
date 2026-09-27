@@ -20,13 +20,12 @@ class FredClient(ProviderClient):
         code = payload.get("error_code")
         message = str(payload.get("error_message"))
         if code == 429:
-            raise ProviderRateLimited(self.provider, message, response=payload)
+            raise ProviderRateLimited(self.provider, message)
         if code in (400, 401, 403) and "api_key" in message:
-            raise ProviderAuthError(self.provider, message, response=payload)
-        raise ProviderDataError(self.provider, message, response=payload)
+            raise ProviderAuthError(self.provider, message)
+        raise ProviderDataError(self.provider, message)
 
     def _raise_for_status(self, error, body=None):
-        # FRED answers HTTP 400 for a bad/unregistered key — an auth fact, not a data one
         if error.code == 400 and body and b"api_key" in body:
             raise ProviderAuthError(
                 self.provider,

@@ -24,7 +24,6 @@ export const endpoints = {
         `/api/market-data/quotes/${encodeURIComponent(provider)}/${encodeURIComponent(symbol)}/history`,
         { limit, raw: raw ? 1 : null },
       ),
-    fxRates: (to) => withQuery('/api/market-data/fx/rates', { to }),
     curves: (raw = false) => withQuery('/api/market-data/curves', { raw: raw ? 1 : null }),
     curveRevision: (provider, curve, asOf) => (
       `/api/market-data/curves/${encodeURIComponent(provider)}/${encodeURIComponent(curve)}/${encodeURIComponent(asOf)}`
@@ -41,20 +40,21 @@ export const endpoints = {
     valuations: '/api/pricing/valuations',
     bookRisk: '/api/pricing/book-risk',
     price: '/api/pricing/price',
+    curveAt: (curveName, params) =>
+      withQuery(`/api/pricing/curves/${encodeURIComponent(curveName)}/at`, params),
   },
   books: {
     list: '/api/books/books',
     book: (bookId) => `/api/books/books/${encodeURIComponent(bookId)}`,
   },
   blotter: {
-    booksSummary: '/api/blotter/books/summary',
+    booksSummary: (currency) => withQuery('/api/blotter/books/summary', { currency }),
     trades: (params) => withQuery('/api/blotter/trades', params),
     trade: (tradeId) => `/api/blotter/trades/${encodeURIComponent(tradeId)}`,
     tradesOverview: (params) => withQuery('/api/blotter/trades/overview', params),
   },
   tradeAction: {
     submit: '/api/trade-action/trade-actions',
-    queueStatus: '/api/trade-action/queue/status',
     termSchemas: '/api/trade-action/instruments/term-schemas',
   },
 }

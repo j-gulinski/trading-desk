@@ -34,7 +34,7 @@ def split_terms(instrument):
 
 def effective_terms(instrument_type, currency, contract, metadata, underlying_symbol=None):
     pricing = metadata.get("pricing") or {}
-    allowed = {spec["name"] for spec in instrument_type.models} or {instrument_type.model}
+    allowed = set(instrument_type.models) or {instrument_type.model}
     name = pricing.get("model") or (contract or {}).get("model") or instrument_type.model
     if name not in allowed:
         raise ValueError(f"unsupported pricing model for {instrument_type.asset_class}")

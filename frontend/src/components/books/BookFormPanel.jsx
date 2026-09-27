@@ -4,10 +4,6 @@ import LoadingSkeleton from '../LoadingSkeleton.jsx'
 import SidePanel from '../panel/SidePanel.jsx'
 import { apiGet, apiPost, apiPut } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
-import {
-  BOOK_DESCRIPTION_MAX_LENGTH,
-  BOOK_NAME_MAX_LENGTH,
-} from '../../config/books.js'
 import { bookFormErrorsOf, bookFormValuesOf, bookPayloadOf } from '../../domain/books.js'
 import { assetClassLabel, catalogueAssetClasses } from '../../domain/catalogue.js'
 import { ticketOptionsOf } from '../../domain/tradeActions.js'
@@ -91,7 +87,7 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    const nextErrors = bookFormErrorsOf(values, schemas)
+    const nextErrors = bookFormErrorsOf(values)
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
 
@@ -140,7 +136,6 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
               className="panel-form__input"
               type="text"
               value={values.name}
-              maxLength={BOOK_NAME_MAX_LENGTH}
               aria-invalid={errors.name != null}
               aria-describedby={errors.name ? 'book-form-name-error' : undefined}
               onChange={(event) => setField('name', event.target.value)}
@@ -179,12 +174,8 @@ export default function BookFormPanel({ bookId = null, onSaved, onClose }) {
               className="panel-form__textarea"
               rows={3}
               value={values.description}
-              maxLength={BOOK_DESCRIPTION_MAX_LENGTH}
-              aria-invalid={errors.description != null}
-              aria-describedby={errors.description ? 'book-form-description-error' : undefined}
               onChange={(event) => setField('description', event.target.value)}
             />
-            <FieldError id="book-form-description-error" message={errors.description} />
           </div>
 
           {submitError && (

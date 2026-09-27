@@ -1,7 +1,9 @@
 from decimal import Decimal
 
 from desk_domain.instruments import FinancialInstrument
-from desk_domain.symbols import TRADE_QUANTITY_MAX, TRADE_QUANTITY_MIN
+
+TRADE_QUANTITY_MIN = 1
+TRADE_QUANTITY_MAX = 1_000_000
 
 
 def decimal_value(value, label):
@@ -14,7 +16,14 @@ def decimal_value(value, label):
     return number
 
 
-def validate_position(instrument: FinancialInstrument, side, quantity, price):
+def validate_price(instrument: FinancialInstrument, price, field="trade_price"):
+    price = decimal_value(price, field)
+    if not instrument.allows_negative_price and price <= 0:
+        raise ValueError(f"{field} must be greater than zero")
+    return price
+
+
+def validate_position(instrument: FinancialInstrument, side, quantity, price, price_field="trade_price"):
     asset_class = instrument.asset_class
     if side not in ("BUY", "SELL"):
         raise ValueError("side must be BUY or SELL")
@@ -27,7 +36,4 @@ def validate_position(instrument: FinancialInstrument, side, quantity, price):
         raise ValueError(f"{asset_class} quantity must be a whole number")
     if instrument.fixed_quantity is not None and quantity != instrument.fixed_quantity:
         raise ValueError(f"{asset_class} quantity must be {instrument.fixed_quantity}; {instrument.size_term or 'the contract terms'} defines size")
-    price = decimal_value(price, "trade_price")
-    if not instrument.allows_negative_price and price <= 0:
-        raise ValueError("trade_price must be greater than zero")
-    return quantity, price
+    return quantity, validate_price(instrument, price, price_field)

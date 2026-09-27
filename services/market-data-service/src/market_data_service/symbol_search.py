@@ -2,9 +2,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from market_data_service.providers import REGISTRATIONS
-from market_data_service.providers.base import ProviderError
 from market_data_service import watchlist
+from market_data_service.feeds import SEARCH_FEEDS
+from market_data_service.providers.alpha_vantage.normalizer import attach_search_result
 from desk_runtime.logging_config import get_logger
 from market_data_service.config import (
     SERVICE_NAME,
@@ -31,52 +31,42 @@ def _rank(query):
     return key
 
 
-def _provider_results(provider, query):
+def _provider_results(feed, query):
     try:
-        payload = provider.search(query)
-    except ProviderError as error:
-        log.warning("symbol_search_failed", provider=provider.name, detail=error.detail)
-        return [], provider.name, error.detail
+        found = feed.search(query)
     except Exception as error:
-        log.exception("symbol_search_failed", provider=provider.name)
-        return [], provider.name, f"unexpected {type(error).__name__}"
-    if payload is None:
-        return [], provider.name, "provider search is unavailable or out of budget"
+        log.exception("symbol_search_failed", provider=feed.provider)
+        return [], feed.provider, f"unexpected {type(error).__name__}"
+    if found is None:
+        return [], feed.provider, "provider search is unavailable or out of budget"
     seen = set()
     results = []
-    for result in sorted(provider.normalize_search(payload), key=_rank(query)):
+    for result in sorted(found, key=_rank(query)):
         if result["symbol"] in seen:
             continue
         seen.add(result["symbol"])
         results.append(result)
-    return results[:SYMBOL_SEARCH_RESULT_LIMIT], provider.name, None
+    return results[:SYMBOL_SEARCH_RESULT_LIMIT], feed.provider, None
 
 
 def _collect(query):
-    providers = tuple(
-        provider for provider in REGISTRATIONS
-        if provider.normalize_search is not None
-    )
-    with ThreadPoolExecutor(max_workers=len(providers)) as pool:
-        parts = list(pool.map(lambda provider: _provider_results(provider, query), providers))
+    with ThreadPoolExecutor(max_workers=len(SEARCH_FEEDS)) as pool:
+        parts = list(pool.map(lambda feed: _provider_results(feed, query), SEARCH_FEEDS))
     results = sorted(
         (result for part, _, _ in parts for result in part),
         key=_rank(query),
     )
     attached = []
     seen = {(result["provider"], result["symbol"]) for result in results}
-    for provider in REGISTRATIONS:
-        if provider.attach_search is None:
+    for result in (*results, *watchlist.matching_identities(query)):
+        candidate = attach_search_result(result)
+        if candidate is None:
             continue
-        for result in (*results, *watchlist.matching_identities(query)):
-            candidate = provider.attach_search(result)
-            if candidate is None:
-                continue
-            key = (candidate["provider"], candidate["symbol"])
-            if key in seen:
-                continue
-            seen.add(key)
-            attached.append(candidate)
+        key = (candidate["provider"], candidate["symbol"])
+        if key in seen:
+            continue
+        seen.add(key)
+        attached.append(candidate)
     results = sorted((*results, *attached), key=_rank(query))
     errors = {provider: error for _, provider, error in parts if error is not None}
     return results, errors
@@ -90,7 +80,6 @@ def search(query):
         if cached and cached[0] > now:
             return cached[1], {}
     results, errors = _collect(query)
-    # Never turn an outage or exhausted search budget into a cached "no matches" fact.
     if not errors:
         with _cache_lock:
             if len(_cache) > 200:

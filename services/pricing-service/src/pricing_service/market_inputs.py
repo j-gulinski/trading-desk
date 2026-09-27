@@ -13,8 +13,6 @@ def market_inputs(instrument: FinancialInstrument, provider=None):
             inputs["spot"] = cache.spots.get((provider or DEFAULT_QUOTE_PROVIDER, instrument.quote_symbol))
         if instrument.uses_curve():
             inputs["curve"] = cache.curves.get(instrument.discount_curve)
-        if instrument.projection_curve:
-            inputs["projection_curve"] = inputs.get("curve")
         return inputs
 
 
@@ -32,5 +30,4 @@ def shock_inputs(instrument: FinancialInstrument, inputs, shock):
     if not curve:
         return None
     bumped = {**curve, "rates": [rate + shock / 10000 for rate in curve["rates"]]}
-    return {**inputs, "curve": bumped,
-            **({"projection_curve": bumped} if "projection_curve" in inputs else {})}
+    return {**inputs, "curve": bumped}

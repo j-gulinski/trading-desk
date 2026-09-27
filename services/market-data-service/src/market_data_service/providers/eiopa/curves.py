@@ -39,12 +39,9 @@ def _derivation(series_code):
 def make_curve_builder(curve_name):
     country = WORKBOOK_COUNTRY_BY_CURVE[curve_name]
 
-    def build(client, record_request):
-        record_request()
+    def build(client):
         release = client.latest_release()
-        archive, fetched = client.monthly_archive(release["href"])
-        if fetched:
-            record_request()
+        archive = client.monthly_archive(release["href"])
         published = read_term_structure(archive, country, TENORS)
         basis = BASES.get(_derivation(published["series_code"]))
         if basis is None:

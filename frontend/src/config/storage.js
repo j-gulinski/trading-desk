@@ -4,6 +4,5 @@ export const STORAGE_KEYS = {
   valuationColumns: 'valuations.visible-columns.v2',
   marketColumns: 'market-data.visible-columns.v7',
   marketTickCount: 'market-data.tick-count',
-  marketFeedState: 'market-data.feed-state',
   reportingCurrency: 'reporting.currency',
 }

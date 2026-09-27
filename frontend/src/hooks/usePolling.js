@@ -2,10 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 const MIN_RETRY_DELAY_MS = 1000
 
-export function usePolling(
-  fetchFn,
-  { intervalMs = 5000, timeoutMs = 4000 } = {},
-) {
+export function usePolling(fetchFn, { intervalMs = 5000 } = {}) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -32,9 +29,6 @@ export function usePolling(
       clearTimeout(timer)
       const startedAt = Date.now()
       requestController = new AbortController()
-      const timeout = timeoutMs == null
-        ? null
-        : setTimeout(() => requestController.abort(), timeoutMs)
       setLastPolled(startedAt)
 
       try {
@@ -47,7 +41,6 @@ export function usePolling(
         if (cancelled) return
         setError(err)
       } finally {
-        clearTimeout(timeout)
         inFlight = false
         if (!cancelled) {
           setLoading(false)
@@ -71,7 +64,7 @@ export function usePolling(
       clearTimeout(timer)
       requestController?.abort()
     }
-  }, [intervalMs, timeoutMs])
+  }, [intervalMs])
 
   const refetch = useCallback(() => tickRef.current?.(), [])
 

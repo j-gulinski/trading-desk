@@ -1,23 +1,22 @@
-import queue
+import math
+
 import bottle
 from bottle import request, response
 
 from pricing_service import cache
-from pricing_service.config import SERVICE_NAME, VALUATION_STREAM_QUEUE_SIZE
+from pricing_service.config import SERVICE_NAME
 from pricing_service.market_inputs import market_inputs
-from desk_domain.instruments import instrument_for
+from desk_domain.instruments import IRS_PAYMENTS_PER_YEAR, instrument_for
 from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from pricing_service.schemas import ScenarioRequest
-from pricing_service.valuation_publisher import STREAM_OVERFLOW
-from desk_domain.curve_registry import latest_curve_sets
+from pricing_service.valuation_publisher import hub
+from desk_pricing.curves import curve_position, discount_factor, par_rate, rate_at
 from desk_pricing.provenance import pricing_provenance
 from desk_runtime.db import session_scope
 from desk_domain.active_set import load_active_set
-from desk_domain.symbols import watchlist_spot_catalog
-from desk_domain.term_schemas import validate_terms
+from desk_domain.term_schemas import checked_terms
 from pricing_service.scenario import run_scenario
 from desk_runtime.http import json_error, json_response
-from desk_runtime.serialization import to_json
 from desk_runtime.logging_config import get_logger
 
 log = get_logger(SERVICE_NAME)
@@ -37,21 +36,17 @@ def _preview_revisions(terms, inputs):
             "received_at": spot.get("received_at"),
         }
 
-    def curve_revision(field, input_name):
-        curve = inputs.get(input_name) or {}
+    def curve_revision():
+        curve = inputs.get("curve") or {}
         if not curve:
             return None
         return {
-            "curve_name": terms.get(field),
+            "curve_name": terms.get("discount_curve"),
             "as_of_date": curve.get("as_of_date"),
             "received_at": curve.get("received_at"),
         }
 
-    return {
-        "spot": spot_revision(),
-        "discount_curve": curve_revision("discount_curve", "curve"),
-        "projection_curve": curve_revision("projection_curve", "projection_curve"),
-    }
+    return {"spot": spot_revision(), "discount_curve": curve_revision()}
 
 
 def _revisions_match(expected, actual):
@@ -69,6 +64,51 @@ def _revisions_match(expected, actual):
             if value is not None and str(used.get(field)) != str(value):
                 return False
     return True
+
+
+def _positive_number(name):
+    try:
+        value = float(request.query.get(name, ""))
+    except ValueError:
+        raise ValueError(f"{name} must be a number") from None
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return value
+
+
+@app.route("/curves/<curve_name>/at")
+def curve_at(curve_name):
+    try:
+        maturity = _positive_number("maturity_years")
+        index_tenor = request.query.get("index_tenor")
+        if index_tenor:
+            if index_tenor not in IRS_PAYMENTS_PER_YEAR:
+                raise ValueError("index_tenor must be 3M or 6M")
+            payments_per_year = IRS_PAYMENTS_PER_YEAR[index_tenor]
+        elif request.query.get("payments_per_year"):
+            payments_per_year = _positive_number("payments_per_year")
+            if not payments_per_year.is_integer():
+                raise ValueError("payments_per_year must be a whole number")
+            payments_per_year = int(payments_per_year)
+        else:
+            payments_per_year = None
+    except ValueError as error:
+        return json_error(str(error), 400)
+    with cache.data_lock:
+        curve = cache.curves.get(curve_name)
+    if curve is None:
+        return json_error("curve is not loaded yet", 404, curve_name=curve_name)
+    rate = rate_at(curve["tenors"], curve["rates"], maturity)
+    par = par_rate(curve, maturity, payments_per_year) if payments_per_year else None
+    return json_response({
+        "curve_name": curve_name,
+        "as_of_date": curve.get("as_of_date"),
+        "maturity_years": maturity,
+        "zero_rate_percent": rate * 100,
+        "discount_factor": discount_factor(curve, maturity),
+        **curve_position(curve["tenors"], maturity),
+        "par_rate_percent": par * 100 if par is not None else None,
+    })
 
 
 @app.route("/valuations")
@@ -90,15 +130,13 @@ def price_preview():
     if symbol is not None and not isinstance(symbol, str):
         return json_error("symbol must be text", 400)
     if body.get("terms") is not None:
-        with session_scope() as session:
-            spot_catalog = watchlist_spot_catalog(session)
-            curves = latest_curve_sets(session)
-        terms, error = validate_terms(body.get("asset_class"), body["terms"],
-                                      spot_catalog, curves)
-        if terms is None:
+        try:
+            with session_scope() as session:
+                terms = checked_terms(session, body.get("asset_class"), body["terms"])
+        except ValueError as error:
             log.warning("price_preview_rejected", symbol=symbol,
-                        asset_class=body.get("asset_class"), reason=error)
-            return json_error(error, 400, symbol=symbol)
+                        asset_class=body.get("asset_class"), reason=str(error))
+            return json_error(str(error), 400, symbol=symbol)
     else:
         with session_scope() as session:
             entry = load_active_set(session).get((symbol or "").strip().upper())
@@ -137,7 +175,7 @@ def price_preview():
         )
     needs_spot = instrument.needs_quote
     provenance = pricing_provenance(
-        instrument.model, inputs.get("curve"), inputs.get("projection_curve"),
+        instrument.model, inputs.get("curve"), getattr(instrument, "maturity_years", None),
     )
     log.info("price_preview", symbol=symbol, asset_class=terms["asset_class"],
              provider=provider, price=str(priced["price"]))
@@ -164,28 +202,7 @@ def get_valuation(trade_id):
 def valuation_stream():
     response.content_type = "text/event-stream"
     response.set_header("Cache-Control", "no-cache")
-    with cache.clients_lock:
-        client_q = queue.Queue(maxsize=VALUATION_STREAM_QUEUE_SIZE)
-        cache.client_event_queues.add(client_q)
-    log.info("stream_client_connected")
-
-    def generate_events():
-        yield ": connected\n\n"
-        try:
-            while True:
-                message = client_q.get()
-                if message is STREAM_OVERFLOW:
-                    log.warning("stream_client_disconnected_after_overflow")
-                    return
-                yield f"event: {message['event']}\ndata: {to_json(message['data'])}\n\n"
-        except Exception as exc:
-            log.debug("stream_client_error", error=type(exc).__name__)
-        finally:
-            with cache.clients_lock:
-                cache.client_event_queues.discard(client_q)
-            log.info("stream_client_disconnected")
-
-    return generate_events()
+    return hub.subscribe()
 
 
 @app.route("/scenario", method="POST")
@@ -200,14 +217,13 @@ def post_scenario():
         return json_error(str(e), 400)
 
     if type(req.instrument).fields:
-        with session_scope() as session:
-            spot_catalog = watchlist_spot_catalog(session)
-            curves = latest_curve_sets(session)
-        terms, error = validate_terms(
-            req.instrument.asset_class, req.instrument.as_terms(), spot_catalog, curves,
-        )
-        if terms is None:
-            return json_error(error, 400)
+        try:
+            with session_scope() as session:
+                terms = checked_terms(
+                    session, req.instrument.asset_class, req.instrument.as_terms(),
+                )
+        except ValueError as error:
+            return json_error(str(error), 400)
         req.instrument = instrument_for(
             req.instrument.asset_class, req.instrument.symbol, terms,
         )

@@ -3,13 +3,11 @@ import uuid
 
 from desk_runtime.functions import utcnow
 from desk_runtime.logging_config import get_logger
-from desk_runtime.streams import STREAM_OVERFLOW, publish_event
+from desk_runtime.streams import EventHub
 from market_data_service.config import SERVICE_NAME
 
 log = get_logger(SERVICE_NAME)
-clients_lock = threading.Lock()
-client_event_queues = set()
-
+hub = EventHub(log)
 
 stream_id = str(uuid.uuid4())
 _event_lock = threading.Lock()
@@ -29,7 +27,7 @@ def last_event_id():
 
 
 def publish_tick(event_type, tick):
-    publish_event(client_event_queues, clients_lock, event_type, tick, log)
+    hub.publish(event_type, tick)
 
 
 def publish_quote(tick):

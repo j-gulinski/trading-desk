@@ -1,9 +1,10 @@
 import bottle
+import re
 import uuid
 
-from blotter_service import cache, service, repository
+from blotter_service import live_valuations, repository, service
 from blotter_service.config import SERVICE_NAME
-from desk_runtime.http import json_error, json_response, query_text
+from desk_runtime.http import json_error, json_response, query_text, query_upper
 
 app = bottle.Bottle()
 MAX_TRADE_PAGE_SIZE = 500
@@ -30,6 +31,13 @@ def _book_filter():
         return str(uuid.UUID(raw)), None
     except (AttributeError, TypeError, ValueError):
         return None, "book_id must be a UUID"
+
+
+def _reporting_currency():
+    currency = query_upper("currency")
+    if currency is None or re.fullmatch(r"[A-Z]{3}", currency):
+        return currency, None
+    return None, "currency must be a 3-letter ISO currency code"
 
 
 def _trade_id(value):
@@ -62,14 +70,16 @@ def health():
     return json_response({
         "service": SERVICE_NAME,
         "status": "UP",
-        "cached_trades": len(cache.trades),
-        "cached_valuations": len(cache.valuations),
+        "live_valuations": live_valuations.count(),
     })
 
 
 @app.route("/books/summary")
 def books_summary():
-    return json_response(service.books_summary())
+    currency, error = _reporting_currency()
+    if error is not None:
+        return json_error(error, 400)
+    return json_response(service.books_summary(currency))
 
 
 @app.route("/trades/overview")
@@ -79,7 +89,7 @@ def trades_overview():
         return json_error(error, 400)
     return json_response({
         "trades": service.list_trades(**query),
-        "books": service.books_summary(),
+        "books": service.books_summary()["books"],
     })
 
 

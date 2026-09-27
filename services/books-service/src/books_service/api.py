@@ -3,7 +3,7 @@ import uuid
 import bottle
 from bottle import request
 
-from books_service.repository import DuplicateBookName
+from books_service.repository import BookConflict
 from books_service import repository
 from desk_domain.instruments import INSTRUMENT_TYPES
 from desk_runtime.http import json_error, json_response
@@ -11,6 +11,8 @@ from desk_runtime.http import json_error, json_response
 app = bottle.Bottle()
 
 ASSET_CLASS_FIELD = "expected_asset_class"
+NAME_MAX_LENGTH = 60
+DESCRIPTION_MAX_LENGTH = 200
 
 
 def _book_id(value):
@@ -20,37 +22,43 @@ def _book_id(value):
         return None
 
 
-def _body():
-    raw = request.json
-    if raw is None:
-        return {}, None
-    if not isinstance(raw, dict):
-        return None, "request body must be an object"
-    return raw, None
+def _text(body, field, max_length=None):
+    value = body[field]
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    value = value.strip()
+    if max_length is not None and len(value) > max_length:
+        raise ValueError(f"{field} must be at most {max_length} characters")
+    return value
 
 
-def _identity_error(body, *, required):
+def _book_fields(*, creating):
+    body = request.json
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        raise ValueError("request body must be an object")
+    fields = {}
     for field in ("name", ASSET_CLASS_FIELD):
-        if field not in body:
-            if required:
-                return f"{field} is required"
-            continue
-        value = body[field]
-        if not isinstance(value, str) or not value.strip():
-            return f"{field} must be a non-empty string"
-    asset_class = body.get(ASSET_CLASS_FIELD)
-    if asset_class is not None and asset_class.strip().upper() not in INSTRUMENT_TYPES:
-        return f"{ASSET_CLASS_FIELD} must be one of {', '.join(sorted(INSTRUMENT_TYPES))}"
-    return None
+        if field in body:
+            fields[field] = _text(body, field, NAME_MAX_LENGTH if field == "name" else None)
+        elif creating:
+            raise ValueError(f"{field} is required")
+    if ASSET_CLASS_FIELD in fields:
+        fields[ASSET_CLASS_FIELD] = fields[ASSET_CLASS_FIELD].upper()
+        if fields[ASSET_CLASS_FIELD] not in INSTRUMENT_TYPES:
+            raise ValueError(
+                f"{ASSET_CLASS_FIELD} must be one of {', '.join(sorted(INSTRUMENT_TYPES))}"
+            )
+    if body.get("description") not in (None, ""):
+        fields["description"] = _text(body, "description", DESCRIPTION_MAX_LENGTH)
+    elif "description" in body:
+        fields["description"] = None
+    return fields
 
 
-def _deactivation_refusal(book_id):
-    open_trades = repository.active_trade_count(book_id)
-    if open_trades > 0:
-        return json_error(
-            "book has open trades", 409, book_id=book_id, active_trades=open_trades,
-        )
-    return None
+def _conflict(conflict):
+    return json_error(str(conflict), 409, **conflict.fields)
 
 
 @app.route("/books", method="GET")
@@ -69,15 +77,14 @@ def get_book(book_id):
 
 @app.route("/books", method="POST")
 def create_book():
-    body, error = _body()
-    if error is None:
-        error = _identity_error(body, required=True)
-    if error is not None:
-        return json_error(error, 400)
     try:
-        return json_response(repository.create_book(body), 201)
-    except DuplicateBookName as taken:
-        return json_error("a book with this name already exists", 409, name=str(taken))
+        fields = _book_fields(creating=True)
+    except ValueError as error:
+        return json_error(str(error), 400)
+    try:
+        return json_response(repository.create_book(fields), 201)
+    except BookConflict as conflict:
+        return _conflict(conflict)
 
 
 @app.route("/books/<book_id>", method="PUT")
@@ -85,19 +92,14 @@ def update_book(book_id):
     normalized = _book_id(book_id)
     if normalized is None:
         return json_error("book not found", 404, book_id=book_id)
-    body, error = _body()
-    if error is None:
-        error = _identity_error(body, required=False)
-    if error is not None:
-        return json_error(error, 400)
-    if body.get("is_active") is False:
-        refusal = _deactivation_refusal(normalized)
-        if refusal is not None:
-            return refusal
     try:
-        updated = repository.update_book(normalized, body)
-    except DuplicateBookName as taken:
-        return json_error("a book with this name already exists", 409, name=str(taken))
+        fields = _book_fields(creating=False)
+    except ValueError as error:
+        return json_error(str(error), 400)
+    try:
+        updated = repository.update_book(normalized, fields)
+    except BookConflict as conflict:
+        return _conflict(conflict)
     if updated is None:
         return json_error("book not found", 404, book_id=book_id)
     return json_response(updated)
@@ -106,9 +108,10 @@ def update_book(book_id):
 @app.route("/books/<book_id>", method="DELETE")
 def delete_book(book_id):
     normalized = _book_id(book_id)
-    if normalized is None or repository.get_book(normalized) is None:
+    try:
+        deactivated = repository.deactivate_book(normalized) if normalized else None
+    except BookConflict as conflict:
+        return _conflict(conflict)
+    if deactivated is None:
         return json_error("book not found", 404, book_id=book_id)
-    refusal = _deactivation_refusal(normalized)
-    if refusal is not None:
-        return refusal
-    return json_response(repository.deactivate_book(normalized))
+    return json_response(deactivated)

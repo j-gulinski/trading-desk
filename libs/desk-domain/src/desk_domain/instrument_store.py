@@ -1,11 +1,10 @@
 import uuid
 
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 from sqlalchemy.dialects.postgresql import insert
 
 from desk_domain.models import Instrument, Trade, WatchlistItem
 from desk_domain.symbols import watched_providers
-from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from desk_runtime.functions import utcnow
 
 
@@ -52,7 +51,7 @@ def active_source_dependency(session, instrument_id, providers):
             Trade.status == "ACTIVE",
             or_(Trade.instrument_id == instrument_id,
                 Instrument.underlying_instrument_id == instrument_id),
-            func.coalesce(Trade.market_data_provider, DEFAULT_QUOTE_PROVIDER).in_(providers),
+            Trade.market_data_provider.in_(providers),
         )
         .first() is not None
     )

@@ -1,15 +1,9 @@
 import { useEffect, useState } from 'react'
-import { usePolling } from '../../hooks/usePolling.js'
+import { useBooksSummary } from '../../hooks/useBooksSummary.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
-import { apiDelete, apiGet } from '../../services/apiClient.js'
+import { apiDelete } from '../../services/apiClient.js'
 import { endpoints } from '../../services/endpoints.js'
-import { BOOK_SUMMARY_POLL_INTERVAL_MS } from '../../config/books.js'
-import {
-  bookPositionsOf,
-  bookSummariesOf,
-  moveTargetsOf,
-} from '../../domain/books.js'
-import { portfolioSummaryOf, PORTFOLIO_METRICS } from '../../domain/portfolio.js'
+import { bookPositionsOf, moveTargetsOf } from '../../domain/books.js'
 import { describeApiError } from '../../domain/apiErrors.js'
 import { groupOptions } from '../../domain/filters.js'
 import { classLabelOf } from '../../domain/catalogue.js'
@@ -22,19 +16,6 @@ import BookCard from '../../components/books/BookCard.jsx'
 import BookFormPanel from '../../components/books/BookFormPanel.jsx'
 import MoveTradesPanel from '../../components/books/MoveTradesPanel.jsx'
 import FxReport from '../../components/fx/FxReport.jsx'
-import { useFxRates } from '../../hooks/useFxRates.js'
-import { useReportingCurrency } from '../../hooks/useReportingCurrency.js'
-import { reportedTotalsOf } from '../../domain/fx.js'
-import { useMarketFeedContext } from '../../providers/feedContext.js'
-
-const FX_COLUMNS = [
-  { id: 'grossEntry', label: 'GROSS ENTRY', signed: false },
-  { id: 'unrealized', label: 'UNREALIZED PNL', signed: true },
-  { id: 'realized', label: 'REALIZED PNL', signed: true },
-  { id: 'total', label: 'TOTAL PNL', signed: true },
-]
-
-const FX_METRICS = PORTFOLIO_METRICS
 import { PANEL_ID, usePanelCoordinator } from '../../layout/panelContext.js'
 
 function describeDeleteError(error) {
@@ -53,12 +34,8 @@ function describeDeleteError(error) {
 }
 
 export default function Books() {
-  const summary = usePolling(
-    ({ signal }) => apiGet(endpoints.blotter.booksSummary, { signal }),
-    { intervalMs: BOOK_SUMMARY_POLL_INTERVAL_MS },
-  )
+  const summary = useBooksSummary()
   const { now } = useElapsedTime()
-  const { instruments, curves } = useMarketFeedContext()
   const { activePanel, openPanel, closePanel: closeActivePanel } = usePanelCoordinator()
 
   const [expandedId, setExpandedId] = useState(null)
@@ -68,12 +45,9 @@ export default function Books() {
   const [query, setQuery] = useState('')
   const [includeDeactivated, setIncludeDeactivated] = useState(false)
 
-  const allBooks = bookSummariesOf(summary.data)
+  const allBooks = summary.books
+  const { portfolio } = summary
   const roster = allBooks.filter((book) => book.isActive || includeDeactivated)
-  const totals = portfolioSummaryOf(roster)
-  const [reportingCurrency, setReportingCurrency] = useReportingCurrency()
-  const fx = useFxRates(reportingCurrency)
-  const currencySubtotals = totals.subtotals
   const deactivatedCount = allBooks.filter((book) => !book.isActive).length
   const search = query.trim().toLowerCase()
   const books = roster.filter(
@@ -126,27 +100,10 @@ export default function Books() {
           <BookCard
             key={book.id}
             book={book}
-            reported={reportedTotalsOf(
-              {
-                subtotals: book.subtotals,
-                currency: book.currency,
-                values: {
-                  grossEntry: book.grossEntryValue,
-                  unrealized: book.unrealizedPnl,
-                  realized: book.realizedPnl,
-                  total: Number.isFinite(book.unrealizedPnl) && Number.isFinite(book.realizedPnl)
-                    ? book.unrealizedPnl + book.realizedPnl
-                    : null,
-                },
-              },
-              fx.rates,
-              reportingCurrency,
-              FX_METRICS,
-            )}
             expanded={expandedId === book.id}
             positions={
               expandedId === book.id
-                ? bookPositionsOf(book, now, instruments, curves)
+                ? bookPositionsOf(book, now)
                 : []
             }
             onToggleExpand={() =>
@@ -165,11 +122,11 @@ export default function Books() {
     <section className="page">
       <div className="books-header">
         <span className="books-header__meta">
-          {formatNumber(totals.bookCount)} {totals.bookCount === 1 ? 'book' : 'books'}
+          {formatNumber(portfolio.bookCount)} {portfolio.bookCount === 1 ? 'book' : 'books'}
           {deactivatedCount > 0 && !includeDeactivated
             ? ` · ${formatNumber(deactivatedCount)} deactivated hidden`
-          : ''} · {formatNumber(totals.openCount)} open ·{' '}
-          {formatNumber(totals.closedCount)} closed
+          : ''} · {formatNumber(portfolio.activeTrades)} open ·{' '}
+          {formatNumber(portfolio.closedTrades)} closed
         </span>
         <button
           type="button"
@@ -208,17 +165,12 @@ export default function Books() {
         </label>
       </FilterBar>
 
-      {currencySubtotals.length > 0 && (
-        <FxReport
-          columns={totals.closedCount > 0
-            ? FX_COLUMNS
-            : FX_COLUMNS.filter((column) => ['grossEntry', 'unrealized'].includes(column.id))}
-          subtotals={currencySubtotals}
-          reportingCurrency={reportingCurrency}
-          onReportingCurrencyChange={setReportingCurrency}
-          fx={fx}
-        />
-      )}
+      <FxReport
+        currency={summary.currency}
+        portfolio={portfolio}
+        reportingCurrency={summary.reportingCurrency}
+        onReportingCurrencyChange={summary.setReportingCurrency}
+      />
 
       {summary.error != null && summary.data != null && (
         <div className="blotter-notice" role="status">

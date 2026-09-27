@@ -1,114 +1,132 @@
 import uuid
-from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import and_, func
 
 from desk_domain.contract_data import trade_terms
-from desk_pricing.valuation import pnl
+from desk_domain.instruments import instrument_type_for, type_view_for
+from desk_domain.models import AuditLog, Book, Instrument, Trade, Valuation
 from desk_runtime.db import session_scope
-from desk_domain.models import Trade, Valuation, AuditLog, Book, Instrument
-from blotter_service.cache import Trade as CachedTrade
 
 
-def _to_cached_trade(row: Trade) -> CachedTrade:
-    return CachedTrade(
-        trade_id=str(row.trade_id),
-        book_id=str(row.book_id),
-        asset_class=row.instrument.asset_class,
-        symbol=row.instrument.symbol,
-        side=row.side,
-        status=row.status,
-        quantity=row.quantity,
-        trade_price=row.trade_price,
-        currency=row.trade_currency,
-        opened_at=row.opened_at,
-        closed_at=row.closed_at,
-        close_price=row.close_price,
-        close_reason=row.close_reason,
-        market_data_provider=row.market_data_provider,
-        entry_price_timestamp=row.entry_price_timestamp,
-        entry_snapshot_id=str(row.entry_snapshot_id) if row.entry_snapshot_id else None,
-        close_price_timestamp=row.close_price_timestamp,
-        close_snapshot_id=str(row.close_snapshot_id) if row.close_snapshot_id else None,
-        client_seen_price=row.client_seen_price,
-        source=row.source,
-        created_by_service=row.created_by_service,
-        terms=trade_terms(row),
-    )
+def _trade_record(trade: Trade) -> dict:
+    asset_class = trade.instrument.asset_class
+    return {
+        "trade_id": str(trade.trade_id),
+        "book_id": str(trade.book_id),
+        "asset_class": asset_class,
+        **type_view_for(asset_class),
+        "symbol": trade.instrument.symbol,
+        "side": trade.side,
+        "quantity": trade.quantity,
+        "trade_price": trade.trade_price,
+        "currency": trade.trade_currency,
+        "status": trade.status,
+        "opened_at": trade.opened_at,
+        "closed_at": trade.closed_at,
+        "close_price": trade.close_price,
+        "close_reason": trade.close_reason,
+        "market_data_provider": trade.market_data_provider,
+        "entry_price_timestamp": trade.entry_price_timestamp,
+        "entry_snapshot_id": trade.entry_snapshot_id,
+        "close_price_timestamp": trade.close_price_timestamp,
+        "close_snapshot_id": trade.close_snapshot_id,
+        "client_seen_price": trade.client_seen_price,
+        "source": trade.source,
+        "created_by_service": trade.created_by_service,
+        "terms": trade_terms(trade),
+        "model_priced": instrument_type_for(asset_class).ticket_kind != "spot",
+    }
 
 
-def load_active_trades() -> list[CachedTrade]:
-    with session_scope() as session:
-        rows = session.query(Trade).filter(Trade.status == "ACTIVE").all()
-        return [_to_cached_trade(r) for r in rows]
-
-
-def get_trade(trade_id: str) -> CachedTrade | None:
-    with session_scope() as session:
-        row = session.get(Trade, uuid.UUID(trade_id))
-        return _to_cached_trade(row) if row else None
+def _valuation_record(valuation: Valuation) -> dict:
+    return {
+        "valuation_time": valuation.valuation_time,
+        "fair_value": valuation.fair_value,
+        "unrealized_pnl": valuation.unrealized_pnl,
+        "realized_pnl": valuation.realized_pnl,
+        "total_pnl": valuation.total_pnl,
+        "currency": valuation.currency,
+        "market_data_provider": valuation.market_data_provider,
+        "market_data_timestamp": valuation.market_data_timestamp,
+        "valuation_payload": valuation.valuation_payload or {},
+    }
 
 
 def list_trades(*, book_id=None, asset_class=None, status=None, symbol=None,
-                exclude_active=False, limit: int = 100, offset: int = 0) -> list[CachedTrade]:
+                limit=100, offset=0) -> list[dict]:
     with session_scope() as session:
-        q = session.query(Trade).join(Instrument, Trade.instrument_id == Instrument.instrument_id)
+        query = session.query(Trade).join(Trade.instrument)
         if book_id is not None:
-            q = q.filter(Trade.book_id == uuid.UUID(book_id))
+            query = query.filter(Trade.book_id == uuid.UUID(book_id))
         if asset_class is not None:
-            q = q.filter(Instrument.asset_class == asset_class)
+            query = query.filter(Instrument.asset_class == asset_class)
         if status is not None:
-            q = q.filter(Trade.status == status)
-        elif exclude_active:
-            q = q.filter(Trade.status != "ACTIVE")
+            query = query.filter(Trade.status == status)
         if symbol is not None:
-            q = q.filter(Instrument.symbol == symbol)
-        rows = (
-            q.order_by(Trade.opened_at.desc())
-            .limit(limit)
-            .offset(offset)
-            .all()
-        )
-        return [_to_cached_trade(r) for r in rows]
+            query = query.filter(Instrument.symbol == symbol)
+        rows = query.order_by(Trade.opened_at.desc()).limit(limit).offset(offset).all()
+        return [_trade_record(row) for row in rows]
 
 
-def trade_currencies_by_book() -> dict[str, set]:
+def get_trade(trade_id: str) -> dict | None:
     with session_scope() as session:
-        rows = session.query(Trade.book_id, Trade.trade_currency).distinct().all()
-    currencies: dict[str, set] = {}
-    for book_id, currency in rows:
-        if currency:
-            currencies.setdefault(str(book_id), set()).add(currency)
-    return currencies
+        row = session.get(Trade, uuid.UUID(trade_id))
+        return _trade_record(row) if row else None
 
 
-def closed_trade_counts_by_book() -> dict[str, int]:
+def active_trades() -> list[dict]:
     with session_scope() as session:
         rows = (
-            session.query(Trade.book_id, func.count(Trade.trade_id))
-            .filter(Trade.status != "ACTIVE")
-            .group_by(Trade.book_id)
+            session.query(Trade)
+            .filter(Trade.status == "ACTIVE")
+            .order_by(Trade.opened_at.desc())
             .all()
         )
-        return {str(book_id): count for book_id, count in rows}
+        return [_trade_record(row) for row in rows]
 
 
-def realized_pnl_by_book() -> dict[str, dict[str, object]]:
-    """Realized PnL per book, split by settlement currency — amounts in different
-    currencies must not be added together."""
-    totals: dict[str, dict[str, object]] = {}
+def latest_valuations(trade_ids: list[str]) -> dict[str, dict]:
+    if not trade_ids:
+        return {}
     with session_scope() as session:
-        rows = session.query(Trade).filter(Trade.status == "CLOSED").all()
-        for t in rows:
-            if t.close_price is None:
-                continue
-            multiplier = int(trade_terms(t).get("multiplier", 1))
-            realized = pnl(t.side, t.close_price, t.trade_price, t.quantity, multiplier)
-            by_currency = totals.setdefault(str(t.book_id), {})
-            by_currency[t.trade_currency] = (
-                by_currency.get(t.trade_currency) or Decimal("0")
-            ) + realized
-    return totals
+        rows = (
+            session.query(Valuation)
+            .filter(Valuation.trade_id.in_([uuid.UUID(trade_id) for trade_id in trade_ids]))
+            .order_by(Valuation.trade_id, Valuation.valuation_time.desc())
+            .distinct(Valuation.trade_id)
+            .all()
+        )
+        return {str(row.trade_id): _valuation_record(row) for row in rows}
+
+
+def closed_trade_totals() -> list[dict]:
+    """Closed trade count and final realized P&L per book and currency."""
+    final = and_(
+        Valuation.trade_id == Trade.trade_id,
+        Valuation.valuation_payload["final"].as_boolean().is_(True),
+    )
+    with session_scope() as session:
+        rows = (
+            session.query(
+                Trade.book_id,
+                Trade.trade_currency,
+                func.count(Trade.trade_id),
+                func.coalesce(func.sum(Valuation.realized_pnl), 0),
+            )
+            .outerjoin(Valuation, final)
+            .filter(Trade.status == "CLOSED")
+            .group_by(Trade.book_id, Trade.trade_currency)
+            .all()
+        )
+        return [
+            {
+                "book_id": str(book_id),
+                "currency": currency,
+                "trades": trades,
+                "realized_pnl": realized_pnl,
+            }
+            for book_id, currency, trades, realized_pnl in rows
+        ]
 
 
 def valuation_history(trade_id: str, limit: int = 100) -> list[dict]:
@@ -120,20 +138,7 @@ def valuation_history(trade_id: str, limit: int = 100) -> list[dict]:
             .limit(limit)
             .all()
         )
-        return [
-            {
-                "valuation_time": v.valuation_time,
-                "fair_value": v.fair_value,
-                "unrealized_pnl": v.unrealized_pnl,
-                "realized_pnl": v.realized_pnl,
-                "total_pnl": v.total_pnl,
-                "currency": v.currency,
-                "market_data_provider": v.market_data_provider,
-                "market_data_timestamp": v.market_data_timestamp,
-                "valuation_payload": v.valuation_payload or {},
-            }
-            for v in rows
-        ]
+        return [_valuation_record(row) for row in rows]
 
 
 def audit_logs(trade_id: str, limit: int = 100) -> list[dict]:

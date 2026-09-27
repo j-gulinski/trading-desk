@@ -57,8 +57,6 @@ export const CURVE_TEXT = {
 export const CURVE_ROLE_HINTS = {
   discount_curve:
     'Turns each future cashflow into today’s money — the rate at each tenor sets what money promised then is worth now',
-  projection_curve:
-    'Sets the floating leg’s cashflows — forward rates implied by this curve stand in for index fixings that have not happened yet',
 }
 
 export const WATCHLIST_POLL_INTERVAL_MS = 10000
@@ -71,11 +69,7 @@ export const SYMBOL_SEARCH_SHOWN_LIMIT = 8
 
 export const PROVIDERS_POLL_INTERVAL_MS = 5000
 
-export const FX_RATES_REFRESH_MS = 60000
-
 export const REPORTING_CURRENCY_BASE_OPTIONS = ['EUR', 'PLN', 'USD']
-
-export const DEFAULT_SORT_CURRENCY = 'USD'
 
 export const FRESHNESS_PILL_LEVELS = {
   LIVE: 'info',

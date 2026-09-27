@@ -21,12 +21,11 @@ export default function MoveTradesPanel({ book, targets, onAccepted, onClose }) 
     setPending(true)
     setError(null)
     try {
-      await apiPost(endpoints.tradeAction.submit, buildReassignIntent(book.id, targetId))
-      const target = targets.find((candidate) => candidate.id === targetId)
+      const result = await apiPost(endpoints.tradeAction.submit, buildReassignIntent(book.id, targetId))
       onAccepted(
-        `Accepted — ${formatNumber(book.activeTrades)} open ${
-          book.activeTrades === 1 ? 'position is' : 'positions are'
-        } moving to ${target?.name ?? 'the selected book'}.`,
+        `Moved ${formatNumber(result.moved)} open ${
+          result.moved === 1 ? 'position' : 'positions'
+        } to ${result.target_book}.`,
       )
       onClose()
     } catch (err) {

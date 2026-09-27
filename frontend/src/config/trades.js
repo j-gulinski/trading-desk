@@ -63,7 +63,7 @@ export const TRADE_COLUMNS = [
     snapshot: true,
     defaultDirection: 'desc',
     numeric: true,
-    headerNote: 'native · ≈ USD sort',
+    headerNote: 'native currency',
   },
   {
     id: 'return',
@@ -119,5 +119,3 @@ export const DEFAULT_TRADE_COLUMNS = [
 export const DEFAULT_TRADE_SORT = { column: 'pnl', direction: 'desc' }
 
 export const TRADE_FALLBACK_SORT = { column: 'trade', direction: 'asc' }
-
-export const TRADE_CURRENCY_SORT_COLUMNS = new Set(['fairValue', 'pnl'])

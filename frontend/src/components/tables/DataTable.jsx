@@ -13,7 +13,7 @@ function ColumnLabel({ column }) {
   )
 }
 
-function SortHeader({ column, sort, onSort, disabledReason }) {
+function SortHeader({ column, sort, onSort }) {
   const active = sort.column === column.id
   const className = classes(column.numeric && 'data-table__cell--num', column.headerClass)
 
@@ -39,12 +39,7 @@ function SortHeader({ column, sort, onSort, disabledReason }) {
           column.numeric && 'data-table__sort--num',
           active && 'data-table__sort--active',
         )}
-        onClick={() => {
-          if (!disabledReason) onSort(column.id)
-        }}
-        aria-disabled={disabledReason ? true : undefined}
-        aria-label={disabledReason ? `${column.label}. ${disabledReason}` : undefined}
-        title={disabledReason ?? undefined}
+        onClick={() => onSort(column.id)}
       >
         <span>
           <ColumnLabel column={column} />
@@ -64,7 +59,6 @@ export default function DataTable({
   renderCell,
   sort = { column: null, direction: 'desc' },
   onSort = () => {},
-  sortDisabledReason = () => null,
   rowClassName = () => null,
   cellClassName = () => null,
   cellTitle = () => undefined,
@@ -91,7 +85,6 @@ export default function DataTable({
                 column={column}
                 sort={sort}
                 onSort={onSort}
-                disabledReason={sortDisabledReason(column)}
               />
             ))}
           </tr>

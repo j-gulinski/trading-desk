@@ -3,7 +3,7 @@ import datetime
 import bottle
 from bottle import response
 
-from monitoring_service import log_collector, log_publisher, monitor, repository
+from monitoring_service import log_collector, monitor, repository
 from desk_domain.enums import Severity
 from desk_runtime.http import json_error, json_response, query_text
 from desk_runtime.serialization import to_json
@@ -46,9 +46,12 @@ def status():
 
 @app.route("/audits")
 def audits():
-    limit = query_text("limit")
+    try:
+        limit = int(query_text("limit", repository.DEFAULT_LIMIT))
+    except ValueError:
+        return json_error("limit must be an integer", 400)
     return json_response(repository.recent_audits(
-        limit=int(limit) if limit else repository.DEFAULT_LIMIT,
+        limit=limit,
         since=_parse_since(query_text("since")),
         severities=_parse_severities(query_text("severity")),
         services=_parse_list(query_text("service")),
@@ -66,18 +69,6 @@ def logs():
         if any(level not in VALID_LOG_LEVELS for level in levels):
             return json_error("invalid level", 400, valid=sorted(VALID_LOG_LEVELS))
 
-    since_id = query_text("since_id")
-    if since_id:
-        try:
-            since_id = int(since_id)
-        except ValueError:
-            return json_error("since_id must be an integer", 400)
-        run_id = query_text("run_id")
-        if run_id and run_id != log_collector.RUN_ID:
-            since_id = None
-    else:
-        since_id = None
-
     try:
         limit = int(query_text("limit", LOGS_DEFAULT_LIMIT))
     except ValueError:
@@ -87,7 +78,6 @@ def logs():
     lines = log_collector.snapshot(
         services=_parse_list(query_text("service")),
         levels=levels,
-        since_id=since_id,
         q=query_text("q"),
         limit=limit,
     )
@@ -101,15 +91,6 @@ def logs():
 def logs_stream():
     response.content_type = "text/event-stream"
     response.set_header("Cache-Control", "no-cache")
-    client_queue = log_publisher.register()
-
-    def generate_events():
-        yield f"event: run\ndata: {to_json({'run_id': log_collector.RUN_ID})}\n\n"
-        try:
-            while True:
-                record = client_queue.get()
-                yield f"event: log_line\ndata: {to_json(record)}\n\n"
-        finally:
-            log_publisher.unregister(client_queue)
-
-    return generate_events()
+    return log_collector.hub.subscribe(
+        first_frame=f"event: run\ndata: {to_json({'run_id': log_collector.RUN_ID})}\n\n"
+    )

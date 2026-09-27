@@ -4,11 +4,14 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
-x-service-healthcheck: &service-healthcheck
-  interval: 10s
-  timeout: 5s
-  retries: 5
-  start_period: 20s
+x-service: &service
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  volumes:
+    - ./logs:/var/log/trading
+  restart: unless-stopped
+  logging: *default-logging
 
 services:
   postgres:
@@ -34,144 +37,100 @@ services:
       context: .
       dockerfile: docker/migrations.Dockerfile
     container_name: db-migrations
-    command: ["alembic", "upgrade", "head"]
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - DATABASE_MIGRATION_URL=${DATABASE_URL}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy
     logging: *default-logging
 
   market-data-service:
+    <<: *service
     build:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
         SERVICE: market-data-service
     container_name: market-data-service
-    env_file: .env
-    volumes:
-      - ./logs:/var/log/trading
     ports:
       - "8001:8001"
-    healthcheck:
-      <<: *service-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
-    restart: unless-stopped
     depends_on:
       db-migrations:
         condition: service_completed_successfully
-    logging: *default-logging
 
   pricing-service:
+    <<: *service
     build:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
         SERVICE: pricing-service
     container_name: pricing-service
-    env_file: .env
-    volumes:
-      - ./logs:/var/log/trading
     ports:
       - "8002:8002"
-    healthcheck:
-      <<: *service-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=3)"]
-    restart: unless-stopped
     depends_on:
       db-migrations:
         condition: service_completed_successfully
       market-data-service:
         condition: service_healthy
-    logging: *default-logging
 
   monitoring-service:
+    <<: *service
     build:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
         SERVICE: monitoring-service
     container_name: monitoring-service
-    env_file: .env
-    volumes:
-      - ./logs:/var/log/trading
     ports:
       - "8003:8003"
-    healthcheck:
-      <<: *service-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=3)"]
-    restart: unless-stopped
     depends_on:
       db-migrations:
         condition: service_completed_successfully
-    logging: *default-logging
 
   books-service:
+    <<: *service
     build:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
         SERVICE: books-service
     container_name: books-service
-    env_file: .env
-    volumes:
-      - ./logs:/var/log/trading
     ports:
       - "8004:8004"
-    healthcheck:
-      <<: *service-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health', timeout=3)"]
-    restart: unless-stopped
     depends_on:
       db-migrations:
         condition: service_completed_successfully
-    logging: *default-logging
 
   trade-action-service:
+    <<: *service
     build:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
         SERVICE: trade-action-service
     container_name: trade-action-service
-    env_file: .env
-    volumes:
-      - ./logs:/var/log/trading
     ports:
       - "8008:8008"
-    healthcheck:
-      <<: *service-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/health', timeout=3)"]
-    restart: unless-stopped
     depends_on:
       db-migrations:
         condition: service_completed_successfully
-    logging: *default-logging
 
   blotter-service:
+    <<: *service
     build:
       context: .
       dockerfile: docker/service.Dockerfile
       args:
         SERVICE: blotter-service
     container_name: blotter-service
-    env_file: .env
-    volumes:
-      - ./logs:/var/log/trading
     ports:
       - "8006:8006"
-    healthcheck:
-      <<: *service-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/health', timeout=3)"]
-    restart: unless-stopped
     depends_on:
       db-migrations:
         condition: service_completed_successfully
       pricing-service:
         condition: service_healthy
-    logging: *default-logging
 
   frontend:
     build:

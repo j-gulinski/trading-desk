@@ -9,7 +9,7 @@ import Trades from '../views/Trades/Trades.jsx'
 
 export const ROUTES = [
   { path: '', label: 'System Overview', subtitle: 'service health, streams & errors', group: 'SYSTEM', component: SystemOverview },
-  { path: 'trade-actions', label: 'Trade Actions', subtitle: 'order processing & throughput', group: 'SYSTEM', component: TradeActions },
+  { path: 'trade-actions', label: 'Trade Actions', subtitle: 'opened, closed, moved & rejected actions', group: 'SYSTEM', component: TradeActions },
   { path: 'logs', label: 'Logs', subtitle: 'central log stream — live tail across services', group: 'SYSTEM', component: Logs },
 
   { path: 'business-overview', label: 'Business Overview', subtitle: 'top-level PnL, book risk & valuation freshness', group: 'TRADING', component: BusinessOverview },

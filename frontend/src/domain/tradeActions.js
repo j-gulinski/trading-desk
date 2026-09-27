@@ -29,24 +29,14 @@ export function ticketOptionsOf(raw) {
   }
 }
 
-export function curveChoicesFor(
-  curves,
-  currency,
-  fieldName = 'discount_curve',
-  indexTenor = null,
-  assetClass = null,
-) {
-  const role = fieldName === 'projection_curve' ? 'PROJECTION' : 'DISCOUNT'
-  const tradeUse = assetClass == null ? null : `${assetClass}:${role}`
+export function curveChoicesFor(curves, currency, indexTenor = null, assetClass = null) {
+  const tradeUse = assetClass == null ? null : `${assetClass}:DISCOUNT`
   return curves
     .filter((curve) => (currency ? curve.currency === currency : true))
-    .filter((curve) => (curve.roles ?? []).includes(role))
+    .filter((curve) => (curve.roles ?? []).includes('DISCOUNT'))
     .filter((curve) => tradeUse == null || (curve.uses ?? []).includes(tradeUse))
     .filter((curve) => (
-      role !== 'PROJECTION' ||
-      indexTenor == null ||
-      curve.index_tenor == null ||
-      curve.index_tenor === indexTenor
+      indexTenor == null || curve.index_tenor == null || curve.index_tenor === indexTenor
     ))
     .sort((a, b) => curveTitle(a).localeCompare(curveTitle(b)))
 }
@@ -72,8 +62,7 @@ export function termCurrencyOf(schema, terms, catalog) {
 function executionPriceOf(instrument, side) {
   if (instrument == null) return null
   if (side == null) return instrument.value
-  const quoted = side === 'BUY' ? instrument.ask : instrument.bid
-  return Number.isFinite(quoted) ? quoted : instrument.value
+  return side === 'BUY' ? instrument.buyPrice : instrument.sellPrice
 }
 
 const TRADEABLE_STATES = ['LIVE', 'CLOSED']
@@ -235,49 +224,14 @@ export function intentRowsOf(events) {
 }
 
 export function summarizeIntents(rows) {
-  const summary = { total: rows.length, opened: 0, closed: 0, rejected: 0 }
+  const summary = { total: rows.length, opened: 0, closed: 0, moved: 0, rejected: 0 }
   for (const row of rows) {
     if (row.direction === 'IN') summary.opened += 1
     else if (row.direction === 'OUT') summary.closed += 1
+    else if (row.direction === 'MOVED') summary.moved += 1
     else summary.rejected += 1
   }
   return summary
-}
-
-function count(value) {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : 0
-}
-
-function countOrNull(value) {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
-}
-
-export function queueStatusOf(raw) {
-  if (raw == null) {
-    return {
-      available: false,
-      accepted: 0,
-      processed: 0,
-      created: 0,
-      closed: 0,
-      rejected: 0,
-      avgProcessingMs: null,
-      lastProcessingMs: null,
-    }
-  }
-
-  return {
-    available: true,
-    accepted: count(raw.accepted),
-    processed: count(raw.processed),
-    created: count(raw.created),
-    closed: count(raw.closed),
-    rejected: count(raw.rejected),
-    avgProcessingMs: countOrNull(raw.avg_processing_ms),
-    lastProcessingMs: countOrNull(raw.last_processing_ms),
-  }
 }
 
 export function lastActionAtOf(rows) {

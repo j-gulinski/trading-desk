@@ -1,31 +1,16 @@
-"""Curve interpolation, discount factors and implied forward rates."""
+"""Curve interpolation, discount factors, implied forward rates and par rates."""
 
-from dataclasses import dataclass
+import math
 
-
-@dataclass(frozen=True)
-class CurveConvention:
-    interpolation: str
-    extrapolation: str
-    compounding: str
-
-    def as_dict(self):
-        return {
-            "interpolation": self.interpolation,
-            "extrapolation": self.extrapolation,
-            "compounding": self.compounding,
-        }
-
-
-CURVE_CONVENTION = CurveConvention(
-    interpolation="LINEAR_ZERO_RATE",
-    extrapolation="FLAT_CLAMP",
-    compounding="ANNUAL_DISCRETE",
-)
+CURVE_CONVENTION = {
+    "interpolation": "LINEAR_ZERO_RATE",
+    "extrapolation": "FLAT_CLAMP",
+    "compounding": "ANNUAL_DISCRETE",
+}
 
 
 def curve_convention():
-    return CURVE_CONVENTION.as_dict()
+    return dict(CURVE_CONVENTION)
 
 
 def rate_at(tenors, rates, t):
@@ -53,3 +38,26 @@ def forward_rate(curve, t_start, t_end):
     if t_end <= t_start:
         return 0.0
     return discount_factor(curve, t_start) / discount_factor(curve, t_end) - 1.0
+
+
+def curve_position(tenors, t):
+    """How rate_at reads t: a curve point, between two points, or flat beyond the ends."""
+    if t in tenors:
+        return {"method": "POINT", "tenors": [t]}
+    if t < tenors[0]:
+        return {"method": "FLAT_BEFORE", "tenors": [tenors[0]]}
+    if t > tenors[-1]:
+        return {"method": "FLAT_AFTER", "tenors": [tenors[-1]]}
+    right = next(index for index, tenor in enumerate(tenors) if t < tenor)
+    return {"method": "INTERPOLATED", "tenors": [tenors[right - 1], tenors[right]]}
+
+
+def par_rate(curve, maturity, payments_per_year):
+    """Fixed rate that makes a fixed leg worth par: (1 - DF(T)) / sum(accrual * DF(t))."""
+    periods = max(1, math.ceil(maturity * payments_per_year))
+    annuity, previous = 0.0, 0.0
+    for period in range(1, periods + 1):
+        payment_time = min(period / payments_per_year, maturity)
+        annuity += (payment_time - previous) * discount_factor(curve, payment_time)
+        previous = payment_time
+    return (1.0 - discount_factor(curve, maturity)) / annuity if annuity else None

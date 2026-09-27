@@ -49,8 +49,7 @@ def _tenor_rows(payload):
 def make_curve_builder(curve_name):
     dataset_key = YC_DATASETS[curve_name]
 
-    def build(client, record_request):
-        record_request()
+    def build(client):
         payload = client.yield_curve(dataset_key, [code for _, _, code in YC_TENORS])
         by_code = _tenor_rows(payload)
         points = []

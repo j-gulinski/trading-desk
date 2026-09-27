@@ -34,8 +34,7 @@ def _as_of(date_text):
     return datetime.strptime(date_text, "%Y-%m-%d").date()
 
 
-def _latest(client, record_request, series_id, lookback):
-    record_request()
+def _latest(client, series_id, lookback):
     payload = client.latest_observations(series_id, lookback)
     observations = payload.get("observations") if isinstance(payload, dict) else None
     if not observations:
@@ -47,14 +46,12 @@ def _latest(client, record_request, series_id, lookback):
     raise ProviderDataError(FRED, f"{series_id} carries only missing values")
 
 
-def build_usd_government_curve(client, record_request):
+def build_usd_government_curve(client):
     points = []
     raw = {}
     for label, years, series_id in DGS_SERIES:
         try:
-            as_of, rate, payload = _latest(
-                client, record_request, series_id, FRED_DAILY_LOOKBACK
-            )
+            as_of, rate, payload = _latest(client, series_id, FRED_DAILY_LOOKBACK)
         except ProviderDataError:
             raw[series_id] = {"error": "no usable observation"}
             continue

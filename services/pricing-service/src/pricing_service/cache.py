@@ -4,7 +4,6 @@ import threading
 from decimal import Decimal
 
 from pricing_service.config import SERVICE_NAME
-from desk_runtime.config import DEFAULT_QUOTE_PROVIDER
 from desk_runtime.logging_config import get_logger
 from desk_domain.quotes import as_decimal
 from desk_domain.valuation_records import is_final, valued_at
@@ -13,18 +12,19 @@ from desk_domain.instruments import instrument_for
 log = get_logger(SERVICE_NAME)
 
 data_lock = threading.Lock()
-clients_lock = threading.Lock()
 
 ticks_received = 0
 last_event_timestamp = None
 market_data_connection = "DISCONNECTED"
-client_event_queues = set()
 
 # Live state belongs here; durable data access belongs in repository.py.
 # Spot quotes are keyed by (provider, symbol), while curves use the stable curve name.
 spots = {}
 curves = {}
 active_trades = {}
+trades_by_quote = {}
+trades_by_curve = {}
+last_written_at = {}
 latest_valuations = {}
 book_risk_metrics = {}
 _active_set_seeded = False
@@ -45,19 +45,6 @@ def _revision(row, primary):
     return (str(row.get(primary) or ""), str(row.get("received_at") or ""))
 
 
-def _pricing_curve(tick):
-    if tick.get("tenors") and tick.get("rates"):
-        return tick
-    points = tick.get("points") or []
-    if not points:
-        return tick
-    return {
-        **tick,
-        "tenors": [float(point["tenor_years"]) for point in points],
-        "rates": [float(point["rate"]) / 100.0 for point in points],
-    }
-
-
 def update_spot(tick):
     parsed = _parsed_spot(tick)
     with data_lock:
@@ -71,41 +58,21 @@ def update_spot(tick):
 
 
 def update_curve(tick):
-    parsed = _pricing_curve(tick)
     with data_lock:
         key = tick["curve_name"]
         current = curves.get(key)
-        if current is not None and _revision(parsed, "as_of_date") \
+        if current is not None and _revision(tick, "as_of_date") \
                 <= _revision(current, "as_of_date"):
             return False
-        curves[key] = parsed
+        curves[key] = tick
         return True
 
 
 def replace_market_state(snapshot_spots, snapshot_curves):
-    """Atomically reconcile the live market cache to one server snapshot.
-
-    Building the replacement maps before taking the lock means a malformed snapshot
-    cannot leave the process with a half-replaced market state.
-    """
-    replacement_spots = {}
-    for row in (snapshot_spots or {}).values():
-        parsed = _parsed_spot(row)
-        key = (row["provider"], row["symbol"])
-        current = replacement_spots.get(key)
-        if current is None or _revision(parsed, "provider_timestamp") \
-                > _revision(current, "provider_timestamp"):
-            replacement_spots[key] = parsed
-
-    replacement_curves = {}
-    for row in (snapshot_curves or {}).values():
-        parsed = _pricing_curve(row)
-        key = row["curve_name"]
-        current = replacement_curves.get(key)
-        if current is None or _revision(parsed, "as_of_date") \
-                > _revision(current, "as_of_date"):
-            replacement_curves[key] = parsed
-
+    replacement_spots = {
+        (row["provider"], row["symbol"]): _parsed_spot(row) for row in snapshot_spots.values()
+    }
+    replacement_curves = {row["curve_name"]: row for row in snapshot_curves.values()}
     global spots, curves
     with data_lock:
         spots = replacement_spots
@@ -146,57 +113,41 @@ def health_snapshot():
 # Active trade state and market-data routing
 
 
-def trade_provider(trade):
-    provider = trade.get("market_data_provider")
-    if provider:
-        return provider
-    log.warning(
-        "trade_provider_defaulted",
-        trade_id=trade.get("trade_id"),
-        symbol=trade.get("symbol"),
-        provider=DEFAULT_QUOTE_PROVIDER,
-    )
-    return DEFAULT_QUOTE_PROVIDER
+def _index(trades):
+    by_quote, by_curve = {}, {}
+    for trade in trades.values():
+        try:
+            instrument = instrument_for(trade["asset_class"], trade["symbol"], trade["metadata"])
+        except (TypeError, ValueError):
+            log.warning("trade_not_indexed", trade_id=trade["trade_id"])
+            continue
+        if instrument.needs_quote:
+            key = (trade["market_data_provider"], instrument.quote_symbol)
+            by_quote.setdefault(key, []).append(trade["trade_id"])
+        if instrument.uses_curve():
+            by_curve.setdefault(instrument.discount_curve, []).append(trade["trade_id"])
+    return by_quote, by_curve
+
+
+def _set_active_trades(trades):
+    global active_trades, trades_by_quote, trades_by_curve
+    active_trades = trades
+    trades_by_quote, trades_by_curve = _index(trades)
 
 
 def trades_for_quote(provider, symbol):
     with data_lock:
-        matches = []
-        for trade in active_trades.values():
-            try:
-                instrument = instrument_for(trade["asset_class"], trade["symbol"], trade.get("metadata"))
-            except (TypeError, ValueError):
-                continue
-            if instrument.quote_symbol == symbol and trade_provider(trade) == provider:
-                matches.append(trade)
-        return matches
-
-
-def _trade_curves(trade):
-    metadata = trade.get("metadata") or {}
-    return {
-        name
-        for name in (
-            metadata.get("discount_curve"),
-            metadata.get("projection_curve"),
-            metadata.get("curve"),
-        )
-        if name
-    }
+        return [active_trades[trade_id] for trade_id in trades_by_quote.get((provider, symbol), ())]
 
 
 def trades_for_curve(curve_name):
     with data_lock:
-        return [
-            trade
-            for trade in active_trades.values()
-            if curve_name in _trade_curves(trade)
-        ]
+        return [active_trades[trade_id] for trade_id in trades_by_curve.get(curve_name, ())]
 
 
 def replace_active_trades(fresh):
     """Replace the active set and return (new or materially changed trades, first load)."""
-    global active_trades, _active_set_seeded
+    global _active_set_seeded
     with data_lock:
         entered_ids = fresh.keys() - active_trades.keys()
         changed_ids = {
@@ -205,7 +156,7 @@ def replace_active_trades(fresh):
             if fresh[trade_id] != active_trades[trade_id]
         }
         first_load = not _active_set_seeded
-        active_trades = fresh
+        _set_active_trades(fresh)
         _active_set_seeded = True
     dirty_ids = entered_ids | changed_ids
     return [fresh[trade_id] for trade_id in dirty_ids], first_load
@@ -218,8 +169,20 @@ def active_trades_snapshot():
 
 def remove_active_trades(trade_ids):
     with data_lock:
-        for trade_id in trade_ids:
-            active_trades.pop(trade_id, None)
+        removed = set(trade_ids)
+        _set_active_trades({
+            trade_id: trade for trade_id, trade in active_trades.items()
+            if trade_id not in removed
+        })
+
+
+def claim_valuation_write(trade_id, now, interval_seconds):
+    with data_lock:
+        last = last_written_at.get(trade_id)
+        if last is not None and (now - last).total_seconds() < interval_seconds:
+            return False
+        last_written_at[trade_id] = now
+        return True
 
 
 # Latest valuation and book-risk state

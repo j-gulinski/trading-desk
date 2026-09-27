@@ -18,7 +18,8 @@ function formatCapital(value) {
 }
 
 export default function BookRiskCard({ book }) {
-  const tone = directionOf(book.unrealizedReported)
+  const unrealized = book.reported?.values.unrealized ?? null
+  const tone = directionOf(unrealized)
   const ready = book.riskStatus === 'READY'
   const windowed = ready && Number.isFinite(book.alphaWindowReturn)
   const bookReturn = Number.isFinite(book.bookWindowReturn)
@@ -51,7 +52,9 @@ export default function BookRiskCard({ book }) {
     ? `${book.riskObservations}/${book.riskWindow} returns${rSquared}${lowFit ? ' · low fit' : ''}`
     : book.riskStatus === 'ZERO_BENCHMARK_VARIANCE'
       ? 'benchmark variance zero'
-      : `${book.riskObservations ?? 0}/${book.riskMinimumObservations ?? 20} returns`
+      : Number.isFinite(book.riskMinimumObservations)
+        ? `${book.riskObservations}/${book.riskMinimumObservations} returns`
+        : 'no returns yet'
   const breakdown =
     windowed &&
     Number.isFinite(book.beta) &&
@@ -92,13 +95,9 @@ export default function BookRiskCard({ book }) {
           className={ready ? '' : 'book-card__value--missing'}
         />
         <Metric
-          label={`UNREAL. · ${book.unrealizedCurrency}`}
-          value={
-            book.unrealizedReported == null
-              ? '—'
-              : formatSignedAmount(book.unrealizedReported)
-          }
-          title={book.unrealizedNote}
+          label={`UNREAL. · ${book.reported?.currency ?? '—'}`}
+          value={formatSignedAmount(unrealized)}
+          title={book.reported?.title}
           className={`book-card__value--total delta--${tone}`}
         />
       </div>

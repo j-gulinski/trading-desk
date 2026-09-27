@@ -1,19 +1,11 @@
-import { useMarketFeedContext, useValuationFeedContext } from '../../providers/feedContext.js'
+import { useValuationFeedContext } from '../../providers/feedContext.js'
 import { useElapsedTime } from '../../hooks/useElapsedTime.js'
-import { usePolling } from '../../hooks/usePolling.js'
-import { apiGet } from '../../services/apiClient.js'
-import { endpoints } from '../../services/endpoints.js'
-import { BOOK_SUMMARY_POLL_INTERVAL_MS } from '../../config/books.js'
-import { bookSummariesOf } from '../../domain/books.js'
+import { useBooksSummary } from '../../hooks/useBooksSummary.js'
 import {
   bookRisksOf,
   summarizeValuations,
   valuationRowsOf,
 } from '../../domain/valuations.js'
-import { reportedTotalsOf } from '../../domain/fx.js'
-import { reportedPortfolioSummaryOf } from '../../domain/portfolio.js'
-import { useFxRates } from '../../hooks/useFxRates.js'
-import { useReportingCurrency } from '../../hooks/useReportingCurrency.js'
 import {
   directionOf,
   formatAmount,
@@ -27,15 +19,18 @@ import Panel from '../../components/Panel.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
 import LoadingSkeleton from '../../components/LoadingSkeleton.jsx'
 
-const FX_METRICS = ['unrealized', 'realized']
+function toneOf(value) {
+  if (value == null) return 'default'
+  return value >= 0 ? 'pos' : 'neg'
+}
 
 function BookPnlRow({ book }) {
-  const value = book.reported.values?.unrealized ?? null
+  const value = book.reported?.values.unrealized ?? null
   return (
-    <li className="book-pnl__row" title={book.reported.title}>
+    <li className="book-pnl__row" title={book.reported?.title}>
       <span className="book-pnl__name">{book.name}</span>
       <span className={`book-pnl__value delta--${directionOf(value)}`}>
-        {value == null ? '—' : formatSignedAmount(value)} {book.reported.currency}
+        {formatSignedAmount(value)} {book.reported?.currency ?? ''}
       </span>
     </li>
   )
@@ -43,38 +38,23 @@ function BookPnlRow({ book }) {
 
 export default function BusinessOverview() {
   const { valuations, bookRisk, status, seedStatus } = useValuationFeedContext()
-  const { instruments, curves } = useMarketFeedContext()
   const { now } = useElapsedTime()
-  const booksRequest = usePolling(
-    ({ signal }) => apiGet(endpoints.blotter.booksSummary, { signal }),
-    { intervalMs: BOOK_SUMMARY_POLL_INTERVAL_MS },
-  )
+  const booksSummary = useBooksSummary()
 
-  const rows = valuationRowsOf(Object.values(valuations), now, instruments, curves)
+  const rows = valuationRowsOf(Object.values(valuations), now)
 
   const summary = summarizeValuations(rows)
-  const bookRoster = bookSummariesOf(booksRequest.data)
-  const [reportingCurrency] = useReportingCurrency()
-  const fx = useFxRates(reportingCurrency)
-  const portfolio = reportedPortfolioSummaryOf(bookRoster, fx.rates, reportingCurrency)
-  const actualOpen = booksRequest.data == null ? summary.open : portfolio.openCount
-  const actualBooks = booksRequest.data == null ? summary.books : portfolio.bookCount
+  const { portfolio } = booksSummary
+  const actualOpen = booksSummary.data == null ? summary.open : portfolio.activeTrades
+  const actualBooks = booksSummary.data == null ? summary.books : portfolio.bookCount
   const unvaluedOpen = Math.max(0, actualOpen - summary.open)
-
-  function reported(subtotals, ownCurrency, values) {
-    return reportedTotalsOf(
-      { subtotals, currency: ownCurrency, values }, fx.rates, reportingCurrency, FX_METRICS,
-    )
-  }
+  const reportedByBook = new Map(booksSummary.books.map((book) => [book.id, book.reported]))
 
   const books = bookRisksOf(rows, bookRisk)
-    .map((book) => ({
-      ...book,
-      reported: reported(book.subtotals, book.currency, book),
-    }))
+    .map((book) => ({ ...book, reported: reportedByBook.get(book.id) ?? null }))
     .sort((left, right) => (
-      Math.abs(right.reported.values?.unrealized ?? 0) -
-      Math.abs(left.reported.values?.unrealized ?? 0)
+      Math.abs(right.reported?.values.unrealized ?? 0) -
+      Math.abs(left.reported?.values.unrealized ?? 0)
     ))
   const headline = portfolio.reported
   const currency = headline.currency
@@ -101,47 +81,31 @@ export default function BusinessOverview() {
       <div className="business-summary">
         <StatCard
           label={`OPEN GROSS ENTRY VALUE · ${currency}`}
-          value={
-            headline.values == null ? '—' : formatAmount(headline.values.grossEntry)
-          }
+          value={formatAmount(headline.values.grossEntry)}
           sub={`${actualOpen} open positions`}
           title={headline.title}
         />
         <StatCard
           label={`UNREALIZED PNL · ALL BOOKS · ${currency}`}
-          value={
-            headline.values == null ? '—' : formatSignedAmount(headline.values.unrealized)
-          }
+          value={formatSignedAmount(headline.values.unrealized)}
           sub={`${summary.open} valued of ${actualOpen} open · ${summary.books} books`}
-          tone={
-            headline.values == null
-              ? 'default'
-              : headline.values.unrealized >= 0 ? 'pos' : 'neg'
-          }
+          tone={toneOf(headline.values.unrealized)}
           title={headline.title}
         />
-        {portfolio.closedCount > 0 && (
+        {portfolio.closedTrades > 0 && (
           <StatCard
             label={`REALIZED PNL · ALL BOOKS · ${currency}`}
-            value={headline.values == null ? '—' : formatSignedAmount(headline.values.realized)}
-            sub={`${portfolio.closedCount} closed positions`}
-            tone={
-              headline.values == null
-                ? 'default'
-                : headline.values.realized >= 0 ? 'pos' : 'neg'
-            }
+            value={formatSignedAmount(headline.values.realized)}
+            sub={`${portfolio.closedTrades} closed positions`}
+            tone={toneOf(headline.values.realized)}
             title={headline.title}
           />
         )}
         <StatCard
           label={`TOTAL PNL · ALL BOOKS · ${currency}`}
-          value={headline.values == null ? '—' : formatSignedAmount(headline.values.total)}
+          value={formatSignedAmount(headline.values.total)}
           sub="realized + unrealized"
-          tone={
-            headline.values == null
-              ? 'default'
-              : headline.values.total >= 0 ? 'pos' : 'neg'
-          }
+          tone={toneOf(headline.values.total)}
           title={headline.title}
         />
         <StatCard
@@ -151,10 +115,10 @@ export default function BusinessOverview() {
           tone={unvaluedOpen > 0 ? 'warn' : 'default'}
           href="#/valuations"
         />
-        {portfolio.closedCount > 0 && (
+        {portfolio.closedTrades > 0 && (
           <StatCard
             label="CLOSED TRADES"
-            value={portfolio.closedCount}
+            value={portfolio.closedTrades}
             sub={`${actualBooks} books · ${summary.books} with a valuation`}
           />
         )}
@@ -217,7 +181,7 @@ export default function BusinessOverview() {
                 <span className="freshness__fill" style={{ transform: `scaleX(${livePercent / 100})` }} />
               </div>
               <p className="freshness__note">
-                Excludes {portfolio.closedCount} closed positions.
+                Excludes {portfolio.closedTrades} closed positions.
               </p>
             </div>
           ) : (
