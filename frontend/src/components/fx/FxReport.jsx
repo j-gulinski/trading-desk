@@ -1,20 +1,22 @@
 import FilterChipGroup from '../filters/FilterChipGroup.jsx'
-import {
-  convertedTotalsOf,
-  fxConversionOf,
-  reportingCurrencyOptions,
-} from '../../domain/fx.js'
+import { reportingCurrencyOptions } from '../../domain/fx.js'
 import { formatAmount, formatSignedAmount } from '../../domain/formatting.js'
 
+const COLUMNS = [
+  { id: 'grossEntry', label: 'GROSS ENTRY', signed: false },
+  { id: 'unrealized', label: 'UNREALIZED PNL', signed: true },
+  { id: 'realized', label: 'REALIZED PNL', signed: true },
+  { id: 'total', label: 'TOTAL PNL', signed: true },
+]
+
+const OPEN_COLUMNS = COLUMNS.slice(0, 2)
+
 function metricValue(column, value) {
-  if (!Number.isFinite(value)) return '—'
   return column.signed ? formatSignedAmount(value) : formatAmount(value)
 }
 
-function SubtotalRow({ row, columns, toCurrency, rates }) {
-  const conversion = toCurrency
-    ? fxConversionOf(rates?.[row.currency], row.currency, toCurrency)
-    : null
+function SubtotalRow({ row, columns }) {
+  const { fx } = row
 
   return (
     <li className="fx-report__row">
@@ -25,12 +27,12 @@ function SubtotalRow({ row, columns, toCurrency, rates }) {
           {metricValue(column, row.values[column.id])}
         </span>
       ))}
-      {conversion != null && !conversion.identity && (
+      {(fx?.label || fx?.reason) && (
         <span className="fx-report__conversion">
-          {conversion.rate != null ? (
-            <span title={conversion.label}>{conversion.label}</span>
+          {fx.label ? (
+            <span title={fx.label}>{fx.label}</span>
           ) : (
-            <span className="fx-report__reason">{conversion.reason}</span>
+            <span className="fx-report__reason">{fx.reason}</span>
           )}
         </span>
       )}
@@ -39,27 +41,20 @@ function SubtotalRow({ row, columns, toCurrency, rates }) {
 }
 
 export default function FxReport({
-  columns,
-  subtotals,
+  currency,
+  portfolio,
   reportingCurrency,
   onReportingCurrencyChange,
-  fx,
 }) {
+  const { subtotals, reported } = portfolio
   if (subtotals.length === 0) return null
+  const columns = portfolio.closedTrades > 0 ? COLUMNS : OPEN_COLUMNS
   const currencies = reportingCurrencyOptions(subtotals)
   if (reportingCurrency && !currencies.includes(reportingCurrency)) {
     currencies.push(reportingCurrency)
     currencies.sort()
   }
-  const options = currencies.map((currency) => ({
-    value: currency,
-    label: currency,
-  }))
-  const converted =
-    reportingCurrency && fx.rates != null
-      ? convertedTotalsOf(subtotals, fx.rates, reportingCurrency,
-          columns.map((column) => column.id))
-      : null
+  const options = currencies.map((code) => ({ value: code, label: code }))
 
   return (
     <div className="fx-report">
@@ -77,35 +72,24 @@ export default function FxReport({
             Choose a reporting currency for a combined total
           </span>
         )}
-        {reportingCurrency && fx.error && (
-          <span className="fx-report__hint fx-report__hint--warn">{fx.error}</span>
-        )}
       </div>
 
       <ul className="fx-report__rows">
         {subtotals.map((row) => (
-          <SubtotalRow
-            key={row.currency}
-            row={row}
-            columns={columns}
-            toCurrency={reportingCurrency}
-            rates={fx.rates}
-          />
+          <SubtotalRow key={row.currency} row={row} columns={columns} />
         ))}
-        {converted != null && (
+        {currency != null && (
           <li className="fx-report__row fx-report__row--total">
-            <span className="fx-report__currency">→ {reportingCurrency}</span>
+            <span className="fx-report__currency">→ {currency}</span>
             {columns.map((column) => (
               <span key={column.id} className="fx-report__value">
                 <span className="fx-report__value-label">{column.label}</span>
-                {metricValue(column, converted.totals[column.id])}
+                {metricValue(column, reported.values[column.id])}
               </span>
             ))}
-            {converted.excluded.length > 0 && (
-              <span className="fx-report__conversion" title={converted.applied.join('; ')}>
-                {`excludes ${converted.excluded
-                  .map((entry) => `${entry.currency} (${entry.reason})`)
-                  .join(', ')}`}
+            {reported.title && (
+              <span className="fx-report__conversion">
+                <span className="fx-report__reason">No total — {reported.title}</span>
               </span>
             )}
           </li>

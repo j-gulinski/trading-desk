@@ -21,7 +21,7 @@ Install Docker with Compose, then:
 
 ```sh
 cp .env.example .env
-# Set POSTGRES_PASSWORD and use it in DATABASE_URL and DATABASE_MIGRATION_URL.
+# Set POSTGRES_PASSWORD; Compose builds the database URL from the POSTGRES_* values.
 # Add provider API keys for the sources you want to use.
 docker compose up --build
 ```
@@ -35,8 +35,8 @@ provider quote; model contracts also need an eligible curve. Missing API keys di
 The main storage defaults are 90 days of quote observations
 and at most one ordinary persisted valuation per trade per 60 seconds. Live updates are more frequent.
 
-The instrument schema change requires a fresh development database. To discard the old local
-Compose data and rebuild:
+Migrations start from one baseline (`db/versions/0001_baseline.py`), so a database created by an
+older schema must be recreated. To discard the old local Compose data and rebuild:
 
 ```sh
 docker compose down -v
@@ -53,24 +53,25 @@ This removes the local database and cached frontend dependencies. There is no le
 | `libs/desk-pricing` | Pure numerical functions for curves, bonds, swaps, options and risk |
 | `libs/desk-runtime` | Configuration, database sessions, logging, JSON responses and errors, HTTP runtime |
 | `services/market-data-service` · 8001 | Provider adapters, watchlist, quote/curve storage and streams |
-| `services/pricing-service` · 8002 | Pricing, valuation persistence, scenarios and valuation stream |
+| `services/pricing-service` · 8002 | Pricing, valuation status and persistence, curve hints, scenarios and valuation stream |
 | `services/monitoring-service` · 8003 | Health, audit and logs |
 | `services/books-service` · 8004 | Book management |
-| `services/blotter-service` · 8006 | Trade, valuation and portfolio reads |
-| `services/trade-action-service` · 8008 | Trade validation, command queue and trade writes |
+| `services/blotter-service` · 8006 | Trade, valuation and portfolio reads; book totals in a reporting currency |
+| `services/trade-action-service` · 8008 | Trade validation and trade writes, one transaction per action |
 | `frontend/src` | React views, components, state and API clients |
 | `db` | Alembic schema migrations |
 
-Providers inherit HTTP handling from `ProviderClient`; `@runtime.guard` handles their errors
-and cooldowns. Quote feeds normalize responses, then share storage and publication in
-`quote_ingestion.py`. `desk-domain/instruments.py` is the instrument catalogue: one
+Providers inherit HTTP handling from `ProviderClient`; `runtime.guarded` handles their errors
+and cooldowns and `runtime.acquire` owns every request budget. Symbol quote feeds subclass
+`SymbolQuoteFeed`; all quote feeds share storage and publication in `quote_board.py`, which
+also owns which provider:symbol rows are served. `desk-domain/instruments.py` is the instrument catalogue: one
 `FinancialInstrument` subclass per asset class declares the contract (ticket fields, symbol
 prefix, curve roles, underlying, trade rules). Instances hold typed attributes
 (`option.strike`, `bond.face_value`); JSON dicts exist only at the HTTP/DB edge
 (`from_dict`, `contract()`, `pricing()`, `as_terms()`). Spots, bonds and swaps call their
 formula from `_value()`. A European option stores the engine name on `option.model`
 (`BLACK_SCHOLES` or `INTRINSIC`); `_value()` looks up that function in `desk-pricing`.
-`desk-domain/pricing.py` maps those two names for the ticket picker. Term validation, the
+`desk-domain/pricing.py` maps those two names to their pricers for the ticket picker. Term validation, the
 served ticket schema, contract storage, the active quote set, trade validation and the blotter
 read the catalogue declarations instead of branching on asset class. Each class also declares
 `label` and `ticket_kind` (`spot`, `bond`, `swap`, or `premium`); the ticket and blotter read
@@ -82,7 +83,9 @@ ticket. Provider response parsing stays in provider adapters.
 one close operation. `desk-runtime` owns configuration, transactions, streams and the HTTP
 edge: every handler answers through `json_response`/`json_error`, unhandled errors and
 unknown routes answer as JSON too, and services without their own `/health` get the default
-one. The trade
+one. `streams.py` holds the one server-sent-events hub and the one stream consumer. Quote
+freshness, execution prices, valuation status and book totals are computed in the backend;
+the UI formats them and compares the current time with each `stale_at`. The trade
 ticket reads one options payload for schema, tradeable instruments and curves, then shows the
 execution value, the total and its key assumptions above a compact price-source list.
 
@@ -116,7 +119,8 @@ IRS pricing uses one curve for discounting and projection. European options defa
 Black–Scholes; the same contract can be valued with intrinsic payoff instead. Quote history
 contains observations collected by this app, without vendor backfill.
 Valuation history follows a trade's current book after reassignment. Exact historical replay,
-authentication, broker connectivity and durable command delivery are not implemented.
+authentication and broker connectivity are not implemented. A trade action runs in one
+transaction and its response is the result; `client_request_id` makes a repeated open safe.
 
 ## Development and checks
 
@@ -130,7 +134,7 @@ for package in libs/* services/*; do
 done
 ```
 
-Load configuration with a local database URL before running a service entry point.
+Set `DATABASE_URL` to a local database before running a service entry point or `alembic`.
 Service addresses default to Compose hostnames. For local processes, set the corresponding
 `MARKET_DATA_SERVICE_URL=http://localhost:8001`, `PRICING_SERVICE_URL=http://localhost:8002`,
 and other `<NAME>_SERVICE_URL` values. Health and stream URLs are derived from those addresses.

@@ -8,8 +8,7 @@ x-bench: &bench
   volumes:
     - ..:/bench
   environment:
-    DATABASE_URL: &database postgresql+psycopg://bench:bench@postgres:5432/bench
-    DATABASE_MIGRATION_URL: *database
+    DATABASE_URL: postgresql+psycopg://bench:bench@postgres:5432/bench
     DATABASE_POOL_SIZE: 15
     DATABASE_MAX_OVERFLOW: 0
     LOG_LEVEL: WARNING

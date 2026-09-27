@@ -1,11 +1,10 @@
 import time
 
-from desk_runtime.functions import utcnow
 from desk_runtime.logging_config import get_logger
 from desk_domain.providers import FINNHUB
 
 from market_data_service.providers.finnhub.client import FinnhubClient
-from market_data_service.providers.finnhub.normalizer import normalize_quote
+from market_data_service.providers.finnhub.normalizer import normalize_quote, normalize_search_results
 from market_data_service.config import (
     FINNHUB_API_KEY,
     FINNHUB_BUDGET_PER_MINUTE,
@@ -18,191 +17,101 @@ from market_data_service.config import (
     FRESHNESS_THRESHOLD_MULTIPLIER,
     SERVICE_NAME,
 )
-from market_data_service.poll_schedule import PollSchedule
 from market_data_service.provider_runtime import ProviderRuntime
-from market_data_service.quote_ingestion import store_and_publish
+from market_data_service.symbol_quote_feed import SymbolQuoteFeed
 
 log = get_logger(SERVICE_NAME)
 
-PROVIDER = FINNHUB
-runtime = ProviderRuntime(
-    FINNHUB,
-    FINNHUB_BUDGET_PER_MINUTE,
-    bool(FINNHUB_API_KEY),
-    provider_minute_limit=FINNHUB_PROVIDER_LIMIT_PER_MINUTE,
-)
-_client = FinnhubClient(FINNHUB_API_KEY)
-_schedule = PollSchedule()
+
+def _tier_seconds(entry):
+    return FINNHUB_TIER1_POLL_SECONDS if entry.tier == 1 else FINNHUB_TIER2_POLL_SECONDS
 
 
-def _cadence_seconds(tier):
-    if runtime.market_open() is False:
-        return FINNHUB_CLOSED_POLL_SECONDS
-    return FINNHUB_TIER1_POLL_SECONDS if tier == 1 else FINNHUB_TIER2_POLL_SECONDS
+class FinnhubFeed(SymbolQuoteFeed):
+    """US equity quotes on tier cadences, slowed down while the US market is closed."""
 
+    def __init__(self, *args):
+        super().__init__(*args)
+        self._status_checked_at = None
 
-def stale_after_seconds(symbol):
-    entry = runtime.active_entry(symbol)
-    tier = entry.tier if entry is not None else 2
-    poll = FINNHUB_TIER1_POLL_SECONDS if tier == 1 else FINNHUB_TIER2_POLL_SECONDS
-    return FRESHNESS_THRESHOLD_MULTIPLIER * poll + FINNHUB_PROVIDER_CLOCK_LAG_SECONDS
+    def fetch(self, entries):
+        return {entry.symbol: self.client.quote(entry.symbol) for entry in entries}
 
+    def normalize(self, entry, payload, received_at):
+        return normalize_quote(entry.symbol, entry.asset_class, entry.currency, payload, received_at)
 
-def closed_stale_after_seconds(symbol):
-    return FRESHNESS_THRESHOLD_MULTIPLIER * FINNHUB_CLOSED_POLL_SECONDS
-
-
-def market_open(symbol):
-    return runtime.market_open()
-
-
-reload_active = runtime.reload_active
-
-
-def _classifier(symbol):
-    return {
-        "stale_after_seconds": stale_after_seconds(symbol),
-        "closed_stale_after_seconds": closed_stale_after_seconds(symbol),
-        "market_open": runtime.market_open(),
-    }
-
-
-@runtime.guard("quote_unavailable")
-def _fetch_and_publish(entry):
-    runtime.record_request()
-    payload = _client.quote(entry.symbol)
-    quote = normalize_quote(entry.symbol, entry.asset_class, entry.currency, payload, utcnow())
-    tick = store_and_publish(quote, _classifier(entry.symbol))
-    runtime.record_success()
-    return tick
-
-
-def _refresh_market_status():
-    if not runtime.try_take():
-        return
-
-    def fetch():
-        runtime.record_request()
-        payload = _client.market_status()
-        runtime.record_success()
-        return payload
-
-    payload, _ = runtime.guarded(
-        fetch, "market_status_failed", log_level="warning"
-    )
-    if payload is None:
-        return
-    runtime.set_market_status(bool(payload.get("isOpen")), payload.get("session"))
-    log.info("market_status", provider=FINNHUB, is_open=bool(payload.get("isOpen")),
-             session=payload.get("session"))
-
-
-def poll_loop():
-    if not FINNHUB_API_KEY:
-        log.warning("finnhub_disabled", reason="FINNHUB_API_KEY is not set")
-        return
-    last_status_refresh = 0.0
-    while True:
-        # paused by a cooldown: wait, poll nothing
-        if runtime.cooldown_seconds_left() > 0:
-            time.sleep(min(runtime.cooldown_seconds_left(), 5))
-            continue
-        # reload which symbols to poll: watchlist + open trades + benchmark
-        if not runtime.reload_active_if_stale():
-            time.sleep(5)
-            continue
-        # re-check whether the US market is open
+    def before_round(self, entries):
         now = time.monotonic()
         if (
-            not last_status_refresh
-            or now - last_status_refresh >= FINNHUB_MARKET_STATUS_REFRESH_SECONDS
+            self._status_checked_at is not None
+            and now - self._status_checked_at < FINNHUB_MARKET_STATUS_REFRESH_SECONDS
         ):
-            _refresh_market_status()
-            last_status_refresh = now
-        pollable = runtime.pollable_entries()
-        # poll while budget lasts: an empty bucket ends the round, symbols stay due
-        for entry in _schedule.due_entries(pollable):
-            if runtime.cooldown_seconds_left() > 0 or not runtime.try_take():
-                break
-            _fetch_and_publish(entry)
-            _schedule.defer(entry.symbol, _cadence_seconds(entry.tier))
-        _schedule.keep_only(pollable)
-        time.sleep(1)
+            return
+        self._status_checked_at = now
+        payload = self._request(self.client.market_status, "market_status_failed")
+        if payload is None:
+            return
+        is_open, session = bool(payload.get("isOpen")), payload.get("session")
+        self.runtime.set_market_status(is_open, session)
+        log.info("market_status", provider=FINNHUB, is_open=is_open, session=session)
 
+    def cadence_seconds(self, entry):
+        if self.runtime.market_open() is False:
+            return FINNHUB_CLOSED_POLL_SECONDS
+        return _tier_seconds(entry)
 
-def refresh_symbol(symbol):
-    """Returns (tick, error, http_status)."""
-    if not FINNHUB_API_KEY:
-        return None, "FINNHUB is disabled: no API key configured", 503
-    entry, error, status = runtime.resolve(symbol)
-    if error is not None:
-        return None, error, status
-    unavailable = runtime.unavailable()
-    if unavailable is not None:
-        return None, unavailable, 503
-    if not runtime.try_take():
-        return None, "FINNHUB request budget is exhausted: retry shortly", 429
-    # same poll as the loop, then push the scheduled poll out
-    tick, error = _fetch_and_publish(entry)
-    if tick is None:
-        return None, error, 429 if runtime.status() == "RATE_LIMITED" else 502
-    _schedule.defer(symbol, _cadence_seconds(entry.tier))
-    return tick, None, 200
+    def classifier(self, entry):
+        return {
+            "stale_after_seconds": FRESHNESS_THRESHOLD_MULTIPLIER * _tier_seconds(entry)
+            + FINNHUB_PROVIDER_CLOCK_LAG_SECONDS,
+            "closed_stale_after_seconds": FRESHNESS_THRESHOLD_MULTIPLIER * FINNHUB_CLOSED_POLL_SECONDS,
+            "market_open": self.runtime.market_open(),
+        }
 
-
-def search(query):
-    if not FINNHUB_API_KEY or runtime.cooldown_seconds_left() > 0:
-        return None
-    if not runtime.try_take():
-        return None
-    def fetch():
-        runtime.record_request()
-        payload = _client.search(query)
-        runtime.record_success()
-        return payload
-
-    payload, _ = runtime.guarded(
-        fetch, "symbol_search_unavailable", log_level="warning", query=query
-    )
-    return payload
-
-
-def poll_strategy():
-    closed = runtime.market_open() is False
-    if closed:
-        description = (
-            f"market closed — confirmation poll every {FINNHUB_CLOSED_POLL_SECONDS} s "
-            f"({FINNHUB_TIER1_POLL_SECONDS} s / {FINNHUB_TIER2_POLL_SECONDS} s when open)"
+    def search(self, query):
+        payload = self._request(
+            lambda: self.client.search(query), "symbol_search_unavailable", query=query,
         )
-    else:
-        description = (
-            f"every {FINNHUB_TIER1_POLL_SECONDS} s tier 1 (open trades + benchmark) · "
-            f"every {FINNHUB_TIER2_POLL_SECONDS} s watchlist"
-        )
-    return {
-        "mode": "TIERED",
-        "tier1_seconds": FINNHUB_TIER1_POLL_SECONDS,
-        "tier2_seconds": FINNHUB_TIER2_POLL_SECONDS,
-        "closed_seconds": FINNHUB_CLOSED_POLL_SECONDS,
-        "current_cadence_seconds": FINNHUB_CLOSED_POLL_SECONDS if closed
-        else FINNHUB_TIER1_POLL_SECONDS,
-        "description": description,
-    }
+        return None if payload is None else normalize_search_results(payload)
 
-
-def active_symbols():
-    return sorted(entry.symbol for entry in runtime.pollable_entries())
-
-
-def runtime_snapshot():
-    symbols = active_symbols()
-    is_open = runtime.market_open()
-    return {
-        **runtime.snapshot(symbols),
-        "market_states": {
+    def market_states(self, symbols):
+        is_open = self.runtime.market_open()
+        return {
             "open": len(symbols) if is_open is True else 0,
             "closed": len(symbols) if is_open is False else 0,
             "unknown": len(symbols) if is_open is None else 0,
-        },
-        "strategy": poll_strategy(),
-    }
+        }
+
+    def strategy(self):
+        closed = self.runtime.market_open() is False
+        if closed:
+            description = (
+                f"market closed — confirmation poll every {FINNHUB_CLOSED_POLL_SECONDS} s "
+                f"({FINNHUB_TIER1_POLL_SECONDS} s / {FINNHUB_TIER2_POLL_SECONDS} s when open)"
+            )
+        else:
+            description = (
+                f"every {FINNHUB_TIER1_POLL_SECONDS} s tier 1 (open trades + benchmark) · "
+                f"every {FINNHUB_TIER2_POLL_SECONDS} s watchlist"
+            )
+        return {
+            "mode": "TIERED",
+            "tier1_seconds": FINNHUB_TIER1_POLL_SECONDS,
+            "tier2_seconds": FINNHUB_TIER2_POLL_SECONDS,
+            "closed_seconds": FINNHUB_CLOSED_POLL_SECONDS,
+            "current_cadence_seconds": FINNHUB_CLOSED_POLL_SECONDS if closed
+            else FINNHUB_TIER1_POLL_SECONDS,
+            "description": description,
+        }
+
+
+feed = FinnhubFeed(
+    FINNHUB,
+    ProviderRuntime(
+        FINNHUB,
+        bool(FINNHUB_API_KEY),
+        per_minute=FINNHUB_BUDGET_PER_MINUTE,
+        provider_minute_limit=FINNHUB_PROVIDER_LIMIT_PER_MINUTE,
+    ),
+    FinnhubClient(FINNHUB_API_KEY),
+)

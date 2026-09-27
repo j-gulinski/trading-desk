@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { apiGet } from '../services/apiClient.js'
 import { endpoints } from '../services/endpoints.js'
 import { useBufferedUpdates } from './useBufferedUpdates.js'
 import { useSseStream } from './useSseStream.js'
 import { useStreamSeed } from './useStreamSeed.js'
 import { BOOK_RISK_EVENT, VALUATION_EVENT } from '../config/valuations.js'
-import { STREAM_STATUS } from '../config/stream.js'
 import {
   bookRiskOf,
   bookRisksFromSeed,
@@ -53,13 +52,8 @@ export function useValuationFeed() {
       )
       setBookRisk((previous) => mergeBookRisks(previous, bookRisksFromSeed(riskSeed)))
     }),
+    { reconnect },
   )
-
-  useEffect(() => {
-    if (seedStatus !== 'error' || status !== STREAM_STATUS.connected) return undefined
-    const timer = window.setTimeout(reconnect, 2000)
-    return () => window.clearTimeout(timer)
-  }, [reconnect, seedStatus, status])
 
   return useMemo(
     () => ({ valuations, bookRisk, status, seedStatus }),

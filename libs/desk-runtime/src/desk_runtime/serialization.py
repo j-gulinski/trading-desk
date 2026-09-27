@@ -8,7 +8,7 @@ from enum import Enum
 def to_json(obj) -> str:
     def convert(o):
         if isinstance(o, Decimal):
-            return str(o)
+            return format(o, "f")
         if isinstance(o, (datetime.datetime, datetime.date)):
             return o.isoformat()
         if isinstance(o, uuid.UUID):

@@ -8,7 +8,7 @@ attributes are this contract. JSON dicts exist only at the HTTP/DB edge
 from abc import ABC, abstractmethod
 from decimal import Decimal
 
-from desk_domain.pricing import OPTION_MODELS, OPTION_PRICERS, option_model
+from desk_domain.pricing import OPTION_MODELS
 from desk_pricing.bond import bond_pv
 from desk_pricing.irs import irs_valuation
 
@@ -18,7 +18,7 @@ MAX_MATURITY_YEARS = 50
 DEFAULT_VOLATILITY = 0.22
 IRS_PAYMENTS_PER_YEAR = {"3M": 4, "6M": 2}
 
-CURVE_FIELDS = ("discount_curve", "projection_curve")
+CURVE_FIELDS = ("discount_curve",)
 _EDGE_KEYS = frozenset({"asset_class", "currency", "settlement_currency", "model"})
 
 
@@ -53,7 +53,7 @@ class FinancialInstrument(ABC):
     label = None
     ticket_kind = "spot"
     model = None
-    models = ()
+    models = {}
     symbol_prefix = None
 
     needs_quote = False
@@ -103,10 +103,6 @@ class FinancialInstrument(ABC):
         return None
 
     @property
-    def projection_curve(self):
-        return None
-
-    @property
     def deviation_notional(self):
         return None
 
@@ -135,8 +131,7 @@ class FinancialInstrument(ABC):
         return terms
 
     def price(self, inputs):
-        quote = inputs.get("spot") or {}
-        spot = quote.get("mid") if quote.get("mid") is not None else quote.get("last")
+        spot = (inputs.get("spot") or {}).get("mid")
         curve = inputs.get("curve")
         if (self.needs_quote and spot is None) or (self.uses_curve() and not _usable_curve(curve)):
             return None
@@ -288,10 +283,6 @@ class InterestRateSwap(FinancialInstrument):
     @classmethod
     def from_dict(cls, symbol, data):
         data = dict(data or {})
-        if data.get("projection_curve") not in (None, "", data.get("discount_curve")):
-            raise ValueError(
-                "IRS uses one selected risk-free curve for discounting and projection"
-            )
         inst = cls(
             symbol,
             direction=data["direction"],
@@ -305,16 +296,12 @@ class InterestRateSwap(FinancialInstrument):
         inst.extras = _remainder(
             data, "direction", "notional", "fixed_rate", "maturity_years",
             "floating_rate_index_tenor", "discount_curve", "payments_per_year",
-            "projection_curve", "pricing_approach",
+            "pricing_approach",
         )
         return inst
 
     @property
     def discount_curve(self):
-        return self._discount_curve
-
-    @property
-    def projection_curve(self):
         return self._discount_curve
 
     @property
@@ -336,7 +323,6 @@ class InterestRateSwap(FinancialInstrument):
     def derived(self):
         return {
             "payments_per_year": self.payments_per_year,
-            "projection_curve": self.projection_curve,
             "pricing_approach": self.pricing_approach,
         }
 
@@ -355,7 +341,7 @@ class EuropeanOption(FinancialInstrument):
     models = OPTION_MODELS
     symbol_prefix = "OPT"
     needs_quote = True
-    needs_curve = any(spec["needs_curve"] for spec in OPTION_MODELS)
+    needs_curve = any(spec["needs_curve"] for spec in OPTION_MODELS.values())
     whole_quantity = True
     underlying_field = "underlying_symbol"
     underlying_asset_classes = ("EQUITY",)
@@ -388,7 +374,7 @@ class EuropeanOption(FinancialInstrument):
     def from_dict(cls, symbol, data):
         data = dict(data or {})
         model = data.get("model", cls.model)
-        if option_model(model) is None:
+        if model not in OPTION_MODELS:
             raise ValueError(f"unsupported pricing model {model} for {cls.asset_class}")
         inst = cls(
             symbol,
@@ -413,8 +399,7 @@ class EuropeanOption(FinancialInstrument):
         return self._discount_curve
 
     def uses_curve(self):
-        spec = option_model(self.model)
-        return spec["needs_curve"] if spec else True
+        return OPTION_MODELS[self.model]["needs_curve"]
 
     def contract(self):
         return {
@@ -433,11 +418,7 @@ class EuropeanOption(FinancialInstrument):
         return payload
 
     def _value(self, spot, curve):
-        try:
-            pricer = OPTION_PRICERS[self.model]
-        except KeyError:
-            raise ValueError(f"unsupported pricing model {self.model} for {self.asset_class}") from None
-        return pricer(
+        return OPTION_MODELS[self.model]["pricer"](
             {
                 "option_type": self.option_type,
                 "strike": self.strike,

@@ -1,15 +1,12 @@
 """Checkpointed Market Data SSE consumer and targeted valuation dispatcher."""
 
-import time
 import json
 import urllib.request
-import urllib.error
 
 from desk_domain.audit import write_audit
 from desk_runtime.config import BENCHMARK_PROVIDER, BENCHMARK_SYMBOL
-from desk_runtime.functions import first_present
 from desk_runtime.logging_config import get_logger
-from desk_runtime.streams import read_events
+from desk_runtime.streams import follow_stream
 from pricing_service import cache
 from pricing_service.config import MARKET_DATA_SNAPSHOT_URL, MARKET_DATA_STREAM_URL, SERVICE_NAME
 from pricing_service.book_risk import sample_and_publish
@@ -17,17 +14,6 @@ from pricing_service.valuation_engine import value_all_active, value_curve, valu
 from pricing_service.valuation_publisher import publish_valuation
 
 log = get_logger(SERVICE_NAME)
-
-
-def _audit(event_type, message, severity="INFO"):
-    try:
-        write_audit(SERVICE_NAME, event_type, message, severity=severity)
-    except Exception:
-        log.exception("audit_write_failed", event_type=event_type)
-
-
-def _set_connection(state):
-    return cache.set_market_data_connection(state)
 
 
 def _handle(event_type, tick):
@@ -49,9 +35,8 @@ def _handle(event_type, tick):
     for event in value_quote(tick["provider"], tick["symbol"]):
         publish_valuation(event)
     if tick["symbol"] == BENCHMARK_SYMBOL and tick["provider"] == BENCHMARK_PROVIDER:
-        level = first_present(tick, ("mid", "last"))
-        if level is not None:
-            sample_and_publish(level)
+        if tick.get("mid") is not None:
+            sample_and_publish(tick["mid"])
 
 
 def _reconcile_market_state():
@@ -68,7 +53,7 @@ def _reconcile_market_state():
         )
     except Exception as error:
         log.warning("market_state_reconcile_failed", error=str(error))
-        return None
+        raise RuntimeError("market-data snapshot reconciliation failed") from error
 
     spots = snapshot.get("spots") or {}
     curves = snapshot.get("curves") or {}
@@ -104,25 +89,20 @@ def _at_or_before_checkpoint(tick, checkpoint):
     return event_id <= checkpoint_id
 
 
+def _handle_after_checkpoint(event_type, tick, checkpoint):
+    if not _at_or_before_checkpoint(tick, checkpoint):
+        _handle(event_type, tick)
+
+
+def _set_connected(connected):
+    cache.set_market_data_connection("CONNECTED" if connected else "RECONNECTING")
+    if connected:
+        write_audit(SERVICE_NAME, "STREAM_CONNECTED", "Connected to market data stream")
+    else:
+        write_audit(SERVICE_NAME, "STREAM_DISCONNECTED", "Market data stream disconnected",
+                    severity="WARNING")
+
+
 def market_data_stream_consumer():
-    while True:
-        log.info("stream_connecting", url=MARKET_DATA_STREAM_URL)
-        try:
-            request = urllib.request.Request(MARKET_DATA_STREAM_URL)
-            with urllib.request.urlopen(request) as stream:
-                if _set_connection("CONNECTED"):
-                    _audit("STREAM_CONNECTED", "Connected to market data stream")
-                checkpoint = _reconcile_market_state()
-                if checkpoint is None:
-                    raise RuntimeError("market-data snapshot reconciliation failed")
-                for event_type, tick in read_events(stream):
-                    if not _at_or_before_checkpoint(tick, checkpoint):
-                        _handle(event_type, tick)
-        except urllib.error.URLError as e:
-            log.warning("stream_failed", error=str(e))
-        except Exception:
-            log.exception("stream_error")
-        finally:
-            if _set_connection("RECONNECTING"):
-                _audit("STREAM_DISCONNECTED", "Market data stream disconnected", severity="WARNING")
-        time.sleep(5)
+    follow_stream(MARKET_DATA_STREAM_URL, _reconcile_market_state, _handle_after_checkpoint,
+                  _set_connected, log)

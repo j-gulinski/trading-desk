@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal, DecimalException
 from enum import Enum
 
-from desk_domain.freshness import QuoteGrade
+from desk_domain.freshness import QuoteGrade, assess
 
 
 class PriceBasis(str, Enum):
@@ -87,6 +87,27 @@ def wire_quote_fields(quote):
     return {field: getattr(quote, field) for field in WIRE_QUOTE_FIELDS}
 
 
+def execution_price(bid, ask, mid, side):
+    quoted = ask if side == "BUY" else bid
+    return quoted if quoted is not None else mid
+
+
+def quote_state(fields):
+    """Freshness and execution prices that every published quote carries."""
+    state, stale_at = assess(
+        fields.get("provider_timestamp"), fields.get("received_at"),
+        fields.get("stale_after_seconds"), fields.get("market_open"),
+        fields.get("closed_stale_after_seconds"), fields.get("quote_grade"),
+    )
+    bid, ask, mid = fields.get("bid"), fields.get("ask"), fields.get("mid")
+    return {
+        "freshness": state.value,
+        "stale_at": stale_at,
+        "buy_price": execution_price(bid, ask, mid, "BUY"),
+        "sell_price": execution_price(bid, ask, mid, "SELL"),
+    }
+
+
 def wire_tick(quote, classifier, origin=None, reference=False):
     """One published quote: the wire fields, its freshness classifier and why it is watched."""
     origin = origin or {}
@@ -96,6 +117,7 @@ def wire_tick(quote, classifier, origin=None, reference=False):
         "market": quote_market(quote.symbol, quote.asset_class, quote.raw_payload),
         "event_time": quote.received_at,
         **classifier,
+        **quote_state({**wire_quote_fields(quote), **classifier}),
         "watched": bool(origin.get("watched")),
         "held": bool(origin.get("held")),
         "benchmark": bool(origin.get("benchmark")),

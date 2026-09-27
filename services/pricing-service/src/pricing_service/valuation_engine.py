@@ -2,6 +2,7 @@
 
 import time
 import threading
+from datetime import datetime
 
 from pricing_service import cache, repository
 from decimal import Decimal
@@ -9,12 +10,13 @@ from desk_pricing.valuation import pnl, position_value, record_totals, signed_qu
 from pricing_service.market_inputs import market_inputs
 from desk_domain.instruments import instrument_for, type_view_for
 from pricing_service.valuation_publisher import publish_valuation
-from pricing_service.config import TRADE_REFRESH_SECONDS, SERVICE_NAME
+from pricing_service.config import SERVICE_NAME, TRADE_REFRESH_SECONDS, VALUATION_WRITE_INTERVAL_SECONDS
 from desk_pricing.provenance import pricing_provenance
-from desk_runtime.functions import get_iso_timestamp
+from desk_runtime.functions import get_iso_timestamp, utcnow
 from desk_runtime.logging_config import get_logger
 from desk_domain.audit import write_audit
 from desk_domain.contract_data import split_terms
+from desk_domain.curves import curve_stale_at
 
 log = get_logger(SERVICE_NAME)
 _blocked_lock = threading.Lock()
@@ -52,10 +54,34 @@ def _retain_active_blocked(active):
         _blocked_trades.intersection_update(active)
 
 
+def _valuation_state(spot, curve):
+    """LIVE / MARKET_CLOSED / STALE while the inputs stay fresh, and when they turn stale."""
+    status, deadlines = "LIVE", []
+    if spot:
+        if spot.get("freshness") in (None, "MISSING"):
+            status = "STALE"
+        elif spot.get("freshness") == "CLOSED":
+            status = "MARKET_CLOSED"
+        if spot.get("stale_at"):
+            deadlines.append(datetime.fromisoformat(str(spot["stale_at"])))
+    if curve:
+        deadlines.append(curve_stale_at(curve["curve_name"], curve["as_of_date"]))
+    known = [deadline for deadline in deadlines if deadline is not None]
+    return status, min(known) if known else None
+
+
+def _curve_move_bps(meta, provenance):
+    def maturity_rate(record):
+        return ((record or {}).get("curves") or {}).get("discount", {}).get("maturity_rate_percent")
+
+    entry, current = maturity_rate(meta.get("pricing_provenance")), maturity_rate(provenance)
+    return (current - entry) * 100 if entry is not None and current is not None else None
+
+
 def value_trade(trade):
     meta = trade.get("metadata") or {}
     instrument = instrument_for(trade["asset_class"], trade["symbol"], meta)
-    provider = cache.trade_provider(trade) if instrument.needs_quote else None
+    provider = trade["market_data_provider"] if instrument.needs_quote else None
     inputs = market_inputs(instrument, provider)
     priced = instrument.price(inputs)
     if priced is None:
@@ -63,8 +89,9 @@ def value_trade(trade):
     price, multiplier = priced["price"], priced["multiplier"]
     spot = inputs.get("spot") or {}
     curve = inputs.get("curve") or {}
-    projection = inputs.get("projection_curve") or {}
-    provenance = pricing_provenance(instrument.model, curve, projection)
+    maturity = getattr(instrument, "maturity_years", None)
+    provenance = pricing_provenance(instrument.model, curve, maturity)
+    status, stale_at = _valuation_state(spot, curve)
     quantity = trade["quantity"]
     fair_value = position_value(price, quantity, multiplier)
     unrealized = pnl(
@@ -92,6 +119,8 @@ def value_trade(trade):
         ),
         "valuation_time": get_iso_timestamp(),
         "valuation_payload": {
+            "status": status,
+            "stale_at": stale_at,
             "current_price": str(price),
             "multiplier": multiplier,
             "pricing": split_terms(instrument).pricing,
@@ -101,10 +130,8 @@ def value_trade(trade):
             **({"discount_curve": curve.get("curve_name"),
                 "curve_as_of": curve.get("as_of_date"),
                 "curve_received_at": curve.get("received_at")} if curve else {}),
-            **({"projection_curve": meta["projection_curve"],
-                "projection_curve_as_of": projection.get("as_of_date"),
-                "projection_curve_received_at": projection.get("received_at")}
-               if meta.get("projection_curve") else {}),
+            **({"curve_move_bps": curve_move}
+               if (curve_move := _curve_move_bps(meta, provenance)) is not None else {}),
             **({"underlying_symbol": meta["underlying_symbol"]}
                if meta.get("underlying_symbol") else {}),
             **({"face_value": meta["face_value"]}
@@ -130,8 +157,8 @@ def _value_and_store(trades):
         if valuation is None:
             _audit_blocked(trade)
             continue
-        persisted = repository.save_valuation(valuation)
-        if persisted == repository.VALUATION_PERSIST_BLOCKED:
+        if cache.claim_valuation_write(valuation["trade_id"], utcnow(), VALUATION_WRITE_INTERVAL_SECONDS) \
+                and not repository.save_valuation(valuation):
             continue
         _clear_blocked(valuation["trade_id"])
         if not cache.record_valuation(valuation):

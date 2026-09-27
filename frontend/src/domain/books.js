@@ -1,9 +1,5 @@
-import {
-  BOOK_DESCRIPTION_MAX_LENGTH,
-  BOOK_NAME_MAX_LENGTH,
-} from '../config/books.js'
-import { catalogueAssetClasses, catalogueFieldsOf } from './catalogue.js'
-import { statusOf } from './valuations.js'
+import { catalogueFieldsOf } from './catalogue.js'
+import { amountsOf, fxOf, reportedOf } from './fx.js'
 import { toNum, toTime } from './values.js'
 
 export function bookSummariesOf(raw) {
@@ -16,22 +12,29 @@ export function bookSummariesOf(raw) {
       ...catalogueFieldsOf(book),
       activeTrades: toNum(book.active_trades) ?? 0,
       closedTrades: toNum(book.closed_trades) ?? 0,
-      grossEntryValue: toNum(book.gross_entry_value),
-      realizedPnl: toNum(book.realized_pnl),
-      unrealizedPnl: toNum(book.unrealized_pnl),
-      currency: book.currency ?? null,
-      subtotals: (Array.isArray(book.subtotals) ? book.subtotals : []).map((row) => ({
-        currency: row.currency,
-        values: {
-          grossEntry: toNum(row.values?.gross_entry) ?? 0,
-          unrealized: toNum(row.values?.unrealized) ?? 0,
-          realized: toNum(row.values?.realized) ?? 0,
-          total: toNum(row.values?.total) ?? 0,
-        },
-      })),
+      reported: reportedOf(book.reported),
       isActive: book.is_active !== false,
       positions: Array.isArray(book.positions) ? book.positions : [],
     }))
+}
+
+export function booksSummaryOf(data) {
+  const portfolio = data?.portfolio ?? {}
+  return {
+    currency: data?.currency ?? null,
+    books: bookSummariesOf(data?.books),
+    portfolio: {
+      bookCount: toNum(portfolio.book_count) ?? 0,
+      activeTrades: toNum(portfolio.active_trades) ?? 0,
+      closedTrades: toNum(portfolio.closed_trades) ?? 0,
+      subtotals: (Array.isArray(portfolio.subtotals) ? portfolio.subtotals : []).map((row) => ({
+        currency: row.currency,
+        values: amountsOf(row.values),
+        fx: fxOf(row.fx),
+      })),
+      reported: reportedOf(portfolio.reported),
+    },
+  }
 }
 
 export function moveTargetsOf(books, book) {
@@ -41,40 +44,13 @@ export function moveTargetsOf(books, book) {
   )
 }
 
-function positionStatusOf(position, now, instruments, curves) {
-  const unvalued = toNum(position.unvalued) ?? 0
-  const valuedAt = toTime(position.valuation_time)
-  if (unvalued > 0 || !Number.isFinite(valuedAt)) return 'PENDING'
-
-  const payload = position.valuation_payload ?? {}
-  const provider = position.market_data_provider ?? null
-  const underlying = payload.underlying_symbol ?? null
-  const discountCurve = payload.discount_curve ?? null
-
-  return statusOf(
-    {
-      closed: false,
-      symbol: position.symbol,
-      marketDataProvider: provider,
-      marketDataTimestampMs: toTime(
-        position.oldest_market_data_timestamp ?? position.market_data_timestamp,
-      ),
-      receivedAtMs: toTime(position.oldest_valuation_time ?? position.valuation_time),
-      discountCurve,
-      curveAsOf: payload.curve_as_of ?? null,
-      curveReceivedAtMs: toTime(payload.curve_received_at),
-      projectionCurve: payload.projection_curve ?? null,
-      projectionCurveAsOf: payload.projection_curve_as_of ?? null,
-      projectionCurveReceivedAtMs: toTime(payload.projection_curve_received_at),
-      underlyingSymbol: underlying,
-    },
-    now,
-    instruments,
-    curves,
-  )
+function positionStatusOf(position, now) {
+  const staleAtMs = toTime(position.stale_at)
+  if (position.status !== 'PENDING' && Number.isFinite(staleAtMs) && now >= staleAtMs) return 'STALE'
+  return position.status ?? 'PENDING'
 }
 
-export function bookPositionsOf(book, now, instruments = {}, curves = {}) {
+export function bookPositionsOf(book, now) {
   return (book?.positions ?? []).map((position) => {
     const provider = position.market_data_provider ?? null
     return {
@@ -89,7 +65,7 @@ export function bookPositionsOf(book, now, instruments = {}, curves = {}) {
       averageEntry: toNum(position.average_entry),
       price: toNum(position.current_price),
       unrealizedPnl: toNum(position.unrealized_pnl) ?? 0,
-      status: positionStatusOf(position, now, instruments, curves),
+      status: positionStatusOf(position, now),
     }
   })
 }
@@ -102,20 +78,10 @@ export function bookFormValuesOf(book) {
   }
 }
 
-export function bookFormErrorsOf(values, schemas) {
+export function bookFormErrorsOf(values) {
   const errors = {}
-  const name = values.name.trim()
-  if (name.length === 0) {
-    errors.name = 'Name is required.'
-  } else if (name.length > BOOK_NAME_MAX_LENGTH) {
-    errors.name = `Name must be at most ${BOOK_NAME_MAX_LENGTH} characters.`
-  }
-  if (!catalogueAssetClasses(schemas).includes(values.assetClass)) {
-    errors.assetClass = 'Pick an asset class.'
-  }
-  if (values.description.trim().length > BOOK_DESCRIPTION_MAX_LENGTH) {
-    errors.description = `Description must be at most ${BOOK_DESCRIPTION_MAX_LENGTH} characters.`
-  }
+  if (values.name.trim().length === 0) errors.name = 'Name is required.'
+  if (!values.assetClass) errors.assetClass = 'Pick an asset class.'
   return errors
 }
 

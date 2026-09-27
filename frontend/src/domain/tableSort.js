@@ -1,4 +1,11 @@
 function compareValues(a, b) {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
+      const comparison = compareValues(a[index], b[index])
+      if (comparison !== 0) return comparison
+    }
+    return a.length - b.length
+  }
   if (a == null && b == null) return 0
   if (a == null) return 1
   if (b == null) return -1

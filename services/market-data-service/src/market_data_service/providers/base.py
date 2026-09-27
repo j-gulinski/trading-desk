@@ -6,18 +6,16 @@ import urllib.parse
 import urllib.request
 from market_data_service.config import REQUEST_TIMEOUT_SECONDS, SERVICE_NAME
 from desk_runtime.logging_config import get_logger
-from desk_domain.audit import write_audit
 
 
 log = get_logger(SERVICE_NAME)
 
 
 class ProviderError(Exception):
-    def __init__(self, provider, detail, response=None, http_status=None):
+    def __init__(self, provider, detail, http_status=None):
         super().__init__(f"{provider}: {detail}")
         self.provider = provider
         self.detail = detail
-        self.response = response
         self.http_status = http_status
 
 
@@ -26,17 +24,8 @@ class ProviderAuthError(ProviderError):
 
 
 class ProviderRateLimited(ProviderError):
-    def __init__(
-        self,
-        provider,
-        detail,
-        retry_after_seconds=None,
-        response=None,
-        http_status=None,
-    ):
-        super().__init__(
-            provider, detail, response=response, http_status=http_status
-        )
+    def __init__(self, provider, detail, retry_after_seconds=None, http_status=None):
+        super().__init__(provider, detail, http_status=http_status)
         self.retry_after_seconds = retry_after_seconds
 
 
@@ -81,117 +70,38 @@ class ProviderClient(ABC):
         return None
 
     def get(self, path, params=None):
-        public_params = params or {}
-        request_fields = self._request_fields(path, public_params)
+        params = params or {}
         started = time.monotonic()
-        query = urllib.parse.urlencode({**public_params, **self.auth_params()})
+        query = urllib.parse.urlencode({**params, **self.auth_params()})
         status = None
-        body = None
-        payload = None
         try:
             body, status = self._fetch(f"{self.base_url}{path}?{query}")
             payload = self.decode_body(body)
             self.classify_body(payload)
         except ValueError as error:
-            provider_error = ProviderDataError(self.provider, "response body failed to decode")
-            self._log_response(
-                request_fields,
-                started,
-                status,
-                error=provider_error,
-            )
-            raise provider_error from error
+            failure = ProviderDataError(self.provider, "response body failed to decode")
+            self._log_response(path, params, started, status, failure)
+            raise failure from error
         except ProviderError as error:
-            status = error.http_status or status
-            self._log_response(
-                request_fields,
-                started,
-                status,
-                error=error,
-            )
+            self._log_response(path, params, started, error.http_status or status, error)
             raise
-        self._log_response(
-            request_fields,
-            started,
-            status,
-            result_count=self._result_count(path, public_params, payload),
-        )
+        self._log_response(path, params, started, status)
         return payload
 
-    def _request_fields(self, path, params):
-        fields = {"provider": self.provider, "method": "GET", "endpoint": path}
-        if path in ("/search", "/symbol_search"):
-            fields["query"] = params.get("q") or params.get("symbol")
-        elif params.get("symbol"):
-            symbols = [symbol for symbol in str(params["symbol"]).split(",") if symbol]
-            fields["symbols"] = symbols
-            fields["symbol_count"] = len(symbols)
-        return fields
-
-    @staticmethod
-    def _result_count(path, params, payload):
-        if path in ("/search", "/symbol_search"):
-            key = "result" if path == "/search" else "data"
-            results = payload.get(key) if isinstance(payload, dict) else None
-            return len(results) if isinstance(results, list) else 0
-        if path == "/quote":
-            requested = [value for value in str(params.get("symbol") or "").split(",") if value]
-            if len(requested) <= 1:
-                return 1 if isinstance(payload, dict) and payload else 0
-            return sum(
-                isinstance(payload.get(symbol), dict)
-                for symbol in requested
-            ) if isinstance(payload, dict) else 0
-        if path == "/query" and isinstance(payload, dict):
-            result_key = {
-                "GLOBAL_QUOTE": "Global Quote",
-                "CURRENCY_EXCHANGE_RATE": "Realtime Currency Exchange Rate",
-            }.get(params.get("function"))
-            result = payload.get(result_key) if result_key else None
-            return 1 if isinstance(result, dict) and result else 0
-        return None
-
-    @staticmethod
-    def _log_response(
-        request_fields,
-        started,
-        status,
-        result_count=None,
-        error=None,
-    ):
+    def _log_response(self, path, params, started, status, error=None):
         fields = {
-            **request_fields,
+            "provider": self.provider,
+            "method": "GET",
+            "endpoint": path,
+            "params": params,
             "http_status": status,
             "duration_ms": round((time.monotonic() - started) * 1000),
             "outcome": "error" if error else "ok",
         }
-        if result_count is not None:
-            fields["result_count"] = result_count
         if error is None:
             log.info("provider_http_response", **fields)
-            return
-        fields["error_type"] = type(error).__name__
-        log.warning("provider_http_response", **fields)
-        # Only failures reach the audit trail; the per-request ledger is the log above.
-        write_audit(
-            SERVICE_NAME,
-            "PROVIDER_FETCH_RATE_LIMITED"
-            if isinstance(error, ProviderRateLimited)
-            else "PROVIDER_FETCH_FAILED",
-            f"{request_fields['provider']} GET {request_fields['endpoint']} failed",
-            entity_type="PROVIDER",
-            entity_id=request_fields["provider"],
-            severity="WARNING",
-            payload={
-                "provider": request_fields["provider"],
-                "method": request_fields["method"],
-                "endpoint": request_fields["endpoint"],
-                "http_status": status,
-                "duration_ms": fields["duration_ms"],
-                "outcome": fields["outcome"],
-                "error_type": type(error).__name__,
-            },
-        )
+        else:
+            log.warning("provider_http_response", **fields, error_type=type(error).__name__)
 
     def _fetch(self, url):
         try:
@@ -203,35 +113,15 @@ class ProviderClient(ABC):
             raise ProviderUnavailable(self.provider, str(error)) from error
 
     def _raise_for_status(self, error, body=None):
-        try:
-            error_response = json.loads(body) if body else None
-        except (TypeError, ValueError):
-            error_response = body.decode("utf-8", errors="replace") if body else None
         if error.code in (401, 403):
-            raise ProviderAuthError(
-                self.provider,
-                f"HTTP {error.code}",
-                response=error_response,
-                http_status=error.code,
-            )
+            raise ProviderAuthError(self.provider, f"HTTP {error.code}", http_status=error.code)
         if error.code == 404:
-            raise ProviderDataError(
-                self.provider,
-                "not found",
-                response=error_response,
-                http_status=error.code,
-            )
+            raise ProviderDataError(self.provider, "not found", http_status=error.code)
         if error.code == 429:
             raise ProviderRateLimited(
                 self.provider,
                 "HTTP 429",
                 retry_after_seconds=_retry_after_seconds(error.headers),
-                response=error_response,
                 http_status=error.code,
             )
-        raise ProviderError(
-            self.provider,
-            f"HTTP {error.code}",
-            response=error_response,
-            http_status=error.code,
-        )
+        raise ProviderError(self.provider, f"HTTP {error.code}", http_status=error.code)

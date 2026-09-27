@@ -2,9 +2,6 @@ import { catalogueFieldsOf } from './catalogue.js'
 import { directionOf } from './formatting.js'
 import { toNum } from './values.js'
 
-const MARKET_STATE_STORAGE_VERSION = 14
-const MAX_STORED_INSTRUMENTS = 100
-
 function eventIdOf(tick) {
   if (tick?.event_id == null) return null
   const eventId = Number(tick.event_id)
@@ -25,8 +22,7 @@ function spotInstrument(tick, snapshotStreamId = null) {
   const provider = typeof tick.provider === 'string' ? tick.provider : null
   const providerTimestampMs = Date.parse(tick.provider_timestamp ?? '')
   const polledAtMs = Date.parse(tick.received_at ?? '')
-  const staleAfterSeconds = toNum(tick.stale_after_seconds)
-  const closedStaleAfterSeconds = toNum(tick.closed_stale_after_seconds)
+  const staleAtMs = Date.parse(tick.stale_at ?? '')
   return {
     id: provider ? instrumentId(provider, tick.symbol) : tick.symbol,
     symbol: tick.symbol,
@@ -39,6 +35,8 @@ function spotInstrument(tick, snapshotStreamId = null) {
     value: toNum(tick.mid ?? tick.last),
     bid: toNum(tick.bid),
     ask: toNum(tick.ask),
+    buyPrice: toNum(tick.buy_price),
+    sellPrice: toNum(tick.sell_price),
     last: toNum(tick.last),
     previousClose: toNum(tick.previous_close),
     priceBasis: typeof tick.price_basis === 'string' ? tick.price_basis : null,
@@ -49,9 +47,8 @@ function spotInstrument(tick, snapshotStreamId = null) {
     receivedAt: typeof tick.received_at === 'string' ? tick.received_at : null,
     providerTimestampMs: Number.isFinite(providerTimestampMs) ? providerTimestampMs : null,
     polledAtMs: Number.isFinite(polledAtMs) ? polledAtMs : null,
-    staleAfterMs: staleAfterSeconds != null ? staleAfterSeconds * 1000 : null,
-    closedStaleAfterMs:
-      closedStaleAfterSeconds != null ? closedStaleAfterSeconds * 1000 : null,
+    freshness: typeof tick.freshness === 'string' ? tick.freshness : 'MISSING',
+    staleAtMs: Number.isFinite(staleAtMs) ? staleAtMs : null,
     marketOpen: typeof tick.market_open === 'boolean' ? tick.market_open : null,
     watched: tick.watched === true,
     held: tick.held === true,
@@ -75,51 +72,29 @@ function instrumentsFromSnapshot(snapshot) {
     .filter(Boolean)
 }
 
-function mergeInstrument(prev, update) {
-  let sourceRestarted = false
-
-  if (prev) {
-    const providerTimesKnown = Number.isFinite(prev.providerTimestampMs) &&
-      Number.isFinite(update.providerTimestampMs)
-    if (providerTimesKnown && update.providerTimestampMs < prev.providerTimestampMs) {
-      return prev
-    }
-    const sameProviderTime = providerTimesKnown &&
-      update.providerTimestampMs === prev.providerTimestampMs
-    if (
-      sameProviderTime &&
-      Number.isFinite(prev.polledAtMs) &&
-      Number.isFinite(update.polledAtMs) &&
-      update.polledAtMs < prev.polledAtMs
-    ) {
-      return prev
-    }
-    const previousStream = prev.sourceStreamId
-    const nextStream = update.sourceStreamId
-    const streamsKnown = previousStream != null && nextStream != null
-    const streamChanged = streamsKnown && previousStream !== nextStream
-    const previousTime = prev.eventTimeMs
-    const nextTime = update.eventTimeMs
-    const timesKnown = Number.isFinite(previousTime) && Number.isFinite(nextTime)
-
-    if (streamChanged) {
-      if (timesKnown && nextTime < previousTime) return prev
-      sourceRestarted = true
-    } else if (prev.sourceEventId != null && update.sourceEventId != null) {
-      if (update.sourceEventId === prev.sourceEventId) return prev
-      if (update.sourceEventId < prev.sourceEventId) {
-        if (!streamsKnown && timesKnown && nextTime > previousTime) {
-          sourceRestarted = true
-        } else {
-          return prev
-        }
-      }
-    } else if (timesKnown && nextTime <= previousTime) {
-      return prev
-    }
+function isNewer(prev, update) {
+  const providerTimesKnown = Number.isFinite(prev.providerTimestampMs) &&
+    Number.isFinite(update.providerTimestampMs)
+  if (providerTimesKnown && update.providerTimestampMs !== prev.providerTimestampMs) {
+    return update.providerTimestampMs > prev.providerTimestampMs
   }
+  if (
+    Number.isFinite(prev.polledAtMs) &&
+    Number.isFinite(update.polledAtMs) &&
+    update.polledAtMs !== prev.polledAtMs
+  ) {
+    return update.polledAtMs > prev.polledAtMs
+  }
+  if (prev.sourceEventId != null && update.sourceEventId != null) {
+    return update.sourceEventId > prev.sourceEventId
+  }
+  return !(Number.isFinite(prev.eventTimeMs) && Number.isFinite(update.eventTimeMs)) ||
+    update.eventTimeMs > prev.eventTimeMs
+}
 
-  const previous = sourceRestarted ? null : prev
+function mergeInstrument(prev, update) {
+  if (prev && !isNewer(prev, update)) return prev
+  const previous = prev
   const previousValue =
     previous && Number.isFinite(update.value) && Number.isFinite(previous.value)
       ? previous.value
@@ -157,108 +132,13 @@ export function dropInstruments(previous, ids) {
   return Object.fromEntries(kept)
 }
 
-export function reconcileSnapshotInstruments(previous, snapshot, seedStartedMs = null) {
+export function snapshotInstruments(snapshot) {
   const receivedAtMs = Date.now()
   const updates = instrumentsFromSnapshot(snapshot).map((instrument) => ({
     ...instrument,
     receivedAtMs,
   }))
-  const snapshotStreamId = snapshot?.stream_id ?? null
-  if (snapshotStreamId == null) return mergeInstruments(previous, updates)
-
-  const snapshotIds = new Set(updates.map((instrument) => instrument.id))
-  const retained = Object.fromEntries(
-    Object.entries(previous).filter(
-      ([id, instrument]) =>
-        snapshotIds.has(id) ||
-        (instrument.sourceStreamId === snapshotStreamId &&
-          seedStartedMs != null &&
-          instrument.receivedAtMs != null &&
-          instrument.receivedAtMs >= seedStartedMs),
-    ),
-  )
-  return mergeInstruments(retained, updates)
-}
-
-export function instrumentsForStorage(instruments) {
-  return {
-    version: MARKET_STATE_STORAGE_VERSION,
-    instruments: Object.values(instruments ?? {}).slice(0, MAX_STORED_INSTRUMENTS),
-  }
-}
-
-function restoreInstrument(candidate) {
-  if (
-    !candidate ||
-    typeof candidate.id !== 'string' ||
-    candidate.id.length === 0 ||
-    typeof candidate.symbol !== 'string' ||
-    candidate.symbol.length === 0 ||
-    typeof candidate.assetClass !== 'string' ||
-    candidate.assetClass.length === 0
-  ) {
-    return null
-  }
-
-  return {
-    id: candidate.id,
-    symbol: candidate.symbol,
-    name: typeof candidate.name === 'string' ? candidate.name : null,
-    provider: typeof candidate.provider === 'string' ? candidate.provider : null,
-    assetClass: candidate.assetClass,
-    ticketKind: candidate.ticketKind ?? null,
-    label: candidate.label ?? null,
-    currency: typeof candidate.currency === 'string' ? candidate.currency : null,
-    market: typeof candidate.market === 'string' ? candidate.market : null,
-    value: toNum(candidate.value),
-    bid: toNum(candidate.bid),
-    ask: toNum(candidate.ask),
-    last: toNum(candidate.last),
-    previousClose: toNum(candidate.previousClose),
-    priceBasis: typeof candidate.priceBasis === 'string' ? candidate.priceBasis : null,
-    grade: typeof candidate.grade === 'string' ? candidate.grade : null,
-    providerTimestamp: typeof candidate.providerTimestamp === 'string'
-      ? candidate.providerTimestamp
-      : null,
-    receivedAt: typeof candidate.receivedAt === 'string' ? candidate.receivedAt : null,
-    providerTimestampMs: Number.isFinite(candidate.providerTimestampMs)
-      ? candidate.providerTimestampMs
-      : null,
-    polledAtMs: Number.isFinite(candidate.polledAtMs) ? candidate.polledAtMs : null,
-    staleAfterMs: Number.isFinite(candidate.staleAfterMs) ? candidate.staleAfterMs : null,
-    closedStaleAfterMs: Number.isFinite(candidate.closedStaleAfterMs)
-      ? candidate.closedStaleAfterMs
-      : null,
-    marketOpen: typeof candidate.marketOpen === 'boolean' ? candidate.marketOpen : null,
-    watched: candidate.watched === true,
-    held: candidate.held === true,
-    benchmark: candidate.benchmark === true,
-    reference: candidate.reference === true,
-    sourceStreamId:
-      typeof candidate.sourceStreamId === 'string' ? candidate.sourceStreamId : null,
-    sourceEventId: eventIdOf({ event_id: candidate.sourceEventId }),
-    eventTimeMs: Number.isFinite(candidate.eventTimeMs) ? candidate.eventTimeMs : null,
-    receivedAtMs: Number.isFinite(candidate.receivedAtMs) ? candidate.receivedAtMs : null,
-    previousValue: toNum(candidate.previousValue),
-    lastDirection: ['pos', 'neg', 'flat'].includes(candidate.lastDirection)
-      ? candidate.lastDirection
-      : 'flat',
-  }
-}
-
-export function restoreInstruments(payload) {
-  if (
-    payload?.version !== MARKET_STATE_STORAGE_VERSION ||
-    !Array.isArray(payload.instruments)
-  ) {
-    return {}
-  }
-
-  const restored = payload.instruments
-    .slice(0, MAX_STORED_INSTRUMENTS)
-    .map(restoreInstrument)
-    .filter(Boolean)
-  return Object.fromEntries(restored.map((instrument) => [instrument.id, instrument]))
+  return mergeInstruments({}, updates)
 }
 
 function todayChangeOf(instrument) {
@@ -291,28 +171,9 @@ function providerAgeMs(instrument, now) {
 }
 
 export function freshnessOf(instrument, now) {
-  const polledAt = Number.isFinite(instrument.polledAtMs) ? instrument.polledAtMs : null
-  const hasProviderTime = Number.isFinite(instrument.providerTimestampMs)
-  if (!hasProviderTime && polledAt == null) return 'MISSING'
-  if (instrument.grade === 'EOD') {
-    if (!hasProviderTime || !Number.isFinite(instrument.staleAfterMs)) return 'MISSING'
-    return now - instrument.providerTimestampMs <= instrument.staleAfterMs
-      ? 'EOD'
-      : 'STALE'
-  }
-  if (
-    instrument.marketOpen === false &&
-    polledAt != null &&
-    Number.isFinite(instrument.closedStaleAfterMs) &&
-    instrument.closedStaleAfterMs > 0
-  ) {
-    return now - polledAt <= instrument.closedStaleAfterMs ? 'CLOSED' : 'STALE'
-  }
-  if (!hasProviderTime) return 'MISSING'
-  if (!Number.isFinite(instrument.staleAfterMs)) return 'MISSING'
-  return now - instrument.providerTimestampMs <= instrument.staleAfterMs
-    ? 'LIVE'
-    : 'STALE'
+  return Number.isFinite(instrument.staleAtMs) && now > instrument.staleAtMs
+    ? 'STALE'
+    : instrument.freshness ?? 'MISSING'
 }
 
 export function marketRowsOf(instruments, now) {
@@ -390,8 +251,8 @@ function placeholderInstrument(id, provider, item) {
     grade: null,
     providerTimestampMs: null,
     polledAtMs: null,
-    staleAfterMs: null,
-    closedStaleAfterMs: null,
+    freshness: 'MISSING',
+    staleAtMs: null,
     marketOpen: null,
     watched: true,
     held: false,

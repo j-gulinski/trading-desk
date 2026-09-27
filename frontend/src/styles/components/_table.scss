@@ -76,12 +76,6 @@
   gap: 1px;
   white-space: nowrap;
 }
-.money-cell__comparison {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1.2;
-}
 
 // Row tones: muted for stale/final rows, a short flash on an accepted update.
 .data-table__row--muted td {
@@ -120,7 +114,7 @@
   text-align: inherit;
   cursor: pointer;
 
-  &:hover:not([aria-disabled='true']) {
+  &:hover {
     color: var(--text-primary);
     background: var(--bg-panel-hover);
   }
@@ -129,10 +123,6 @@
     z-index: 1;
     outline: 2px solid var(--accent);
     outline-offset: -2px;
-  }
-  &[aria-disabled='true'] {
-    opacity: 0.48;
-    cursor: help;
   }
 }
 .data-table__sort--num {

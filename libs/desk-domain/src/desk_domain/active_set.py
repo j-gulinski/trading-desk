@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from desk_runtime.config import BENCHMARK_PROVIDER, BENCHMARK_SYMBOL, DEFAULT_QUOTE_PROVIDER
+from desk_runtime.config import BENCHMARK_PROVIDER, BENCHMARK_SYMBOL
 from desk_runtime.db import session_scope
 from desk_domain.instruments import instrument_type_for
 from desk_domain.models import Instrument, Trade
@@ -85,7 +85,7 @@ def load_active_set(session=None):
         if instrument_type.underlying_field:
             symbol, asset_class, currency = underlying, underlying_class, underlying_currency
         held[symbol] = (asset_class, currency)
-        holders.setdefault(symbol, set()).add(provider or DEFAULT_QUOTE_PROVIDER)
+        holders.setdefault(symbol, set()).add(provider)
 
     entries = {}
     for symbol, (asset_class, currency) in held.items():

@@ -6,14 +6,12 @@ import { normalizeAuditEvents } from '../../domain/auditEvents.js'
 import { tradeDetailOf } from '../../domain/trades.js'
 import { buildCloseTradeIntent } from '../../domain/tradeActions.js'
 import { describeApiError } from '../../domain/apiErrors.js'
-import { curveOf } from '../../domain/curves.js'
-import { ticketKindOf } from '../../domain/catalogue.js'
 import { BLOTTER_POLL_INTERVAL_MS } from '../../config/trades.js'
 import TradeDetailPanel from '../../components/trades/TradeDetailPanel.jsx'
 
 const CLOSE_STALL_MS = 15000
 
-export default function TradeDetail({ row, bookNames, instruments, curves, onClose }) {
+export default function TradeDetail({ row, bookNames, instruments, onClose }) {
   const detail = usePolling(
     ({ signal }) => apiGet(endpoints.blotter.trade(row.trade.id), { signal }),
     { intervalMs: BLOTTER_POLL_INTERVAL_MS },
@@ -23,54 +21,13 @@ export default function TradeDetail({ row, bookNames, instruments, curves, onClo
 
   const [closing, setClosing] = useState(false)
   const [closeNote, setCloseNote] = useState(null)
-  const [entryCurve, setEntryCurve] = useState(null)
-  const [valuationCurve, setValuationCurve] = useState(null)
   const stallTimer = useRef(null)
   const modelPriced = row.trade.modelPriced
   const closingSide = row.trade.side === 'SELL' ? 'BUY' : 'SELL'
   const marketQuote = instruments?.[`${row.trade.provider}:${row.trade.symbol}`] ?? null
-  const quotedClose = closingSide === 'BUY' ? marketQuote?.ask : marketQuote?.bid
   const closeReference = modelPriced
     ? row.valuation?.price
-    : Number.isFinite(quotedClose)
-      ? quotedClose
-      : marketQuote?.value
-
-  const curveName = row.trade.terms?.discount_curve
-  const curveProvider = row.trade.terms?.discount_curve_provider
-  const curveAsOf = row.trade.terms?.discount_curve_as_of
-  const valuationCurveAsOf = row.valuation?.curveAsOf
-  const feedCurve = curveName ? curves?.[curveName] ?? null : null
-
-  useEffect(() => {
-    if (ticketKindOf(row.trade) !== 'bond' || !curveName || !curveProvider || !curveAsOf) return
-    const controller = new AbortController()
-    apiGet(
-      endpoints.marketData.curveRevision(curveProvider, curveName, curveAsOf),
-      { signal: controller.signal },
-    )
-      .then((data) => setEntryCurve(curveOf(data)))
-      .catch(() => setEntryCurve(null))
-    return () => controller.abort()
-  }, [curveAsOf, curveName, curveProvider, row.trade.ticketKind])
-
-  useEffect(() => {
-    if (
-      ticketKindOf(row.trade) !== 'bond' || !curveName || !curveProvider ||
-      !valuationCurveAsOf || feedCurve?.asOfDate === valuationCurveAsOf
-    ) {
-      setValuationCurve(null)
-      return
-    }
-    const controller = new AbortController()
-    apiGet(
-      endpoints.marketData.curveRevision(curveProvider, curveName, valuationCurveAsOf),
-      { signal: controller.signal },
-    )
-      .then((data) => setValuationCurve(curveOf(data)))
-      .catch(() => setValuationCurve(null))
-    return () => controller.abort()
-  }, [curveName, curveProvider, feedCurve?.asOfDate, row.trade.ticketKind, valuationCurveAsOf])
+    : closingSide === 'BUY' ? marketQuote?.buyPrice : marketQuote?.sellPrice
 
   useEffect(() => {
     if (!closing || detailStatus == null || detailStatus === 'ACTIVE') {
@@ -110,8 +67,6 @@ export default function TradeDetail({ row, bookNames, instruments, curves, onClo
     <TradeDetailPanel
       row={row}
       detail={detailData}
-      entryCurve={entryCurve}
-      currentCurve={feedCurve?.asOfDate === valuationCurveAsOf ? feedCurve : valuationCurve}
       auditEvents={normalizeAuditEvents(detail.data?.audit_logs)}
       loading={detail.loading}
       error={detail.error}

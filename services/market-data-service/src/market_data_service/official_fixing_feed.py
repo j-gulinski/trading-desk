@@ -1,49 +1,97 @@
 import time
+from abc import ABC, abstractmethod
+from datetime import datetime, time as time_of_day, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from desk_runtime.functions import utcnow
 from desk_runtime.logging_config import get_logger
-from market_data_service import quote_lifecycle, quote_store
-from market_data_service.quote_cleanup import cleanup_reference_drops
+from market_data_service import quote_board
 from market_data_service.config import (
     OFFICIAL_FIXING_FEED_CONFIRM_SECONDS,
     OFFICIAL_FIXING_FEED_LOOP_SLEEP_SECONDS,
-    OFFICIAL_FIXING_FEED_UNIVERSE_REFRESH_SECONDS,
+    OFFICIAL_FIXING_FEED_PUBLICATION_GRACE_SECONDS,
     OFFICIAL_FIXING_FEED_WINDOW_RETRY_SECONDS,
     SERVICE_NAME,
 )
-from market_data_service.publisher import publish_quote
-from market_data_service.quote_audit import audit_quote_write
-from desk_domain.quotes import wire_tick
+from market_data_service.providers.base import ProviderDataError
 
 log = get_logger(SERVICE_NAME)
 
+BUSINESS_WEEKDAYS = range(5)
 
-class OfficialFixingFeed:
-    def __init__(self, provider, runtime, calendar, universe_fn, fetch_fn):
+
+class PublicationCalendar:
+    """The local business-day window in which an official fixing is published."""
+
+    def __init__(self, tz_name, window_start, window_end):
+        self.tz = ZoneInfo(tz_name)
+        self.window_start = time_of_day(*window_start)
+        self.window_end = time_of_day(*window_end)
+
+    def source_today(self, now):
+        return now.astimezone(self.tz).date()
+
+    def in_window(self, now):
+        local = now.astimezone(self.tz)
+        return (
+            local.weekday() in BUSINESS_WEEKDAYS
+            and self.window_start <= local.time() <= self.window_end
+        )
+
+    def _next_publication_end(self, after_date):
+        day = after_date + timedelta(days=1)
+        while day.weekday() not in BUSINESS_WEEKDAYS:
+            day += timedelta(days=1)
+        return datetime.combine(day, self.window_end, tzinfo=self.tz)
+
+    def stale_after_seconds(self, as_of_date):
+        as_of = datetime.combine(as_of_date, time_of_day(0, 0), tzinfo=timezone.utc)
+        deadline = self._next_publication_end(as_of_date).astimezone(timezone.utc)
+        return round(
+            (deadline - as_of).total_seconds()
+            + OFFICIAL_FIXING_FEED_PUBLICATION_GRACE_SECONDS
+        )
+
+    def next_window_seconds(self, now):
+        if self.in_window(now):
+            return 0
+        local = now.astimezone(self.tz)
+        day = local.date()
+        if local.weekday() not in BUSINESS_WEEKDAYS or local.time() > self.window_start:
+            day = self._next_publication_end(day).date()
+        opens = datetime.combine(day, self.window_start, tzinfo=self.tz)
+        return round((opens - local).total_seconds())
+
+    def describe_window(self):
+        start = self.window_start.strftime("%H:%M")
+        end = self.window_end.strftime("%H:%M")
+        city = self.tz.key.split("/")[-1].replace("_", " ")
+        return f"{start}–{end} {city} time, business days"
+
+
+class OfficialFixingFeed(ABC):
+    """Polls one official fixing table around its publication window."""
+
+    def __init__(self, provider, runtime, client, calendar):
         self.provider = provider
         self.runtime = runtime
+        self.client = client
         self.calendar = calendar
-        self.universe_fn = universe_fn
-        self.fetch_fn = fetch_fn
-        self._universe = frozenset()
-        self._universe_loaded_at = 0.0
         self._last_fetch = None
         self._latest_as_of = None
 
-    def reload_universe(self):
-        previous = self._universe
-        self._universe = self.universe_fn()
-        self._universe_loaded_at = time.monotonic()
-        cleanup_reference_drops(
-            self.provider,
-            previous - self._universe,
-            self.universe_fn,
-        )
+    @abstractmethod
+    def fetch(self, symbols):
+        """Reference quotes published for symbols."""
 
-    def universe(self):
-        if not self._universe:
-            self.reload_universe()
-        return self._universe
+    def request_cost(self, symbols):
+        return 1
+
+    def symbols(self):
+        return quote_board.fixing_symbols(self.provider)
+
+    def active_symbols(self):
+        return sorted(self.symbols())
 
     def _classifier(self, as_of_date):
         return {
@@ -55,38 +103,26 @@ class OfficialFixingFeed:
     def _store_round(self, quotes):
         ticks = {}
         for quote in quotes:
-            with quote_lifecycle.locked_keys(quote.symbol, (self.provider,)):
-                if quote.symbol not in self.universe_fn():
-                    log.info(
-                        "reference_observation_dropped_after_universe_change",
-                        provider=self.provider,
-                        symbol=quote.symbol,
-                    )
-                    continue
-                classifier = self._classifier(quote.provider_timestamp.date())
-                changed, created, accepted = quote_store.store_quote(quote, classifier)
-                if not accepted:
-                    log.info(
-                        "older_reference_observation_ignored",
-                        provider=self.provider,
-                        symbol=quote.symbol,
-                    )
-                    continue
-                if changed:
-                    audit_quote_write(self.provider, quote, created)
-                tick = wire_tick(quote, classifier, reference=True)
-                publish_quote(tick)
-            ticks[quote.symbol] = tick
             as_of = quote.provider_timestamp.date()
+            try:
+                ticks[quote.symbol] = quote_board.store_and_publish(quote, self._classifier(as_of))
+            except ProviderDataError as error:
+                log.info("official_fixing_not_stored", provider=self.provider,
+                         symbol=quote.symbol, detail=error.detail)
+                continue
             if self._latest_as_of is None or as_of > self._latest_as_of:
                 self._latest_as_of = as_of
         return ticks
 
     def _fetch_round(self):
         self._last_fetch = time.monotonic()
+        symbols = self.active_symbols()
+        cost = self.request_cost(symbols)
+        refusal = self.runtime.acquire(cost, calls=cost)
+        if refusal is not None:
+            return {}, refusal
         quotes, error = self.runtime.guarded(
-            lambda: self.fetch_fn(sorted(self.universe())),
-            "official_fixing_unavailable",
+            lambda: self.fetch(symbols), "official_fixing_unavailable",
         )
         if error is not None:
             return {}, error
@@ -112,15 +148,11 @@ class OfficialFixingFeed:
             time.sleep(OFFICIAL_FIXING_FEED_LOOP_SLEEP_SECONDS)
 
     def _poll_tick(self):
-        # paused by a cooldown: wait, poll nothing
+        # paused by a cooldown: poll nothing
         if self.runtime.cooldown_seconds_left() > 0:
             return
-        # re-read defaults + settlement currencies of open trades
-        if (
-            time.monotonic() - self._universe_loaded_at
-            >= OFFICIAL_FIXING_FEED_UNIVERSE_REFRESH_SECONDS
-        ):
-            self.reload_universe()
+        # served fixings: defaults + settlement currencies of trades
+        quote_board.reload_if_stale()
         # window polling until a new as-of appears, else bounded confirmation polls
         if self._last_fetch is None or (
             time.monotonic() - self._last_fetch >= self._retry_interval(utcnow())
@@ -128,36 +160,36 @@ class OfficialFixingFeed:
             self._fetch_round()
 
     def refresh_symbol(self, symbol):
-        self.reload_universe()
-        if symbol not in self._universe:
+        """Fetches the fixing table now; returns (tick, error, http_status)."""
+        if symbol not in self.symbols():
+            quote_board.reload()
+        if symbol not in self.symbols():
             return None, f"{symbol} is not in the {self.provider} reference set", 404
-        cooldown_left = self.runtime.cooldown_seconds_left()
-        if cooldown_left > 0:
-            return None, (
-                f"{self.provider} is {self.runtime.status()}: "
-                f"retry in {round(cooldown_left)}s"
-            ), 503
+        unavailable = self.runtime.unavailable()
+        if unavailable is not None:
+            return None, unavailable, 503
         ticks, error = self._fetch_round()
         tick = ticks.get(symbol)
         if tick is None:
             return None, error or f"{self.provider} has not published {symbol}", 502
         return tick, None, 200
 
-    def refresh_table(self):
-        self.reload_universe()
+    def refresh_all(self):
+        """Fetches the fixing table now; returns (refreshed, skipped)."""
+        quote_board.reload_if_stale()
+        symbols = self.active_symbols()
         if self.runtime.cooldown_seconds_left() > 0:
             reason = f"{self.provider} is {self.runtime.status()}"
             return [], [{"provider": self.provider, "symbol": symbol, "reason": reason}
-                        for symbol in sorted(self._universe)]
+                        for symbol in symbols]
         ticks, error = self._fetch_round()
-        refreshed = [{"provider": self.provider, "symbol": symbol}
-                     for symbol in sorted(ticks)]
+        refreshed = [{"provider": self.provider, "symbol": symbol} for symbol in sorted(ticks)]
         skipped = [{"provider": self.provider, "symbol": symbol,
                     "reason": error or "no published fixing"}
-                   for symbol in sorted(self._universe - set(ticks))]
+                   for symbol in symbols if symbol not in ticks]
         return refreshed, skipped
 
-    def poll_strategy(self):
+    def strategy(self):
         now = utcnow()
         window = self.calendar.describe_window()
         next_window = self.calendar.next_window_seconds(now)
@@ -181,11 +213,8 @@ class OfficialFixingFeed:
             "description": f"fixings {window} · {state}",
         }
 
-    def active_symbols(self):
-        return sorted(self.universe())
-
     def runtime_snapshot(self):
         return {
             **self.runtime.snapshot(self.active_symbols()),
-            "strategy": self.poll_strategy(),
+            "strategy": self.strategy(),
         }

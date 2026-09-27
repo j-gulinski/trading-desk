@@ -1,9 +1,7 @@
-from decimal import Decimal
-
 from desk_domain.freshness import FreshnessState, classify
 from desk_runtime.functions import utcnow
 from desk_domain.models import MarketDataSnapshot, MarketDataSpotPrice
-from desk_domain.quotes import PriceBasis
+from desk_domain.quotes import PriceBasis, execution_price
 
 
 class Quote:
@@ -20,8 +18,7 @@ class Quote:
         self.state = state
 
     def price_for(self, side):
-        quoted = self.ask if side == "BUY" else self.bid
-        return quoted if quoted is not None else self.mid
+        return execution_price(self.bid, self.ask, self.mid, side)
 
     def executed_basis(self, side):
         quoted = self.ask if side == "BUY" else self.bid
@@ -37,13 +34,13 @@ def current_quote(session, provider, symbol):
     if row is None:
         return None, FreshnessState.MISSING
     state = classify(
-        True,
         row.provider_timestamp,
         row.received_at,
         utcnow(),
         row.stale_after_seconds,
         market_open=row.market_open,
         closed_stale_after_seconds=row.closed_stale_after_seconds,
+        grade=row.quote_grade,
     )
     snapshot = (
         session.get(MarketDataSnapshot, row.latest_snapshot_id)
@@ -70,30 +67,3 @@ class ModelQuote:
     def executed_basis(self, side):
         return "MODEL_PV"
 
-
-def is_parseable_price(seen):
-    if seen in (None, ""):
-        return False
-    try:
-        value = Decimal(str(seen))
-    except (ArithmeticError, ValueError, TypeError):
-        return False
-    return value.is_finite()
-
-
-def is_positive_price(seen):
-    if not is_parseable_price(seen):
-        return False
-    return Decimal(str(seen)) > 0
-
-
-def deviation_percent(executed, seen):
-    if seen in (None, "") or executed in (None, 0):
-        return None
-    try:
-        seen_price = Decimal(str(seen))
-    except (ArithmeticError, ValueError, TypeError):
-        return None
-    if not seen_price.is_finite() or seen_price <= 0:
-        return None
-    return abs(executed - seen_price) / abs(seen_price) * 100

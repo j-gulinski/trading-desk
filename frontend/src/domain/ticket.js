@@ -37,7 +37,7 @@ export function ticketFieldsOf(schema, terms = {}) {
   const fields = (schema?.fields ?? []).filter((field) => field.hidden !== true)
   const model = selectedModelOf(schema, terms)
   if (model?.needs_curve === false) {
-    return fields.filter((field) => field.name !== 'discount_curve' && field.name !== 'projection_curve')
+    return fields.filter((field) => field.name !== 'discount_curve')
   }
   return fields
 }

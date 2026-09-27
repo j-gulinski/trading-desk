@@ -124,7 +124,6 @@ function PositionList({ positions }) {
 
 export default function BookCard({
   book,
-  reported,
   expanded,
   positions,
   onToggleExpand,
@@ -132,6 +131,8 @@ export default function BookCard({
   onMove,
   onDelete,
 }) {
+  const { reported } = book
+
   return (
     <article
       className={`book-tile${expanded ? ' book-tile--expanded' : ''}${
@@ -152,25 +153,25 @@ export default function BookCard({
       <div className="book-tile__pnl">
         <PnlMetric
           label={`Gross entry · ${reported.currency}`}
-          value={reported.values?.grossEntry ?? null}
+          value={reported.values.grossEntry}
           title={reported.title}
           signed={false}
         />
         <PnlMetric
           label={`Unrealized · ${reported.currency}`}
-          value={reported.values?.unrealized ?? null}
+          value={reported.values.unrealized}
           title={reported.title}
         />
         {book.closedTrades > 0 && (
           <>
             <PnlMetric
               label={`Realized · ${reported.currency}`}
-              value={reported.values?.realized ?? null}
+              value={reported.values.realized}
               title={reported.title}
             />
             <PnlMetric
               label={`Total PnL · ${reported.currency}`}
-              value={reported.values?.total ?? null}
+              value={reported.values.total}
               title={reported.title}
             />
           </>

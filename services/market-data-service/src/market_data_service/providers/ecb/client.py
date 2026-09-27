@@ -15,9 +15,7 @@ class EcbClient(ProviderClient):
 
     def classify_body(self, payload):
         if not payload.get("rows"):
-            raise ProviderDataError(
-                self.provider, "empty csvdata response", response=payload
-            )
+            raise ProviderDataError(self.provider, "empty csvdata response")
 
     def exchange_rates(self, currency_codes):
         series = f"D.{'+'.join(sorted(currency_codes))}.EUR.SP00.A"

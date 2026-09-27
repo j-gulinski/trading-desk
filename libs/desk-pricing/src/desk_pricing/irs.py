@@ -2,7 +2,7 @@
 
 import math
 
-from desk_pricing.curves import discount_factor, forward_rate
+from desk_pricing.curves import discount_factor, forward_rate, par_rate
 
 
 def irs_valuation(meta, curve):
@@ -17,7 +17,6 @@ def irs_valuation(meta, curve):
 
     periods = max(1, int(math.ceil(maturity * payments_per_year)))
     regular_accrual = 1.0 / payments_per_year
-    annuity = 0.0
     fixed_leg_pv = 0.0
     floating_leg_pv = 0.0
     previous_payment_time = 0.0
@@ -25,7 +24,6 @@ def irs_valuation(meta, curve):
         payment_time = min(period * regular_accrual, maturity)
         period_accrual = payment_time - previous_payment_time
         payment_discount = discount_factor(curve, payment_time)
-        annuity += notional * period_accrual * payment_discount
         fixed_cashflow = notional * fixed_rate * period_accrual
         fixed_leg_pv += fixed_cashflow * payment_discount
         floating_cashflow = notional * forward_rate(
@@ -38,5 +36,6 @@ def irs_valuation(meta, curve):
         price = -price
     elif meta["direction"] != "PAY_FIXED_RECEIVE_FLOAT":
         raise ValueError("unsupported IRS direction")
+    fair = par_rate(curve, maturity, payments_per_year)
     return price, {"fixed_leg_pv": fixed_leg_pv, "floating_leg_pv": floating_leg_pv,
-                   "par_rate": floating_leg_pv / annuity * 100 if annuity else None}
+                   "par_rate": fair * 100 if fair is not None else None}

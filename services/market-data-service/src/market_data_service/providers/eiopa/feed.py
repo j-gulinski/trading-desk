@@ -11,12 +11,7 @@ from desk_domain.providers import EIOPA
 
 curve_feed = CurveFeed(
     EIOPA,
-    ProviderRuntime(
-        EIOPA,
-        EIOPA_REQUEST_BUDGET_PER_MINUTE,
-        True,
-        keyless=True,
-    ),
+    ProviderRuntime(EIOPA, keyless=True, per_minute=EIOPA_REQUEST_BUDGET_PER_MINUTE),
     EiopaClient(),
     tuple(
         CurveBuilder(

@@ -13,11 +13,13 @@ def get_book(session, book_id):
     return session.get(Book, book_id)
 
 
-def get_active_book(session, book_id):
-    book = session.get(Book, book_id)
-    if book is None or not book.is_active:
-        return None
-    return book
+def lock_active_book(session, book_id):
+    return (
+        session.query(Book)
+        .filter(Book.book_id == book_id, Book.is_active.is_(True))
+        .with_for_update(read=True)
+        .one_or_none()
+    )
 
 
 def trade_by_client_request_id(session, client_request_id):
@@ -82,10 +84,6 @@ def active_trade(session, trade_id):
         .filter(Trade.trade_id == trade_id, Trade.status == "ACTIVE")
         .one_or_none()
     )
-
-
-def active_trades(session):
-    return session.query(Trade).filter(Trade.status == "ACTIVE").all()
 
 
 def close_trade(

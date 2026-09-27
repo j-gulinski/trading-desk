@@ -118,17 +118,6 @@ def resolve_rate(from_ccy, to_ccy, rates):
     }
 
 
-def convert(amount, from_ccy, to_ccy, rates=None):
-    if rates is None:
-        rates = load_official_rates()
-    resolution = resolve_rate(from_ccy, to_ccy, rates)
-    converted = (
-        Decimal(str(amount)) * resolution["rate"]
-        if resolution["rate"] is not None else None
-    )
-    return {**resolution, "from": from_ccy, "to": to_ccy, "converted": converted}
-
-
 def rates_to(to_ccy, rates=None):
     if rates is None:
         rates = load_official_rates()

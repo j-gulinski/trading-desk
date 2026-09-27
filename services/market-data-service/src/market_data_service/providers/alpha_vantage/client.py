@@ -20,22 +20,10 @@ class AlphaVantageClient(ProviderClient):
         if message:
             detail = str(message)
             if "api key" in detail.lower() and "invalid" in detail.lower():
-                raise ProviderAuthError(
-                    self.provider,
-                    "provider rejected the API key",
-                    response=payload,
-                )
-            raise ProviderRateLimited(
-                self.provider,
-                "provider returned a throttling notice",
-                response=payload,
-            )
+                raise ProviderAuthError(self.provider, "provider rejected the API key")
+            raise ProviderRateLimited(self.provider, "provider returned a throttling notice")
         if payload.get("Error Message"):
-            raise ProviderDataError(
-                self.provider,
-                "provider rejected the request",
-                response=payload,
-            )
+            raise ProviderDataError(self.provider, "provider rejected the request")
 
     def quote(self, symbol, asset_class):
         if asset_class == "EQUITY":

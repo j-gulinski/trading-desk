@@ -6,8 +6,8 @@ export default function TradeSubmitted({ summary, provider, modelPriced, tradeId
   return (
     <SidePanel
       eyebrow="TRADE ACTION"
-      title="Trade submitted"
-      subtitle="The order was accepted for processing"
+      title="Trade opened"
+      subtitle="The position is in the book"
       dismissOnOutsideClick={false}
       onClose={onClose}
     >

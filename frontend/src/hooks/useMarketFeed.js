@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { apiGet } from '../services/apiClient.js'
 import { endpoints } from '../services/endpoints.js'
 import { useBufferedUpdates } from './useBufferedUpdates.js'
@@ -6,15 +6,12 @@ import { useSseStream } from './useSseStream.js'
 import { STORAGE_KEYS } from '../config/storage.js'
 import { useStreamSeed } from './useStreamSeed.js'
 import { STREAM_EVENTS } from '../config/marketData.js'
-import { STREAM_STATUS } from '../config/stream.js'
 import {
   dropInstruments,
   instrumentId,
-  instrumentsForStorage,
   instrumentsFromEvent,
   mergeInstruments,
-  reconcileSnapshotInstruments,
-  restoreInstruments,
+  snapshotInstruments,
 } from '../domain/marketData.js'
 import { curveOf, curvesFromSnapshot, mergeCurves } from '../domain/curves.js'
 
@@ -35,37 +32,13 @@ function storeTickCount(count) {
   }
 }
 
-function readStoredInstruments() {
-  try {
-    const stored = window.sessionStorage.getItem(STORAGE_KEYS.marketFeedState)
-    return restoreInstruments(stored ? JSON.parse(stored) : null)
-  } catch {
-    return {}
-  }
-}
-
-function storeInstruments(instruments) {
-  try {
-    window.sessionStorage.setItem(
-      STORAGE_KEYS.marketFeedState,
-      JSON.stringify(instrumentsForStorage(instruments)),
-    )
-  } catch {
-    return
-  }
-}
-
 export function useMarketFeed() {
-  const [instruments, setInstruments] = useState(readStoredInstruments)
+  const [instruments, setInstruments] = useState({})
   const [curves, setCurves] = useState({})
   const [tickCount, setTickCount] = useState(readStoredTickCount)
   const receivedTicksRef = useRef(tickCount)
   const reconcilingRef = useRef(false)
   const bufferedEventsRef = useRef([])
-
-  useEffect(() => {
-    storeInstruments(instruments)
-  }, [instruments])
 
   const {
     push: pushUpdate,
@@ -137,7 +110,7 @@ export function useMarketFeed() {
       reconcilingRef.current = false
 
       setInstruments(() => {
-        let next = reconcileSnapshotInstruments({}, snapshot)
+        let next = snapshotInstruments(snapshot)
         for (const { name, data } of afterSnapshot) {
           if (name === 'market_remove') {
             const ids = (Array.isArray(data?.rows) ? data.rows : [])
@@ -169,19 +142,11 @@ export function useMarketFeed() {
       setTickCount(receivedTicksRef.current)
       storeTickCount(receivedTicksRef.current)
     }).catch((error) => {
-      const buffered = reconcilingRef.current ? bufferedEventsRef.current : []
       bufferedEventsRef.current = []
       reconcilingRef.current = false
-      for (const { name, data } of buffered) applyLiveEvent(name, data)
       throw error
     })
-  }, { initial: false })
-
-  useEffect(() => {
-    if (seedStatus !== 'error' || status !== STREAM_STATUS.connected) return undefined
-    const timer = window.setTimeout(reconnect, 2000)
-    return () => window.clearTimeout(timer)
-  }, [reconnect, seedStatus, status])
+  }, { initial: false, reconnect })
 
   return useMemo(
     () => ({

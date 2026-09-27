@@ -58,7 +58,7 @@ def black_scholes(terms, spot, curve):
         "price": black_scholes_price(
             spot, terms["strike"], maturity,
             discount_factor(curve, maturity),
-            terms.get("volatility", 0.22),
+            terms["volatility"],
             terms["option_type"],
         )
     }

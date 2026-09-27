@@ -24,13 +24,7 @@ function tradeValueText(trade, value) {
   return withUnit(formatMarkAmount(trade, value), priceUnitLabelOf(trade))
 }
 
-export default function TradeCell({
-  column,
-  row,
-  onSelect,
-  comparisonValue,
-  comparisonCurrency,
-}) {
+export default function TradeCell({ column, row, onSelect }) {
   const { trade, valuation, valuationStatus } = row
 
   switch (column.id) {
@@ -79,8 +73,6 @@ export default function TradeCell({
         <MoneyCell
           value={valuation?.fairValue}
           currency={valuation?.currency ?? trade.currency}
-          comparisonValue={comparisonValue}
-          comparisonCurrency={comparisonCurrency}
         />
       )
     case 'pnl':
@@ -89,8 +81,6 @@ export default function TradeCell({
           value={row.pnl}
           currency={valuation?.currency ?? trade.currency}
           signed
-          comparisonValue={comparisonValue}
-          comparisonCurrency={comparisonCurrency}
         />
       )
     case 'return':

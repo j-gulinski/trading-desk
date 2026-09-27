@@ -14,8 +14,7 @@ def _symbol_list(name, default):
 SERVICE_NAME = "market-data-service"
 PORT = SERVICE_PORTS[SERVICE_NAME]
 
-# Cross-provider policy. Provider-published limits are converted to the safer
-# operating budgets below; these settings do not belong to one adapter.
+# Cross-provider budget policy.
 PROVIDER_BUDGET_USAGE_PERCENT = env_int("PROVIDER_BUDGET_USAGE_PERCENT", 90)
 PROVIDER_ACTIVE_WINDOW_HOURS = env_int("PROVIDER_ACTIVE_WINDOW_HOURS", 12)
 
@@ -108,16 +107,13 @@ TRANSIENT_ERROR_BACKOFF_SECONDS = 10
 SYMBOL_SEARCH_CACHE_SECONDS = 600
 SYMBOL_SEARCH_RESULT_LIMIT = 10
 
-# Shared OfficialFixingFeed mechanics used by the NBP and ECB adapters. These are
-# application polling choices, not provider-published request limits.
+# OfficialFixingFeed polling (NBP, ECB).
 OFFICIAL_FIXING_FEED_WINDOW_RETRY_SECONDS = 300
 OFFICIAL_FIXING_FEED_CONFIRM_SECONDS = 3600
-OFFICIAL_FIXING_FEED_UNIVERSE_REFRESH_SECONDS = 60
 OFFICIAL_FIXING_FEED_LOOP_SLEEP_SECONDS = 15
 OFFICIAL_FIXING_FEED_PUBLICATION_GRACE_SECONDS = 4 * 3600
 
-# Shared CurveFeed mechanics. Each provider package chooses which builders and
-# per-curve cadence it registers; these are only common defaults/failure retry.
+# CurveFeed defaults.
 CURVE_FEED_LOOP_SLEEP_SECONDS = 15
 CURVE_REFETCH_SECONDS = env_int("CURVE_REFETCH_SECONDS", 6 * 3600)
 CURVE_RETRY_SECONDS = 900

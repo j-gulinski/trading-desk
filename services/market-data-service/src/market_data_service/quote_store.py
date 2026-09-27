@@ -1,10 +1,8 @@
 import uuid
 
-from sqlalchemy.exc import IntegrityError
-
 from desk_runtime.db import session_scope
 from desk_runtime.functions import utcnow
-from desk_domain.models import MarketDataSnapshot, MarketDataSpotPrice
+from desk_domain.models import MarketDataSnapshot, MarketDataSpotPrice, Trade
 from desk_domain.quotes import quote_market, quote_name
 
 PRICE_FIELDS = ("bid", "ask", "last", "mid")
@@ -22,7 +20,8 @@ BOARD_EXTRA_FIELDS = ("previous_close",)
 CLASSIFIER_FIELDS = ("stale_after_seconds", "closed_stale_after_seconds", "market_open")
 
 
-def _store_quote(quote, classifier):
+def store_quote(quote, classifier):
+    """Upserts the board row, snapshotting changed prices; False for an older observation."""
     with session_scope() as session:
         row = (
             session.query(MarketDataSpotPrice)
@@ -44,12 +43,11 @@ def _store_quote(quote, classifier):
                 and quote.received_at <= row.received_at
             )
             if older_provider_clock or older_receive_clock:
-                return False, False, False
+                return False
         changed = row is None or any(
             getattr(row, field) != getattr(quote, field) for field in PRICE_FIELDS
         )
         now = utcnow()
-        created = row is None
         if row is None:
             row = MarketDataSpotPrice(
                 market_data_id=uuid.uuid4(),
@@ -74,32 +72,20 @@ def _store_quote(quote, classifier):
             )
             session.flush()
             row.latest_snapshot_id = snapshot_id
-        return changed, created, True
+        return True
 
 
-def store_quote(quote, classifier):
-    try:
-        return _store_quote(quote, classifier)
-    except IntegrityError:
-        # Two first polls can race before there is a board row to lock.
-        return _store_quote(quote, classifier)
-
-
-def board_rows(provider=None, symbol=None):
+def board_rows():
     with session_scope() as session:
-        query = session.query(
-            MarketDataSpotPrice, MarketDataSnapshot.raw_payload
-        ).outerjoin(
-            MarketDataSnapshot,
-            MarketDataSnapshot.snapshot_id == MarketDataSpotPrice.latest_snapshot_id,
+        rows = (
+            session.query(MarketDataSpotPrice, MarketDataSnapshot.raw_payload)
+            .outerjoin(
+                MarketDataSnapshot,
+                MarketDataSnapshot.snapshot_id == MarketDataSpotPrice.latest_snapshot_id,
+            )
+            .order_by(MarketDataSpotPrice.provider, MarketDataSpotPrice.symbol)
+            .all()
         )
-        if provider is not None:
-            query = query.filter(MarketDataSpotPrice.provider == provider)
-        if symbol is not None:
-            query = query.filter(MarketDataSpotPrice.symbol == symbol)
-        rows = query.order_by(
-            MarketDataSpotPrice.provider, MarketDataSpotPrice.symbol
-        ).all()
         return [
             {
                 **{field: getattr(row, field) for field in QUOTE_FIELDS + BOARD_EXTRA_FIELDS},
@@ -161,9 +147,34 @@ def quote_clocks(provider, symbol):
         return tuple(row) if row is not None else (None, None)
 
 
-def delete_board_rows(symbol, providers=None):
+def delete_board_row(provider, symbol):
     with session_scope() as session:
-        query = session.query(MarketDataSpotPrice).filter_by(symbol=symbol)
-        if providers is not None:
-            query = query.filter(MarketDataSpotPrice.provider.in_(list(providers)))
-        return query.delete(synchronize_session=False)
+        return (
+            session.query(MarketDataSpotPrice)
+            .filter_by(provider=provider, symbol=symbol)
+            .delete(synchronize_session=False)
+        )
+
+
+def delete_snapshots_before(cutoff):
+    """Deletes older snapshots that no trade or board row references; returns how many."""
+    with session_scope() as session:
+        by_trades = session.query(Trade.entry_snapshot_id).filter(
+            Trade.entry_snapshot_id.isnot(None)
+        )
+        by_closes = session.query(Trade.close_snapshot_id).filter(
+            Trade.close_snapshot_id.isnot(None)
+        )
+        by_board = session.query(MarketDataSpotPrice.latest_snapshot_id).filter(
+            MarketDataSpotPrice.latest_snapshot_id.isnot(None)
+        )
+        return (
+            session.query(MarketDataSnapshot)
+            .filter(
+                MarketDataSnapshot.received_at < cutoff,
+                ~MarketDataSnapshot.snapshot_id.in_(by_trades),
+                ~MarketDataSnapshot.snapshot_id.in_(by_closes),
+                ~MarketDataSnapshot.snapshot_id.in_(by_board),
+            )
+            .delete(synchronize_session=False)
+        )

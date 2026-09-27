@@ -72,7 +72,6 @@ export function useTableState({
   fallbackSort = defaultSort,
   captureSnapshot,
   hasRows = true,
-  isSortable = (column) => Boolean(column?.sortable),
 }) {
   const allColumnIds = useMemo(() => columns.map((column) => column.id), [columns])
   const columnById = useMemo(
@@ -140,7 +139,7 @@ export function useTableState({
 
   function toggleSort(column) {
     const config = columnById.get(column)
-    if (!isSortable(config)) return
+    if (!config?.sortable) return
     const direction =
       sort.column === column
         ? sort.direction === 'asc'

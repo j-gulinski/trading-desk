@@ -20,31 +20,15 @@ function cellClassName(column, row) {
   return toneOf ? `delta delta--${directionOf(toneOf(row.valuation))}` : null
 }
 
-export default function ValuationTable({
-  table,
-  rows,
-  caption,
-  sortDisabledReason,
-  comparisonCurrency,
-}) {
+export default function ValuationTable({ table, rows, caption }) {
   return (
     <DataTable
       columns={table.columns}
       rows={rows}
       rowKey={rowKey}
-      renderCell={(column, row) => (
-        <ValuationCell
-          column={column}
-          row={row}
-          comparisonValue={
-            column.id === table.sort.column ? table.sort.snapshot?.[row.valuation.id] : null
-          }
-          comparisonCurrency={comparisonCurrency}
-        />
-      )}
+      renderCell={(column, row) => <ValuationCell column={column} row={row} />}
       sort={table.sort}
       onSort={table.toggleSort}
-      sortDisabledReason={sortDisabledReason}
       rowClassName={rowClassName}
       cellClassName={cellClassName}
       caption={caption}

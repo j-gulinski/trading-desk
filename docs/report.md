@@ -3,8 +3,15 @@
 | | |
 | --- | --- |
 | Repository | `trading-desk`, branch `hw-5.5-asgi-migration` |
-| Machine | Apple M3, 8 cores, 16 GB |
-| Stack | Python 3.14, Bottle 0.13.4, SQLAlchemy 2.0.52, psycopg 3.3.4, PostgreSQL 18.6, Docker Compose |
+| Machine | Apple M3 (4 fast + 4 efficient cores), 16 GB, macOS 27.0, mains power |
+| Docker | Docker Desktop 29.4, Linux VM with 8 CPUs and 8 GB |
+| Image | `python:3.14.7-slim`: Debian 13, Python 3.14.7 |
+| Stack | Bottle 0.13.4, SQLAlchemy 2.0.52, psycopg 3.3.4, PostgreSQL 18.6, Docker Compose |
+
+- **Exact Python version**: 3.14.0–3.14.4 use an incremental garbage collector; 3.14.5 returned
+  to three generations. Memory and latency figures apply to 3.14.7.
+- **Slim image**: 44 MB download instead of 404 MB (arm64). No compiler; none needed, every
+  dependency installs from a prebuilt wheel. Services and benchmark share the same base image.
 
 ---
 
@@ -62,9 +69,14 @@ appendix A.
 
 **books-service** and a stub standing in for another service.
 
+- **Why not pricing or market-data**: their heavy work runs in background threads (pricing
+  revalues positions on every market update; market-data polls providers). A framework changes
+  only request handling, and requests look the same in every service.
+- **Representative**: request → short database query → JSON, like nearly every handler.
 - **Identical in both frameworks**: no background threads, nothing in memory, only the database.
-- **Representative**: request → synchronous database access → JSON, like nearly every handler.
 - **The stub adds the missing case**: waiting on another service.
+- **Limit**: the sample shows what one request looks like, not the desk's volume (instruments,
+  traders, positions).
 
 ### 2.5 Scenarios
 
@@ -81,6 +93,20 @@ appendix A.
 - S4 uses a separate database, emptied before each point.
 
 Variants, parameters and thresholds: `docs/decision_criteria.md`.
+
+### 2.6 Dependencies under ASGI
+
+No library needs WSGI. Only our own code stands in the way of an async migration.
+
+| Dependency | Under ASGI |
+| --- | --- |
+| Bottle 0.13 | replaced by FastAPI |
+| SQLAlchemy 2.0 | async sessions in `sqlalchemy.ext.asyncio`; needs greenlet, already installed |
+| psycopg 3 | async connections built in |
+| structlog | request context lives in `contextvars`; async code keeps it per task |
+| Alembic | runs migrations in its own container, outside the services |
+| desk-pricing | pure Python, no dependencies |
+| **Our code** | blocking `urllib` calls in 4 files; streams read from a `queue.Queue` that background threads fill; handlers use Bottle's global `request` and `response` |
 
 ---
 
@@ -140,8 +166,7 @@ Successful req/s / p95 in ms (budget 100 ms):
 | S5 `/health` | – | 0 / all timeouts | 29 074 / 0.4 | – |
 
 - **Errors**: none, except `bottle-threads` in S5.
-- **CPU per request**: `/health` 0.03–0.08 ms · `/io` 0.43 ms (`requests`), 0.73 ms (httpx) ·
-  `/cpu` ~5 ms · `/db` 0.7 ms (sync driver), 0.8–1.0 ms (async driver).
+- **CPU per request**: see 4.3.
 - **Memory**: Bottle 77–87 MB, FastAPI 110–117 MB.
 
 ### 4.2 Other loads
@@ -151,7 +176,24 @@ Successful req/s / p95 in ms (budget 100 ms):
 - **c = 200, S3**: `fastapi-async` 3.8 % timeouts.
 - **S1, c = 50**: `fastapi-async` 33 000 req/s, the others 11 500–17 400.
 
-### 4.3 Charts
+### 4.3 CPU cost
+
+CPU time per request in ms, at c = 50. The same number is how many cores one service needs for
+1 000 requests per second. Cloud cost follows cores.
+
+| | Bottle, 40 threads | FastAPI `def` | FastAPI async |
+| --- | --- | --- | --- |
+| S1 `/health`: framework only | 0.07 | 0.06 | **0.03** |
+| S2 `/io`: waits on a service | 0.45 | 0.43 | **0.73** (httpx) |
+| S3 `/cpu`: computation | 4.97 | 4.71 | 4.62 |
+| S4 `/db`: database | 0.74 | 0.74 | **0.91** (async driver) |
+
+- **FastAPI itself is cheaper**: 0.04 ms less per request.
+- **Its async libraries cost more**: +63 % CPU when a request waits on a service, +23 % when it
+  queries the database. Nearly every handler here does one of the two.
+- **Net effect for this system**: async FastAPI needs more cores for the same traffic.
+
+### 4.4 Charts
 
 Throughput and p95 against concurrency.
 

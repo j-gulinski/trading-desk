@@ -7,7 +7,7 @@ import PanelTabs from '../panel/PanelTabs.jsx'
 import ValuationHistoryTable from './ValuationHistoryTable.jsx'
 import { VALUATION_STATUS_LABEL, VALUATION_STATUS_LEVEL } from '../../config/valuations.js'
 import { CURVE_ROLE_HINTS } from '../../config/marketData.js'
-import { curveMarketAt, curveTitle } from '../../domain/curves.js'
+import { curveTitle } from '../../domain/curves.js'
 import { providerLabel } from '../../config/providers.js'
 import {
   directionOf,
@@ -32,7 +32,7 @@ import {
 import { instrumentLabelOf } from '../../domain/contracts.js'
 import { classLabelOf, formatMarkAmount, markForDisplay, ticketKindOf, valueLabelOf, priceDriverLabelOf } from '../../domain/catalogue.js'
 
-const CURVE_TERMS = ['discount_curve', 'projection_curve']
+const CURVE_TERMS = ['discount_curve']
 const HIDDEN_TERMS = new Set([
   'asset_class',
   'currency',
@@ -41,7 +41,6 @@ const HIDDEN_TERMS = new Set([
   'notional',
   'pricing_provenance',
   'close_pricing_provenance',
-  'projection_curve_tracks_index',
 ])
 const TERM_LABELS = {
   settlement_currency: 'Currency',
@@ -54,7 +53,6 @@ const TERM_LABELS = {
   pricing_approach: 'Pricing approach',
   model: 'Pricing model',
   discount_curve: 'Discount curve',
-  projection_curve: 'Projection curve',
   underlying_symbol: 'Underlying',
   option_type: 'Type',
   strike: 'Strike',
@@ -62,8 +60,6 @@ const TERM_LABELS = {
   volatility: 'Volatility assumption',
   discount_curve_provider: 'Discount curve provider',
   discount_curve_as_of: 'Discount curve as of',
-  projection_curve_provider: 'Projection curve provider',
-  projection_curve_as_of: 'Projection curve as of',
   stale_curve_acknowledged: 'Stale curve acknowledged',
 }
 const TERM_ORDER = [
@@ -84,23 +80,12 @@ const TERM_ORDER = [
   'discount_curve',
   'discount_curve_provider',
   'discount_curve_as_of',
-  'projection_curve',
-  'projection_curve_provider',
-  'projection_curve_as_of',
 ]
 const TERM_RANK = new Map(TERM_ORDER.map((key, index) => [key, index]))
 
 function visibleTermEntries(terms) {
   return Object.entries(terms)
-    .filter(([key, value]) => {
-      if (HIDDEN_TERMS.has(key)) return false
-      if (key === 'projection_curve') return value !== terms.discount_curve
-      if (key === 'projection_curve_provider') {
-        return value !== terms.discount_curve_provider
-      }
-      if (key === 'projection_curve_as_of') return value !== terms.discount_curve_as_of
-      return true
-    })
+    .filter(([key]) => !HIDDEN_TERMS.has(key))
     .sort(([left], [right]) => (
       (TERM_RANK.get(left) ?? TERM_ORDER.length) -
       (TERM_RANK.get(right) ?? TERM_ORDER.length)
@@ -261,7 +246,7 @@ function AttributionCell({ value, note, tone = null }) {
   )
 }
 
-function MoveAttribution({ trade, row, entryCurve, currentCurve }) {
+function MoveAttribution({ trade, row }) {
   const valuation = row.valuation
   const entryLevel = markForDisplay(trade, trade.entryPrice)
   const currentRaw = valuation?.price ?? (row.lifecycle === 'CLOSED' ? trade.closePrice : null)
@@ -281,15 +266,7 @@ function MoveAttribution({ trade, row, entryCurve, currentCurve }) {
     ? 'Close level'
     : 'Current'
   const maturity = trade.terms?.maturity_years
-  const entryCurveMarket = ticketKindOf(trade) === 'bond'
-    ? curveMarketAt(entryCurve, maturity)
-    : null
-  const currentCurveMarket = ticketKindOf(trade) === 'bond'
-    ? curveMarketAt(currentCurve, maturity)
-    : null
-  const curveDeltaBps = Number.isFinite(entryCurveMarket?.rate) && Number.isFinite(currentCurveMarket?.rate)
-    ? (currentCurveMarket.rate - entryCurveMarket.rate) * 100
-    : null
+  const entryCurveRate = trade.terms?.pricing_provenance?.curves?.discount?.maturity_rate_percent
 
   return (
     <section className="trade-detail__section" aria-labelledby="move-attribution-title">
@@ -310,16 +287,16 @@ function MoveAttribution({ trade, row, entryCurve, currentCurve }) {
               Curve rate at {formatNumber(maturity)}Y
             </span>
             <AttributionCell
-              value={formatRate(entryCurveMarket?.rate)}
-              note={entryCurve?.asOfDate ?? trade.terms?.discount_curve_as_of}
+              value={formatRate(entryCurveRate)}
+              note={trade.terms?.discount_curve_as_of}
             />
             <AttributionCell
-              value={formatRate(currentCurveMarket?.rate)}
-              note={currentCurve?.asOfDate}
+              value={formatRate(valuation?.maturityRatePercent)}
+              note={valuation?.curveAsOf}
             />
             <AttributionCell
-              value={formatBasisPoints(curveDeltaBps)}
-              tone={directionOf(curveDeltaBps)}
+              value={formatBasisPoints(valuation?.curveMoveBps)}
+              tone={directionOf(valuation?.curveMoveBps)}
             />
           </div>
         )}
@@ -358,8 +335,6 @@ export default function TradeDetailPanel({
   closeNote,
   closeReference,
   closeReferenceLabel,
-  entryCurve,
-  currentCurve,
 }) {
   const [tab, setTab] = useState('details')
 
@@ -451,8 +426,6 @@ export default function TradeDetailPanel({
           <MoveAttribution
             trade={trade}
             row={row}
-            entryCurve={entryCurve}
-            currentCurve={currentCurve}
           />
 
           <section className="trade-detail__section" aria-labelledby="trade-summary-title">

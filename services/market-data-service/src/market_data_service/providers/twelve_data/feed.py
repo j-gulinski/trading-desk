@@ -1,17 +1,13 @@
-import threading
-import time
-
-from desk_runtime.functions import utcnow
-from desk_runtime.logging_config import get_logger
 from desk_domain.providers import TWELVE_DATA
 
-from market_data_service.providers.base import ProviderDataError
 from market_data_service.providers.twelve_data.client import TwelveDataClient
-from market_data_service.providers.twelve_data.normalizer import normalize_quote
+from market_data_service.providers.twelve_data.normalizer import (
+    normalize_quote,
+    normalize_search_results,
+)
 from market_data_service.config import (
     FRESHNESS_THRESHOLD_MULTIPLIER,
     PROVIDER_ACTIVE_WINDOW_SECONDS,
-    SERVICE_NAME,
     TWELVE_DATA_API_KEY,
     TWELVE_DATA_BUDGET_PER_MINUTE,
     TWELVE_DATA_DAILY_BUDGET,
@@ -20,229 +16,129 @@ from market_data_service.config import (
     TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE,
     TRANSIENT_ERROR_BACKOFF_SECONDS,
 )
-from market_data_service.poll_schedule import PollSchedule
 from market_data_service.provider_runtime import ProviderRuntime
-from market_data_service.quote_ingestion import store_and_publish
-
-log = get_logger(SERVICE_NAME)
-
-PROVIDER = TWELVE_DATA
-runtime = ProviderRuntime(
-    TWELVE_DATA,
-    TWELVE_DATA_BUDGET_PER_MINUTE,
-    bool(TWELVE_DATA_API_KEY),
-    daily_budget=TWELVE_DATA_DAILY_BUDGET,
-    provider_minute_limit=TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE,
-    provider_daily_limit=TWELVE_DATA_PROVIDER_LIMIT_PER_DAY,
-)
-_client = TwelveDataClient(TWELVE_DATA_API_KEY)
-_schedule = PollSchedule()
-_market_open_lock = threading.Lock()
-_market_open = {}
+from market_data_service.symbol_quote_feed import SymbolQuoteFeed
 
 
-def paced_interval_seconds():
-    symbols = max(1, len(runtime.pollable_entries()))
-    return max(
-        TWELVE_DATA_POLL_SECONDS,
-        round(PROVIDER_ACTIVE_WINDOW_SECONDS * symbols / TWELVE_DATA_DAILY_BUDGET),
-    )
+class TwelveDataFeed(SymbolQuoteFeed):
+    """Equity, FX and commodity quotes in batches paced to spread the daily credit budget."""
 
+    def __init__(self, *args):
+        super().__init__(*args)
+        self._market_open = {}
 
-def stale_after_seconds(symbol):
-    return FRESHNESS_THRESHOLD_MULTIPLIER * paced_interval_seconds()
+    def fetch(self, entries):
+        symbols = {
+            self.client.provider_symbol(entry.symbol, entry.asset_class): entry.symbol
+            for entry in entries
+        }
+        payload = self.client.quotes(list(symbols))
+        if len(symbols) == 1:
+            payload = {next(iter(symbols)): payload}
+        payloads = {symbol: payload.get(provider_symbol) for provider_symbol, symbol in symbols.items()}
+        for symbol, quote in payloads.items():
+            if isinstance(quote, dict) and "is_market_open" in quote:
+                self._market_open[symbol] = bool(quote["is_market_open"])
+        return payloads
 
+    def normalize(self, entry, payload, received_at):
+        return normalize_quote(entry.symbol, entry.asset_class, entry.currency, payload, received_at)
 
-closed_stale_after_seconds = stale_after_seconds
+    def _paced_interval(self):
+        symbols = max(1, len(self.entries()))
+        return max(
+            TWELVE_DATA_POLL_SECONDS,
+            round(PROVIDER_ACTIVE_WINDOW_SECONDS * symbols / TWELVE_DATA_DAILY_BUDGET),
+        )
 
+    def cadence_seconds(self, entry):
+        return self._paced_interval()
 
-def market_open(symbol):
-    with _market_open_lock:
-        return _market_open.get(symbol)
+    def classifier(self, entry):
+        stale_after = FRESHNESS_THRESHOLD_MULTIPLIER * self._paced_interval()
+        return {
+            "stale_after_seconds": stale_after,
+            "closed_stale_after_seconds": stale_after,
+            "market_open": self._market_open.get(entry.symbol),
+        }
 
+    def poll(self, entries):
+        ticks, error = super().poll(entries)
+        if ticks is None and self.runtime.cooldown_seconds_left() <= 0:
+            self.runtime.transient_error(error, TRANSIENT_ERROR_BACKOFF_SECONDS)
+        return ticks, error
 
-reload_active = runtime.reload_active
-
-
-def _record_market_open(symbol, payload):
-    if not isinstance(payload, dict) or "is_market_open" not in payload:
-        return
-    with _market_open_lock:
-        _market_open[symbol] = bool(payload["is_market_open"])
-
-
-def _pacing_allows(credits_needed):
-    return runtime.ledger.credits_today() + credits_needed <= TWELVE_DATA_DAILY_BUDGET
-
-
-def _classifier(symbol):
-    return {
-        "stale_after_seconds": stale_after_seconds(symbol),
-        "closed_stale_after_seconds": closed_stale_after_seconds(symbol),
-        "market_open": market_open(symbol),
-    }
-
-
-def _store_and_publish(entry, payload):
-    _record_market_open(entry.symbol, payload)
-    quote = normalize_quote(entry.symbol, entry.asset_class, entry.currency, payload, utcnow())
-    return store_and_publish(quote, _classifier(entry.symbol))
-
-
-@runtime.guard("quote_batch_unavailable")
-def _fetch_and_publish(entries):
-    runtime.record_request(credits=len(entries))
-    by_provider_symbol = {
-        _client.provider_symbol(entry.symbol, entry.asset_class): entry
-        for entry in entries
-    }
-    payload = _client.quotes(list(by_provider_symbol))
-    quotes = payload if len(by_provider_symbol) > 1 else {next(iter(by_provider_symbol)): payload}
-    ticks = {}
-    for provider_symbol, entry in by_provider_symbol.items():
-        try:
-            ticks[entry.symbol] = _store_and_publish(entry, quotes.get(provider_symbol))
-        except ProviderDataError as error:
-            log.warning("quote_unavailable", provider=TWELVE_DATA, symbol=entry.symbol,
-                        detail=error.detail)
-        except (ArithmeticError, OverflowError, TypeError, ValueError) as error:
-            log.warning(
-                "quote_unavailable",
-                provider=TWELVE_DATA,
-                symbol=entry.symbol,
-                detail=f"invalid provider quote: {type(error).__name__}",
-            )
-    if not ticks:
-        error = ProviderDataError(TWELVE_DATA, "the quote batch contained no usable observations")
-        runtime.transient_error(error.detail, TRANSIENT_ERROR_BACKOFF_SECONDS)
-        raise error
-    runtime.record_success()
-    return ticks
-
-
-def poll_loop():
-    if not TWELVE_DATA_API_KEY:
-        log.warning("twelve_data_disabled", reason="TWELVE_DATA_API_KEY is not set")
-        return
-    while True:
-        if runtime.cooldown_seconds_left() > 0:
-            time.sleep(min(runtime.cooldown_seconds_left(), 5))
-            continue
-        # reload the provider-specific slice of watchlist + positions + benchmark
-        if not runtime.reload_active_if_stale():
-            time.sleep(5)
-            continue
-        pollable = runtime.pollable_entries()
-        due = _schedule.due_entries(pollable)
-        # poll due symbols in batches while both the minute and daily budgets allow
+    def poll_round(self, entries):
+        due = self.schedule.due_entries(entries)
         for start in range(0, len(due), TWELVE_DATA_BUDGET_PER_MINUTE):
             chunk = due[start:start + TWELVE_DATA_BUDGET_PER_MINUTE]
-            if runtime.cooldown_seconds_left() > 0 or not _pacing_allows(len(chunk)):
+            if self.runtime.cooldown_seconds_left() > 0 or self.runtime.acquire(len(chunk)) is not None:
                 break
-            if not runtime.try_take(len(chunk)):
-                break
-            ticks, _ = _fetch_and_publish(chunk)
+            ticks, _ = self.poll(chunk)
             if ticks is None:
-                # Keep the symbols due so the short runtime backoff, rather than the
-                # normal daily-ledger cadence, controls the retry.
                 break
-            # spread the polled chunk's next due-times across the interval
-            interval = paced_interval_seconds()
+            # spread the chunk's next due-times across the interval
+            interval = self._paced_interval()
             for position, entry in enumerate(chunk, start=start):
-                _schedule.defer(entry.symbol, interval + round(position * interval / len(due)))
-        _schedule.keep_only(pollable)
-        time.sleep(1)
+                self.schedule.defer(entry.symbol, interval + round(position * interval / len(due)))
 
-
-def refresh_symbol(symbol):
-    if not TWELVE_DATA_API_KEY:
-        return None, "TWELVE_DATA is disabled: no API key configured", 503
-    entry, error, status = runtime.resolve(symbol)
-    if error is not None:
-        return None, error, status
-    unavailable = runtime.unavailable()
-    if unavailable is not None:
-        return None, unavailable, 503
-    if not _pacing_allows(1):
-        return None, "TWELVE_DATA daily credit budget is spent for now: retry later", 429
-    if not runtime.try_take():
-        return None, "TWELVE_DATA request budget is exhausted: retry shortly", 429
-    ticks, error = _fetch_and_publish([entry])
-    tick = (ticks or {}).get(symbol)
-    if tick is None:
-        return None, error or f"no quote data for {symbol}", (
-            429 if runtime.status() == "RATE_LIMITED" else 502
+    def search(self, query):
+        payload = self._request(
+            lambda: self.client.search(query), "symbol_search_unavailable", query=query,
         )
-    _schedule.defer(symbol, paced_interval_seconds())
-    return tick, None, 200
+        return None if payload is None else normalize_search_results(payload)
 
-
-def search(query):
-    if not TWELVE_DATA_API_KEY or runtime.cooldown_seconds_left() > 0:
-        return None
-    if not _pacing_allows(1) or not runtime.try_take():
-        return None
-    def fetch():
-        runtime.record_request()
-        payload = _client.search(query)
-        runtime.record_success()
-        return payload
-
-    payload, _ = runtime.guarded(
-        fetch, "symbol_search_unavailable", log_level="warning", query=query
-    )
-    return payload
-
-
-def poll_strategy():
-    on_pace = _pacing_allows(1)
-    cadence = paced_interval_seconds()
-    entries = runtime.pollable_entries()
-    symbols = len(entries)
-    due = _schedule.due_entries(entries)
-    next_cost = min(len(due), TWELVE_DATA_BUDGET_PER_MINUTE) if due else 1
-    schedule_wait = _schedule.next_due_seconds(entries)
-    budget_wait = runtime.budget_wait_seconds(next_cost)
-    next_batch = (
-        None if schedule_wait is None
-        else max(schedule_wait, budget_wait or 0)
-    )
-    if next_batch is None:
-        description = "no symbols on the daily ledger"
-    else:
-        description = (
-            f"next batch in {next_batch}s · cadence {round(cadence / 60)} min "
-            f"({symbols} {'symbol' if symbols == 1 else 'symbols'} on the daily ledger)"
-        )
-    if not on_pace:
-        description += " — holding for daily pace"
-    return {
-        "mode": "BATCHED_DAILY_LEDGER",
-        "poll_seconds": TWELVE_DATA_POLL_SECONDS,
-        "batch_size": TWELVE_DATA_BUDGET_PER_MINUTE,
-        "daily_budget": TWELVE_DATA_DAILY_BUDGET,
-        "current_cadence_seconds": cadence,
-        "next_batch_seconds": next_batch,
-        "symbol_count": symbols,
-        "on_pace": on_pace,
-        "description": description,
-    }
-
-
-def active_symbols():
-    return sorted(entry.symbol for entry in runtime.pollable_entries())
-
-
-def runtime_snapshot():
-    symbols = active_symbols()
-    with _market_open_lock:
-        states = [_market_open.get(symbol) for symbol in symbols]
-    return {
-        **runtime.snapshot(symbols),
-        "market_states": {
+    def market_states(self, symbols):
+        states = [self._market_open.get(symbol) for symbol in symbols]
+        return {
             "open": sum(state is True for state in states),
             "closed": sum(state is False for state in states),
             "unknown": sum(state is None for state in states),
-        },
-        "strategy": poll_strategy(),
-    }
+        }
+
+    def strategy(self):
+        on_pace = self.runtime.budget.credits_left_today() >= 1
+        cadence = self._paced_interval()
+        entries = self.entries()
+        symbols = len(entries)
+        due = self.schedule.due_entries(entries)
+        next_cost = min(len(due), TWELVE_DATA_BUDGET_PER_MINUTE) if due else 1
+        schedule_wait = self.schedule.next_due_seconds(entries)
+        next_batch = (
+            None if schedule_wait is None
+            else max(schedule_wait, self.runtime.budget.wait_seconds(next_cost))
+        )
+        if next_batch is None:
+            description = "no symbols on the daily ledger"
+        else:
+            description = (
+                f"next batch in {next_batch}s · cadence {round(cadence / 60)} min "
+                f"({symbols} {'symbol' if symbols == 1 else 'symbols'} on the daily ledger)"
+            )
+        if not on_pace:
+            description += " — holding for daily pace"
+        return {
+            "mode": "BATCHED_DAILY_LEDGER",
+            "poll_seconds": TWELVE_DATA_POLL_SECONDS,
+            "batch_size": TWELVE_DATA_BUDGET_PER_MINUTE,
+            "daily_budget": TWELVE_DATA_DAILY_BUDGET,
+            "current_cadence_seconds": cadence,
+            "next_batch_seconds": next_batch,
+            "symbol_count": symbols,
+            "on_pace": on_pace,
+            "description": description,
+        }
+
+
+feed = TwelveDataFeed(
+    TWELVE_DATA,
+    ProviderRuntime(
+        TWELVE_DATA,
+        bool(TWELVE_DATA_API_KEY),
+        per_minute=TWELVE_DATA_BUDGET_PER_MINUTE,
+        per_day=TWELVE_DATA_DAILY_BUDGET,
+        provider_minute_limit=TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE,
+        provider_daily_limit=TWELVE_DATA_PROVIDER_LIMIT_PER_DAY,
+    ),
+    TwelveDataClient(TWELVE_DATA_API_KEY),
+)

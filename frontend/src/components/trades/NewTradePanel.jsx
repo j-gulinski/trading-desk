@@ -41,7 +41,6 @@ import { assetClassLabel } from '../../domain/catalogue.js'
 import { formatAmount } from '../../domain/formatting.js'
 import { quantityUnitLabelOf, unitLabelOf } from '../../domain/marketFormat.js'
 
-const CURVE_TERM_FIELDS = ['discount_curve', 'projection_curve']
 
 function TicketNote({ children }) {
   return (
@@ -130,15 +129,13 @@ function without(errors, fields) {
   return next
 }
 
-function resolveCurveFields(next, curves, currency, assetClass) {
-  CURVE_TERM_FIELDS.forEach((field) => {
-    const eligible = currency
-      ? curveChoicesFor(curves, currency, field, next.floating_rate_index_tenor, assetClass)
-      : []
-    if (eligible.some((curve) => curve.curve_name === next[field])) return
-    if (eligible.length === 1) next[field] = eligible[0].curve_name
-    else delete next[field]
-  })
+function resolveCurveField(next, curves, currency, assetClass) {
+  const eligible = currency
+    ? curveChoicesFor(curves, currency, next.floating_rate_index_tenor, assetClass)
+    : []
+  if (eligible.some((curve) => curve.curve_name === next.discount_curve)) return
+  if (eligible.length === 1) next.discount_curve = eligible[0].curve_name
+  else delete next.discount_curve
 }
 
 export default function NewTradePanel({ onClose }) {
@@ -201,11 +198,7 @@ export default function NewTradePanel({ onClose }) {
   const fixedQuantity = schema?.fixed_quantity ?? null
   const selectedCurve = curves.find((curve) => curve.curve_name === termValues.discount_curve) ?? null
   const needsCurve = selectedModel?.needs_curve ?? schema?.needs_curve === true
-  const selectedStaleCurves = needsCurve
-    ? CURVE_TERM_FIELDS
-      .map((field) => curves.find((curve) => curve.curve_name === termValues[field]))
-      .filter((curve) => curve?.stale === true)
-    : []
+  const selectedStaleCurves = needsCurve && selectedCurve?.stale === true ? [selectedCurve] : []
 
   const defaultModel = schema?.default_model
   const schemaDefaults = schema?.defaults
@@ -238,7 +231,7 @@ export default function NewTradePanel({ onClose }) {
       const next = { ...current }
       delete next[underlyingField]
       delete next.settlement_currency
-      CURVE_TERM_FIELDS.forEach((field) => delete next[field])
+      delete next.discount_curve
       return next
     })
     setProviderChoice('')
@@ -266,15 +259,11 @@ export default function NewTradePanel({ onClose }) {
       provider_timestamp: quote.providerTimestamp,
       received_at: quote.receivedAt,
     } : null,
-    ...Object.fromEntries(CURVE_TERM_FIELDS.map((field) => {
-      if (!needsCurve) return [field, null]
-      const chosen = feedCurves?.[termValues[field]]
-      return [field, chosen == null ? null : {
-        curve_name: chosen.name,
-        as_of_date: chosen.asOfDate,
-        received_at: chosen.receivedAt,
-      }]
-    })),
+    discount_curve: needsCurve && feedCurves?.[termValues.discount_curve] != null ? {
+      curve_name: feedCurves[termValues.discount_curve].name,
+      as_of_date: feedCurves[termValues.discount_curve].asOfDate,
+      received_at: feedCurves[termValues.discount_curve].receivedAt,
+    } : null,
   }
   const previewRequestKey = JSON.stringify({
     assetClass,
@@ -341,7 +330,7 @@ export default function NewTradePanel({ onClose }) {
     setStaleCurveAcknowledged(false)
     setTermValues((current) => {
       const next = { ...current, [name]: value }
-      if (!underlyingField && CURVE_TERM_FIELDS.includes(name) && !next.settlement_currency) {
+      if (!underlyingField && name === 'discount_curve' && !next.settlement_currency) {
         const chosen = curves.find((curve) => curve.curve_name === value)
         if (chosen != null) next.settlement_currency = chosen.currency
       }
@@ -351,29 +340,29 @@ export default function NewTradePanel({ onClose }) {
         const model = (schema?.models ?? []).find((item) => item.name === modelName)
         if (model?.needs_curve) {
           const entry = (catalog ?? []).find((item) => item.symbol === value)
-          resolveCurveFields(next, curves, entry?.currency ?? null, assetClass)
+          resolveCurveField(next, curves, entry?.currency ?? null, assetClass)
         } else {
-          CURVE_TERM_FIELDS.forEach((field) => delete next[field])
+          delete next.discount_curve
         }
       }
       if (name === 'settlement_currency') {
         const modelName = next.model ?? schema?.default_model
         const model = (schema?.models ?? []).find((item) => item.name === modelName)
         if (model == null || model.needs_curve) {
-          resolveCurveFields(next, curves, value, assetClass)
+          resolveCurveField(next, curves, value, assetClass)
         }
       }
-      if (name === 'floating_rate_index_tenor' && next.projection_curve) {
-        const chosen = curves.find((curve) => curve.curve_name === next.projection_curve)
-        if (chosen?.index_tenor && chosen.index_tenor !== value) delete next.projection_curve
+      if (name === 'floating_rate_index_tenor' && next.discount_curve) {
+        const chosen = curves.find((curve) => curve.curve_name === next.discount_curve)
+        if (chosen?.index_tenor && chosen.index_tenor !== value) delete next.discount_curve
       }
       if (name === 'model') {
         const chosen = (schema?.models ?? []).find((model) => model.name === value)
         if (chosen?.needs_curve) {
           const currency = termCurrencyOf(schema, next, catalog)
-          resolveCurveFields(next, curves, currency, assetClass)
+          resolveCurveField(next, curves, currency, assetClass)
         } else {
-          CURVE_TERM_FIELDS.forEach((field) => delete next[field])
+          delete next.discount_curve
         }
       }
       return next
@@ -428,9 +417,9 @@ export default function NewTradePanel({ onClose }) {
             quantity,
             quote,
           })
-      const accepted = await apiPost(endpoints.tradeAction.submit, intent)
+      const opened = await apiPost(endpoints.tradeAction.submit, intent)
       setAck({
-        tradeId: accepted?.trade_id ?? null,
+        tradeId: opened?.trade_id ?? null,
         summary: ackSummaryOf({
           schema,
           side: intent.side,
