@@ -1,5 +1,7 @@
 import time
 from abc import ABC, abstractmethod
+from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 from desk_runtime.functions import utcnow
 from desk_runtime.logging_config import get_logger
@@ -40,12 +42,17 @@ class PollSchedule:
 class SymbolQuoteFeed(ABC):
     """Polls one provider for every watchlist, open-trade and benchmark symbol it serves."""
 
+    poll_concurrency = 1
+
     def __init__(self, provider, runtime, client):
         self.provider = provider
         self.runtime = runtime
         self.client = client
         self.enabled = runtime.enabled
         self.schedule = PollSchedule()
+        self._pool = ThreadPoolExecutor(
+            max_workers=self.poll_concurrency, thread_name_prefix=f"{provider}-poll",
+        )
 
     @abstractmethod
     def fetch(self, entries):
@@ -107,14 +114,31 @@ class SymbolQuoteFeed(ABC):
         self.schedule.keep_only(entries)
 
     def poll_round(self, entries):
-        for entry in self.schedule.due_entries(entries):
-            if self.runtime.cooldown_seconds_left() > 0 or self.runtime.acquire() is not None:
-                break
-            ticks, _ = self.poll([entry])
-            self.schedule.defer(
-                entry.symbol,
-                self.cadence_seconds(entry) if ticks else self.retry_seconds(entry),
-            )
+        due = deque(self.schedule.due_entries(entries))
+        in_flight = {}
+        try:
+            while due or in_flight:
+                free = min(len(due), self.poll_concurrency - len(in_flight))
+                if free:
+                    if (
+                        self.runtime.cooldown_seconds_left() > 0
+                        or self.runtime.acquire(free, calls=free) is not None
+                    ):
+                        due.clear()
+                    else:
+                        for _ in range(free):
+                            entry = due.popleft()
+                            in_flight[self._pool.submit(self.poll, [entry])] = entry
+                done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+                for future in done:
+                    entry = in_flight.pop(future)
+                    ticks, _ = future.result()
+                    self.schedule.defer(
+                        entry.symbol,
+                        self.cadence_seconds(entry) if ticks else self.retry_seconds(entry),
+                    )
+        finally:
+            wait(in_flight)
 
     def poll(self, entries):
         """Fetches, stores and publishes quotes; returns ({symbol: tick} or None, error)."""

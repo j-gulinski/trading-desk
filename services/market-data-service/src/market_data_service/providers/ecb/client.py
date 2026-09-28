@@ -2,12 +2,13 @@ import csv
 import io
 
 from market_data_service.providers.base import ProviderClient, ProviderDataError
+from market_data_service.config import ECB_BASE_URL
 from desk_domain.providers import ECB
 
 
 class EcbClient(ProviderClient):
     provider = ECB
-    base_url = "https://data-api.ecb.europa.eu/service"
+    base_url = ECB_BASE_URL
 
     def decode_body(self, body):
         text = body.decode("utf-8-sig")

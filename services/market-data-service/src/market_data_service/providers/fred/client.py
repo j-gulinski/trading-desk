@@ -4,12 +4,13 @@ from market_data_service.providers.base import (
     ProviderDataError,
     ProviderRateLimited,
 )
+from market_data_service.config import FRED_BASE_URL
 from desk_domain.providers import FRED
 
 
 class FredClient(ProviderClient):
     provider = FRED
-    base_url = "https://api.stlouisfed.org/fred"
+    base_url = FRED_BASE_URL
 
     def auth_params(self):
         return {"api_key": self.api_key or "", "file_type": "json"}

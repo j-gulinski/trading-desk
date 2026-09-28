@@ -4,12 +4,13 @@ from market_data_service.providers.base import (
     ProviderDataError,
     ProviderRateLimited,
 )
+from market_data_service.config import ALPHA_VANTAGE_BASE_URL
 from desk_domain.providers import ALPHA_VANTAGE
 
 
 class AlphaVantageClient(ProviderClient):
     provider = ALPHA_VANTAGE
-    base_url = "https://www.alphavantage.co"
+    base_url = ALPHA_VANTAGE_BASE_URL
 
     api_key_param = "apikey"
 

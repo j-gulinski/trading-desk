@@ -1,10 +1,11 @@
 from market_data_service.providers.base import ProviderClient
+from market_data_service.config import NBP_BASE_URL
 from desk_domain.providers import NBP
 
 
 class NbpClient(ProviderClient):
     provider = NBP
-    base_url = "https://api.nbp.pl/api"
+    base_url = NBP_BASE_URL
 
     def table_a(self):
         return self.get("/exchangerates/tables/a", {"format": "json"})

@@ -2,7 +2,7 @@ import re
 import urllib.parse
 
 from market_data_service.providers.base import ProviderClient, ProviderDataError
-from market_data_service.config import EIOPA_TIMEOUT_SECONDS
+from market_data_service.config import EIOPA_BASE_URL, EIOPA_TIMEOUT_SECONDS
 from desk_domain.providers import EIOPA
 
 RELEASE_PAGE = "/tools-and-data/risk-free-interest-rate-term-structures_en"
@@ -11,7 +11,7 @@ RELEASE_LINK = re.compile(r'href="([^"]*EIOPA_RFR_(\d{8})[^"]*\.zip)"')
 
 class EiopaClient(ProviderClient):
     provider = EIOPA
-    base_url = "https://www.eiopa.europa.eu"
+    base_url = EIOPA_BASE_URL
     timeout_seconds = EIOPA_TIMEOUT_SECONDS
 
     def __init__(self, api_key=None):
