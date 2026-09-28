@@ -45,6 +45,18 @@ docker compose up --build
 
 This removes the local database and cached frontend dependencies. There is no legacy-data backfill.
 
+## Serving
+
+- **One gunicorn worker per service.** Each service runs one gunicorn gthread worker process,
+  because services keep live state in memory.
+- **Worker owns the app.** The master only supervises. The worker imports the service via
+  `build()` in `main.py` and starts its background threads, so a replacement worker starts fresh.
+- **Threads.** `SERVER_THREADS` (default 40): one thread per request or open stream.
+  Market-data, pricing and monitoring serve SSE clients and use 256. Streams send a comment
+  every 5 s, so a closed client frees its thread within about 10 s.
+- **Shutdown.** `docker stop` waits up to 5 s for open requests, then cuts streams.
+- **Database pool.** 15 connections per service (6 × 15 = 90, under PostgreSQL's default 100).
+
 ## Structure
 
 | Location | Responsibility |
