@@ -1,0 +1,19 @@
+{
+  "stable_at": 1790622474.7474954,
+  "p95_ms": {
+    "tick": 59.57,
+    "valuation": 300.4,
+    "execution": 133.19,
+    "position": 2489.2
+  },
+  "pricing_lag_p95_s": 1.15,
+  "opens": {
+    "ok": 30
+  },
+  "closes": {
+    "ok": 18
+  },
+  "streams_opened": 100,
+  "streams_dropped": 0,
+  "client_cores": 0.073
+}
