@@ -11,10 +11,6 @@ def _symbol_list(name, default):
         if symbol.strip()
     )
 
-
-def _base_url(name, default):
-    return env_str(name, default).rstrip("/")
-
 SERVICE_NAME = "market-data-service"
 PORT = SERVICE_PORTS[SERVICE_NAME]
 
@@ -24,18 +20,15 @@ PROVIDER_ACTIVE_WINDOW_HOURS = env_int("PROVIDER_ACTIVE_WINDOW_HOURS", 12)
 
 # Finnhub — US equity quotes and market status.
 FINNHUB_API_KEY = env_str("FINNHUB_API_KEY")
-FINNHUB_BASE_URL = _base_url("FINNHUB_BASE_URL", "https://finnhub.io/api/v1")
 FINNHUB_TIER1_POLL_SECONDS = env_int("FINNHUB_TIER1_POLL_SECONDS", 15)
 FINNHUB_TIER2_POLL_SECONDS = env_int("FINNHUB_TIER2_POLL_SECONDS", 60)
 FINNHUB_CLOSED_POLL_SECONDS = env_int("FINNHUB_CLOSED_POLL_SECONDS", 300)
 FINNHUB_PROVIDER_LIMIT_PER_MINUTE = env_int("FINNHUB_PROVIDER_LIMIT_PER_MINUTE", 60)
-FINNHUB_POLL_CONCURRENCY = env_int("FINNHUB_POLL_CONCURRENCY", 1)
 FINNHUB_MARKET_STATUS_REFRESH_SECONDS = 600
 FINNHUB_PROVIDER_CLOCK_LAG_SECONDS = 60
 
 # Twelve Data — equity/FX/commodity quotes and catalog search.
 TWELVE_DATA_API_KEY = env_str("TWELVE_DATA_API_KEY")
-TWELVE_DATA_BASE_URL = _base_url("TWELVE_DATA_BASE_URL", "https://api.twelvedata.com")
 TWELVE_DATA_POLL_SECONDS = env_int("TWELVE_DATA_POLL_SECONDS", 900)
 TWELVE_DATA_PROVIDER_LIMIT_PER_DAY = env_int("TWELVE_DATA_PROVIDER_LIMIT_PER_DAY", 800)
 TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE = env_int(
@@ -44,7 +37,6 @@ TWELVE_DATA_PROVIDER_LIMIT_PER_MINUTE = env_int(
 
 # Alpha Vantage — US equity EOD and FX quotes.
 ALPHA_VANTAGE_API_KEY = env_str("ALPHA_VANTAGE_API_KEY")
-ALPHA_VANTAGE_BASE_URL = _base_url("ALPHA_VANTAGE_BASE_URL", "https://www.alphavantage.co")
 ALPHA_VANTAGE_PROVIDER_LIMIT_PER_DAY = env_int(
     "ALPHA_VANTAGE_PROVIDER_LIMIT_PER_DAY", 25
 )
@@ -60,25 +52,21 @@ ALPHA_VANTAGE_FX_STALE_SECONDS = env_int(
 )
 
 # NBP — PLN reference fixings and gold fixing.
-NBP_BASE_URL = _base_url("NBP_BASE_URL", "https://api.nbp.pl/api")
 NBP_FIXING_SYMBOLS = _symbol_list("NBP_FIXING_SYMBOLS", "EURPLN,USDPLN,XAUPLN_G")
 NBP_GOLD_SYMBOL = "XAUPLN_G"
 NBP_WINDOW_START = (11, 45)
 NBP_WINDOW_END = (12, 20)
 
 # ECB — public reference-rate and yield-curve CSV sources.
-ECB_BASE_URL = _base_url("ECB_BASE_URL", "https://data-api.ecb.europa.eu/service")
 ECB_FIXING_SYMBOLS = _symbol_list("ECB_FIXING_SYMBOLS", "EURUSD,EURPLN")
 ECB_WINDOW_START = (15, 55)
 ECB_WINDOW_END = (16, 45)
 
 # FRED — authenticated time-series source.
 FRED_API_KEY = env_str("FRED_API_KEY")
-FRED_BASE_URL = _base_url("FRED_BASE_URL", "https://api.stlouisfed.org/fred")
 FRED_PROVIDER_LIMIT_PER_MINUTE = env_int("FRED_PROVIDER_LIMIT_PER_MINUTE", 120)
 
 # EIOPA — public monthly workbook source.
-EIOPA_BASE_URL = _base_url("EIOPA_BASE_URL", "https://www.eiopa.europa.eu")
 EIOPA_REQUEST_BUDGET_PER_MINUTE = env_int("EIOPA_REQUEST_BUDGET_PER_MINUTE", 10)
 EIOPA_TIMEOUT_SECONDS = 60
 EIOPA_CURVE_REFETCH_SECONDS = 24 * 3600
@@ -93,8 +81,6 @@ if not 1 <= PROVIDER_ACTIVE_WINDOW_HOURS <= 24:
     raise ValueError("PROVIDER_ACTIVE_WINDOW_HOURS must be between 1 and 24")
 if EIOPA_REQUEST_BUDGET_PER_MINUTE < 1:
     raise ValueError("EIOPA_REQUEST_BUDGET_PER_MINUTE must be positive")
-if FINNHUB_POLL_CONCURRENCY < 1:
-    raise ValueError("FINNHUB_POLL_CONCURRENCY must be positive")
 
 
 def _safe_budget(provider_limit):
