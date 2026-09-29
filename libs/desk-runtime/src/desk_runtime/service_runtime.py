@@ -1,10 +1,21 @@
 import threading
+from socketserver import ThreadingMixIn
+from wsgiref.simple_server import WSGIServer, make_server
 
-from gunicorn.app.base import BaseApplication
+from bottle import ServerAdapter
 
-from desk_runtime.config import SERVER_THREADS
 from desk_runtime.http import install_json_errors, json_response
 from desk_runtime.logging_config import configure_logging, get_logger
+
+
+class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
+    daemon_threads = True
+
+
+class ThreadedServer(ServerAdapter):
+    def run(self, handler):
+        server = make_server(self.host, self.port, handler, server_class=ThreadingWSGIServer)
+        server.serve_forever()
 
 
 def install_default_health(app, service_name):
@@ -14,30 +25,13 @@ def install_default_health(app, service_name):
         )
 
 
-class ServiceApplication(BaseApplication):
-    def __init__(self, service_name, port, build):
-        self.service_name = service_name
-        self.port = port
-        self.build = build
-        super().__init__()
-
-    def load_config(self):
-        self.cfg.set("bind", f"0.0.0.0:{self.port}")
-        self.cfg.set("workers", 1)
-        self.cfg.set("worker_class", "gthread")
-        self.cfg.set("threads", SERVER_THREADS)
-        self.cfg.set("graceful_timeout", 5)
-
-    def load(self):
-        configure_logging(self.service_name)
-        get_logger(self.service_name).info("starting")
-        app, background = self.build()
-        install_default_health(app, self.service_name)
-        install_json_errors(app)
-        for target in background:
-            threading.Thread(target=target, daemon=True).start()
-        return app
-
-
-def run_service(service_name, port, build):
-    ServiceApplication(service_name, port, build).run()
+def run_service(service_name, app, port, startup=(), background=()):
+    configure_logging(service_name)
+    get_logger(service_name).info("starting")
+    install_default_health(app, service_name)
+    install_json_errors(app)
+    for hook in startup:
+        hook()
+    for target in background:
+        threading.Thread(target=target, daemon=True).start()
+    app.run(host="0.0.0.0", port=port, server=ThreadedServer)
