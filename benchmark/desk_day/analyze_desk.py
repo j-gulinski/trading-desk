@@ -244,7 +244,11 @@ def plot(ax, points, levels, axis, metric, title, budget=None):
 def charts(points, levels, axis, heading):
     (RESULTS / "charts").mkdir(exist_ok=True)
     latency, axes = plt.subplots(2, 3, figsize=(14, 8))
-    for ax, metric in zip(axes.flat, ("tick", "valuation", "preview", "position", "execution", "md_errors")):
+    metrics = [m for m in ("tick", "valuation", "preview", "position", "execution", "md_errors")
+               if any(point[m] for point in points.values())]
+    for ax in axes.flat[len(metrics):]:
+        ax.set_visible(False)
+    for ax, metric in zip(axes.flat, metrics):
         unit = ", %" if metric == "md_errors" else ", p95 ms"
         plot(ax, points, levels, axis, metric, TITLES[metric] + unit, BUDGETS[metric])
     latency.suptitle(f"{heading} — median, bars = min–max of runs")
