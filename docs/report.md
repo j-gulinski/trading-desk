@@ -6,97 +6,72 @@
 | Machine | Apple M3 (4 fast + 4 efficient cores), 16 GB, macOS 27.0, mains power |
 | Docker | Docker Desktop 29.4, Linux VM with 8 CPUs and 8 GB |
 | Image | `python:3.14.7-slim`: Debian 13, Python 3.14.7 |
-| Stack | Bottle 0.13.4, SQLAlchemy 2.0.52, psycopg 3.3.4, PostgreSQL 18.6, Docker Compose |
+| Stack | Bottle 0.13.4, gunicorn 26.2.0, SQLAlchemy 2.0.52, psycopg 3.3.4, PostgreSQL 18.6, Docker Compose |
+| Part 2 variant 3 | FastAPI 0.141.1, uvicorn 0.53.0, a2wsgi 1.10.10 |
 
 - **Exact Python version**: 3.14.0–3.14.4 use an incremental garbage collector; 3.14.5 returned
   to three generations. Memory and latency figures apply to 3.14.7.
-- **Slim image**: 44 MB download instead of 404 MB (arm64). No compiler; none needed, every
-  dependency installs from a prebuilt wheel. Services and benchmark share the same base image.
+- **Slim image**: 44 MB download instead of 404 MB (arm64). No compiler needed: every dependency
+  installs from a prebuilt wheel. Services and benchmark share the same base image.
 
 ---
 
 ## 1. Summary
 
-*Written last, after Stage 2.*
+> **Decision: keep Bottle for request handling; serve the two live streams (prices and
+> valuations) with FastAPI.** Recommended as the next step.
+
+- **One desk process per service keeps 100 traders' screens within budget on gunicorn, 200 with
+  FastAPI serving the streams** (10 000 instruments, 5 000 open positions, live trading).
+- **At 200 traders, valuations reach the screen in about 1 s instead of 2 s**, and market-data +
+  pricing use 37 % less CPU (0.64 vs 1.02 cores).
+- **Orders take 0.11–0.15 s in every variant**, also with 20 traders trading at once.
+- **Part 1** (a books-service sample): the framework alone brings nothing; threads and open
+  streams set the limit. Stage 4B replaced the `wsgiref` development server with gunicorn.
 
 ---
 
-## 2. System inventory (Stage 0)
+## 2. System
 
-Six Bottle services, one PostgreSQL database, a React UI behind the Vite proxy. Endpoints:
+Six Bottle services, one PostgreSQL database, a React UI behind the Vite proxy. 43 endpoints:
 appendix A.
 
 ### 2.1 How the services run
 
 | | |
 | --- | --- |
-| Server | `wsgiref`: a new thread per connection, no limit; HTTP/1.0; listen queue of 5. A development server |
-| Processes | One per container. Five services keep live data in memory, so each runs as one process only (books-service could run more) |
-| Database | SQLAlchemy ORM, synchronous sessions (54 call sites), psycopg 3, pool of 5 + 10 connections |
+| Server | gunicorn, one gthread worker per service (stage 4B); before it, `wsgiref`, a development server |
+| Threads | `SERVER_THREADS`, default 40: one thread per request or open stream; market-data, pricing and monitoring serve streams and use 256 |
+| Processes | One worker per service: services keep live state in memory |
+| Database | SQLAlchemy ORM, synchronous sessions, psycopg 3; 15 connections per service (6 × 15 = 90, under PostgreSQL's default 100) |
 | Calls to other services | `urllib`: blocking, with timeouts |
-| Bottle used in | each service's `api.py` and `desk_runtime` (`http.py`, `service_runtime.py`); domain logic does not depend on it |
 | Errors | JSON `{"error": "…"}` for every status |
-| Tests | None; checked by hand in the UI |
-| Containers | One image, a healthcheck per service |
 
-### 2.2 Services
+| Service (port) | Endpoints | Does |
+| --- | --- | --- |
+| market-data (8001) | 14 | Polls market-data APIs, stores quotes and curves, streams updates |
+| pricing (8002) | 8 | Revalues trades on every market update; valuations, book risk, previews |
+| monitoring (8003) | 5 | Checks every service, collects and streams logs |
+| books (8004) | 6 | Trading books |
+| blotter (8006) | 7 | Trades with valuations, book summaries, audit history |
+| trade-action (8008) | 3 | Validates and executes trade orders, one transaction per action |
 
-| Service (port, endpoints) | Does | Depends on | In the background |
-| --- | --- | --- | --- |
-| market-data (8001, 19) | Polls seven market-data APIs, stores quotes and curves, streams updates | PostgreSQL; 7 external APIs | provider polling, retention sweep |
-| pricing (8002, 7) | Revalues trades on every market update; valuations and book risk | PostgreSQL; market-data stream | stream consumer, trade refresh |
-| monitoring (8003, 5) | Checks every service, collects and streams logs | PostgreSQL; other services' `/health`; log files | pollers every 1–5 s |
-| books (8004, 6) | Trading books | PostgreSQL | nothing |
-| trade-action (8008, 6) | Validates and executes trade orders | PostgreSQL | order worker |
-| blotter (8006, 7) | Trades with valuations, book summaries, audit history | PostgreSQL; pricing stream | stream consumer, trade refresh |
-
-### 2.3 Load character
+### 2.2 Load character
 
 - **All six are I/O-bound** (from the code and 61 000 provider calls in the logs).
 - **Request handlers**: short database queries. The only computation: pricing's `POST /price`
   and `POST /scenario`.
 - **Long waits run in background threads** (external APIs, other services' streams, health
   polling). The framework does not change them.
-- **External APIs inside a request**: only market-data's `GET /symbols/search`, `POST /refresh`,
-  `POST /curves/refresh`; they answer in 83–378 ms at the median, up to 1.8 s at p95.
+- **External APIs inside a request**: market-data's `GET /symbols/search` and `POST /refresh`;
+  they answer in 83–378 ms at the median, up to 1.8 s at p95.
 - **Streams to the UI**: market-data, pricing, monitoring; every open UI holds two or three.
-- **Today's load is small**: one UI polling every 2–10 s. No service has a performance problem,
-  so the benchmark asks how the backend scales.
 - **A migration can change only**: database waits in handlers, the UI streams, market-data's
   in-request API calls.
 
-### 2.4 Benchmark sample
+### 2.3 Dependencies under ASGI
 
-**books-service** and a stub standing in for another service.
-
-- **Why not pricing or market-data**: their heavy work runs in background threads (pricing
-  revalues positions on every market update; market-data polls providers). A framework changes
-  only request handling, and requests look the same in every service.
-- **Representative**: request → short database query → JSON, like nearly every handler.
-- **Identical in both frameworks**: no background threads, nothing in memory, only the database.
-- **The stub adds the missing case**: waiting on another service.
-- **Limit**: the sample shows what one request looks like, not the desk's volume (instruments,
-  traders, positions).
-
-### 2.5 Scenarios
-
-| # | Request | Shows | In this system |
-| --- | --- | --- | --- |
-| S1 | `GET /health` | framework and server overhead | every request |
-| S2 | `GET /io`: the stub waits 50 ms | waiting on another service — where ASGI should help | market-data's symbol search and refreshes |
-| S3 | `GET /cpu`: 20 000 × SHA-256 | computation — where ASGI cannot help | pricing's `POST /price` |
-| S4 | insert a book, read it by id | synchronous database work | most handlers |
-| S5 | `GET /health` beside 10, 50, 200 open streams | whether open streams block other requests | the UI streams |
-
-- Real external APIs are not called: rate limits and variable latency make runs irreproducible;
-  only the wait matters, not who answers.
-- S4 uses a separate database, emptied before each point.
-
-Variants, parameters and thresholds: `docs/decision_criteria.md`.
-
-### 2.6 Dependencies under ASGI
-
-No library needs WSGI. Only our own code stands in the way of an async migration.
+No library needs WSGI; only our own code blocks an async migration.
 
 | Dependency | Under ASGI |
 | --- | --- |
@@ -106,33 +81,80 @@ No library needs WSGI. Only our own code stands in the way of an async migration
 | structlog | request context lives in `contextvars`; async code keeps it per task |
 | Alembic | runs migrations in its own container, outside the services |
 | desk-pricing | pure Python, no dependencies |
-| **Our code** | blocking `urllib` calls in 4 files; streams read from a `queue.Queue` that background threads fill; handlers use Bottle's global `request` and `response` |
+| **Our code** | blocking `urllib` calls; streams fed by background threads; handlers use Bottle's global `request` and `response` |
+
+### 2.4 Simplified before measuring
+
+| | Before | After |
+| --- | --- | --- |
+| Python (services + libs) | 11 964 lines, 139 files | 10 206 lines, 129 files (−15 %) |
+| Frontend (js / jsx) | 13 376 lines | 12 381 lines (−7 %) |
+| Endpoints | 50 | 43 (market-data −5, trade-action −3, pricing +1) |
+| Migrations | 9 files | 1 baseline |
+| market-data | 5 010 lines | 3 957 lines |
+| blotter | 848 lines | ~590 lines |
+
+- **Streams**: three hand-written SSE copies → one `EventHub` and `follow_stream` in
+  `desk_runtime/streams.py`; each frame serialized once.
+- **market-data**: one owner of "is this symbol served" (`quote_board.py`); three feed copies →
+  `SymbolQuoteFeed`; no full active-set query per quote.
+- **pricing**: no `FOR UPDATE` transaction per tick; valuation status, `stale_at`, curve hints and
+  curve moves in bp computed in the backend.
+- **trade-action**: no queue, worker or second validation; one transaction per action;
+  201 / 200 (replay) / 422.
+- **blotter**: no second in-memory copy of trades; 5 queries per page instead of 5 + N; totals and
+  currency conversion in the backend.
+- **monitoring**: one loop per target; state at once, audit after 3 failures.
+- **UI**: no curve maths, currency totals, freshness rules or statuses; dead `sessionStorage`
+  cache removed.
+- **Infra**: `python:3.14.7-slim` pinned; one compose block and one `HEALTHCHECK`.
 
 ---
 
-## 3. Benchmark method
+## 3. Method
+
+Rules for both parts:
+
+- **Criteria committed before the first run** of each part: [`docs/decision_criteria.md`](decision_criteria.md)
+  (Part 1: `174eb35`; Part 2: `c10e7dd`; Part 2b: `1749779`).
+- **Machine**: one laptop (header); services, load and database in Docker on the same VM.
+- **Pinned versions**: every package in `requirements.txt`; appendix B.
+- **Production mode**: no reload, no debug, no access log.
+- **Variants interleaved** within each run.
+- **Each point = median of 3 runs; spread = max − min.**
+- **A difference counts only if larger than the larger spread.**
+- **More than 1 % errors or timeouts → the variant loses the point.**
+
+### 3.1 Part 1: the sample
+
+**books-service** code and a stub standing in for another service, behind Bottle and FastAPI;
+identical responses. Request → short database query → JSON, like nearly every handler; no
+background threads, nothing in memory.
 
 | Variant | Server | Handlers and clients |
 | --- | --- | --- |
 | `bottle-sync` | gunicorn, sync worker | one request at a time |
 | `bottle-threads` | gunicorn, 40 threads | `requests`, sync database driver |
+| `bottle-threads-256` † | gunicorn, 256 threads | as `bottle-threads` |
+| `bottle-wsgiref` † | `wsgiref`, the pre-4B server | as `bottle-threads` |
 | `fastapi-async` | uvicorn | `async def`, httpx, async database driver |
 | `fastapi-sync` | uvicorn | `def` in a 40-thread pool, `requests`, sync database driver |
 
-- **Sample**: books-service code and a stub (2.4), behind Bottle and FastAPI; identical responses.
-- **Load**: c = 1, 10, 50, 200; S5: 10, 50, 200 open streams.
-- **One point**: 10 s warm-up, 30 s measured, 3 runs, variants alternating; client timeout 10 s.
-- **Setup**: one process per variant, server on its own CPU; separate PostgreSQL, emptied
-  before each S4 point.
-- **Metrics**: successful req/s; p50, p95, p99; errors and timeouts; server CPU and memory (RSS).
-- **Load generator**: oha — listed in the assignment, reports percentiles and error types; used
-  a quarter of one core at 31 000 req/s.
-- **Fair comparison** (PDF 5.1): same host, N and Python; production mode; same generator;
-  pinned versions.
-- **Run**: `benchmark/run_benchmark.sh`, Docker only, about 2 h 45 min. Commands and
-  versions: appendix B.
+| # | Request | Shows | In this system |
+| --- | --- | --- | --- |
+| S1 | `GET /health` | framework and server overhead | every request |
+| S2 | `GET /io`: the stub waits 50 ms | waiting on another service | market-data's symbol search and refresh |
+| S3 | `GET /cpu`: 20 000 × SHA-256 | computation | pricing's `POST /price` |
+| S4 | insert a book, read it by id | synchronous database work | most handlers |
+| S5 | `GET /health` at c = 10 beside 10, 50, 200 open streams | whether open streams block other requests | the UI streams |
 
-### 3.1 Fixes made during the measurement
+- **Load**: c = 1, 10, 50, 200; target c = 50. Latency budget p95 ≤ 100 ms (S3 none).
+- **One point**: 10 s warm-up, 30 s measured; client timeout 10 s; load generator oha.
+- **Setup**: one process per variant, server on its own CPU; S4 on a separate PostgreSQL,
+  emptied before each point.
+- **Metrics**: successful req/s; p50, p95, p99; errors and timeouts; server CPU and RSS.
+
+Fixes made during the measurement:
 
 | Problem | Fix |
 | --- | --- |
@@ -142,44 +164,201 @@ No library needs WSGI. Only our own code stands in the way of an async migration
 | Load generator ran out of ports: `bottle-sync` closes every connection | port reuse; first full run discarded |
 | Database pool kept reopening connections, FastAPI 2–4× more often | 15 connections kept open; S4 measured again |
 
-### 3.2 Limitations
+### 3.2 Part 2: the desk core
+
+The business core of the desk: quotes in, valuations out, trades through.
+
+| # | Variant | Serving |
+| --- | --- | --- |
+| 1 | `wsgiref` | the development server before stage 4B |
+| 2 | gunicorn | gthread, one worker, threads = 40 + K + 10 for market-data and pricing (stage 4B) |
+| 3 | FastAPI streams | FastAPI serves `/stream` (market-data) and `/valuation-stream` (pricing); their other routes are the same Bottle app behind `a2wsgi` (40 workers); the other four services as in variant 2 |
+
+- **Same application code** in all variants; only the HTTP layer differs.
+- **Desk**: 10 000 watched equities; 1 000 of them held, refreshed every 15 s, the rest every
+  60 s (about 217 quotes per second); 5 000 open positions (3 500 spot, 500 bonds, 500 swaps,
+  500 options).
+- **Provider stub**: constant 200 ms, seeded random-walk prices; 401 req/s at p99 203 ms alone.
+- **Watching clients**: K = 10, 50, 100, 200; each holds the price stream and the valuation
+  stream, about 390 frames per second. K = 200 means about 78 000 frames per second.
+- **Trading**: 0.2 orders opened per second (720 per hour), each closed about 60 s later.
+  Part 2b: T = 5 and 20 traders at once, one order about every 20 s each.
+- **Price previews**: `POST /price`, a European option, 0.2 per second.
+- **One run**: fresh database from a template → all 10 000 quotes and 5 000 valuations live →
+  90 s warm-up → clients connect at K / 10 per second → 30 s without a dropped stream → 150 s
+  measured.
+- **Each service on its own CPU of the VM**: market-data 7, pricing 6, trade-action and stub 5,
+  blotter 4, the rest 2–3, load client 0–1.
+- **A run counts only if** all clients stay connected, the load client uses < 0.8 cores and other
+  programs on the laptop use ≤ 3 cores during the window. No run crossed a limit.
+
+| Budget (p95) | |
+| --- | --- |
+| Tick delivery: provider response → tick at the client | ≤ 1 s |
+| Valuation freshness: provider response → valuation at the client | ≤ 1 s |
+| Price preview (`POST /price`) | ≤ 300 ms |
+| Position on screen: order confirmed → first valuation of that position | ≤ 3 s |
+| Order execution (`POST /trade-actions`) | ≤ 500 ms |
+| Errors: timeouts, 5xx, dropped streams | ≤ 1 % |
+
+---
+
+## 4. Part 1: the sample (books-service)
+
+Successful req/s / p95 ms at c = 50 (S5: 50 open streams). p99 in brackets where the tail is the
+result.
+
+| | `bottle-sync` | `bottle-threads` | `bottle-threads-256` † | `bottle-wsgiref` † | `fastapi-async` | `fastapi-sync` |
+| --- | --- | --- | --- | --- | --- | --- |
+| S1 `/health` | 11 479 / 4.7 | 14 116 / 5.7 | 14 013 / 4.9 | 7 016 / 0.9 | 33 064 / 2.5 | 17 447 / 3.2 |
+| S2 `/io` | 17.5 / 2 886 | 711 / 105 | 918 / 59.2 | 656 / 56.2 (p99 1 094) | 693 / 90.5 | 719 / 101 |
+| S3 `/cpu` | 201 / 256 | 201 / 555 | 202 / 496 | 207 / 1 103 (p99 2 526) | 216 / 380 | 212 / 460 |
+| S4 `/db` | 1 117 / 48.5 | 1 343 / 120 | 1 346 / 72.6 | 1 249 / 19.0 (p99 1 050) | 1 094 / 73.2 | 1 343 / 57.6 |
+| S5 `/health` | – | 0 / all timeouts | 13 367 / 0.8 | 7 058 / 0.9 | 29 074 / 0.4 | – |
+| S2, c = 200 | 5.3, 71.5 % errors | 705 / 302 | 2 966 / 84.5 | 1 700 / 55.2 (p99 1 308) | 360 / 606 | 700 / 314 |
+| S3, c = 200 | 203 / 1 004 | 202 / 1 445 | 194 / 2 109 | 207 / 1 894, 4.4 % errors | 210 / 613, 3.8 % errors | 210 / 1 206 |
+
+† One run, 24 September. The others: median of 3 runs; spread typically 1–7 % of the median,
+S4 up to 25 %. Every range: `benchmark/results/summary.md`, `benchmark/results/threads-check/summary.md`.
+`–`: not measured.
+
+**Observations**
+
+- **Open streams exhaust a fixed thread pool**: beside 50 streams `bottle-threads` (40) answers
+  nothing; with 256 threads 13 367 req/s at 0.8 ms; `fastapi-async` 29 074 req/s at 0.4 ms.
+- **Waiting is limited by threads, not by the framework**: at 40 threads Bottle and FastAPI `def`
+  both stop near 710 req/s (711, 719); with 256 threads Bottle reaches 918 req/s at p95 59.2 ms,
+  and 2 966 req/s at c = 200, where `fastapi-async` gives 360.
+- **`wsgiref` has a 1 s tail**: p99 1 094 ms in S2 and 1 050 ms in S4 at c = 50, from c = 10
+  (S2 p99 1 079 ms); its listen queue of 5 drops connections, which retry after 1 s. p95 hides it.
+- **Computation is the same everywhere**: S3 201–216 req/s on one core; only the order of service
+  changes p95 (256 to 555 ms).
+- **A short database request gains nothing from async**: S4 FastAPI `def` = Bottle threads
+  (1 343 req/s each); `fastapi-async` 1 094.
+- **FastAPI async has the lowest framework overhead**: S1 33 064 req/s vs 11 479–17 447; every
+  variant answers in 0.1 ms at c = 1.
+- **Memory**: Bottle 77–87 MB, FastAPI 110–117 MB.
+
+**Result of Part 1 (criteria `174eb35`): NO-GO for a full migration**
+
+| Gate | Result |
+| --- | --- |
+| 1. No regression in S3, S4 | **FAIL**: S3 p95 FastAPI 380 ms, Bottle 256 ms |
+| 2. Real gain in S2 or S5 | **PASS**: S5, Bottle answers nothing beside 50 streams |
+| 3. Cost | not scored |
+| 4. Need: Bottle over budget, FastAPI within | **PASS** at 40 threads; **FAIL** at 256 threads (S2 p95 59.2 ms) |
+
+- **What Part 1 could not say**: whether ASGI's one win, open streams, matters at the desk's
+  real volume (Part 2).
+
+![S2, waiting on another service](../benchmark/results/charts/s2.png)
+![S5, open streams](../benchmark/results/charts/s5.png)
+
+All charts, S1–S5: [`benchmark/results/charts/`](../benchmark/results/charts/) (3 runs, min–max bars) and
+[`benchmark/results/threads-check/charts/`](../benchmark/results/threads-check/charts/) (†).
+
+**Limitations**
 
 - One laptop; macOS decides whether the server's CPU is a fast or a slow core.
 - Each client waits for its answer before the next request: overload latency is understated.
 - The stub waits a fixed 50 ms; the real external APIs take 83–378 ms.
 - The sample has no background threads and no in-memory state.
 
-## 4. Results
+---
 
-Median of 3 runs. Spread: typically 1–7 % of the median, S4 up to 25 %; min–max bars on the
-charts, every range in `benchmark/results/summary.md`.
+## 5. Part 2: the desk core
 
-### 4.1 Target load: c = 50 (S5: 50 open streams)
+p95 in ms, median of 3 runs (spread in brackets). ✗ = over budget. Every table and run:
+`benchmark/results/desk_day/summary.md`.
 
-Successful req/s / p95 in ms (budget 100 ms):
-
-| | `bottle-sync` | `bottle-threads` | `fastapi-async` | `fastapi-sync` |
+| K watching clients | 10 | 50 | 100 | 200 |
 | --- | --- | --- | --- | --- |
-| S2 `/io` | 17 / 2 886 | 711 / 105 | 693 / 90.5 | 719 / 101 |
-| S3 `/cpu` | 201 / 256 | 201 / 555 | 216 / 380 | 212 / 460 |
-| S4 `/db` | 1 117 / 48.5 | 1 343 / 120 | 1 094 / 73.2 | 1 343 / 57.6 |
-| S5 `/health` | – | 0 / all timeouts | 29 074 / 0.4 | – |
+| **Valuation freshness** (≤ 1 000) | | | | |
+| `wsgiref` | 189 | 303 | 1 029 ✗ | 2 419 ✗ |
+| gunicorn | 177 | 368 | 719 | 1 960 ✗ |
+| FastAPI streams | 176 | 300 | 913 | 959 |
+| **Tick delivery** (≤ 1 000) | | | | |
+| `wsgiref` | 47.4 | 60.9 | 81.0 | 103 |
+| gunicorn | 47.5 | 61.2 | 74.8 | 110 |
+| FastAPI streams | 48.2 | 57.3 | 69.8 | 84.1 |
+| **Price preview** (≤ 300) | | | | |
+| `wsgiref` | 152 | 175 | 237 | 467 ✗ |
+| gunicorn | 152 | 205 | 223 | 394 ✗ |
+| FastAPI streams | 183 | 170 | 237 | 286 |
+| **Position on screen** (≤ 3 000) | | | | |
+| `wsgiref` | 2 426 | 2 414 | 2 482 | 3 077 ✗ |
+| gunicorn | 2 408 | 2 419 | 2 622 | 2 573 |
+| FastAPI streams | 2 451 | 2 387 | 2 465 | 2 484 |
+| **Order execution** (≤ 500) | | | | |
+| `wsgiref` | 119 | 114 | 121 | 129 |
+| gunicorn | 125 | 122 | 123 | 124 |
+| FastAPI streams | 125 | 131 | 137 | 122 |
+| **Largest K within budget** | `wsgiref` 50 | gunicorn 100 | FastAPI streams 200 | |
 
-- **Errors**: none, except `bottle-threads` in S5.
-- **CPU per request**: see 4.3.
-- **Memory**: Bottle 77–87 MB, FastAPI 110–117 MB.
+- **Errors**: 0 % everywhere; no dropped stream in 36 runs.
 
-### 4.2 Other loads
+**Observations**
 
-- **c = 1**: all variants within 2 ms of each other.
-- **c = 200, S2**: `fastapi-async` 360 req/s, `bottle-threads` 705; `bottle-sync` 71 % timeouts.
-- **c = 200, S3**: `fastapi-async` 3.8 % timeouts.
-- **S1, c = 50**: `fastapi-async` 33 000 req/s, the others 11 500–17 400.
+- **Up to about 100 clients the server makes no measurable difference**: at K = 100 FastAPI's
+  freshness spans 426–1 437 ms over three runs and overlaps the others.
+- **At 200 clients FastAPI keeps valuations fresh; threads do not.** Every FastAPI run
+  (743 / 959 / 1 107 ms) beats every gunicorn run (1 807 / 1 960 / 2 727 ms).
+- **The same shows on the server**: pricing's lag behind market data at K = 200 is 0.7–1.3 s
+  with FastAPI, 1.6–2.9 s with gunicorn.
+- **Why**: on gunicorn every open stream is a thread woken for each frame: 200 threads in
+  market-data at about 170 frames a second, 200 in pricing at about 220. They compete for the
+  interpreter with pricing's single revaluation thread. FastAPI serves all streams from one
+  event loop.
+- **Tick delivery and previews improve less** (84 vs 110 ms, 286 vs 394 ms): −24 % and −27 %.
+- **Orders do not depend on the variant**: 114–137 ms; FastAPI does not change trade-action.
+- **The margin is thin**: FastAPI's K = 200 freshness median is 959 ms against a 1 000 ms budget;
+  one run was 1 107 ms.
 
-### 4.3 CPU cost
+**Part 2b: many traders trading at once** (K = 50; `benchmark/results/desk_day_trading/summary.md`)
 
-CPU time per request in ms, at c = 50. The same number is how many cores one service needs for
-1 000 requests per second. Cloud cost follows cores.
+| T traders | 5 (0.25 orders/s) | | | 20 (1 order/s) | | |
+| --- | --- | --- | --- | --- | --- | --- |
+| | `wsgiref` | gunicorn | FastAPI | `wsgiref` | gunicorn | FastAPI |
+| Order execution | 124 | 119 | 130 | 150 | 138 | 137 |
+| Valuation freshness | 334 | 440 | 201 | 413 | 376 | 258 |
+| Position on screen | 2 481 | 2 527 | 2 430 | 2 421 | 2 409 | 2 385 |
+
+- **Every variant within every budget**; 0 errors; about 150 orders opened per run at T = 20.
+- **Orders take the same time in every variant**: differences are within the spread (up to 53 ms).
+- **The Part 2 decision stands** (criterion `1749779`).
+
+**What limits the desk besides the server** (measured on gunicorn while setting up Part 2)
+
+- **Logging in costs 12.8 MB per trader**: `/snapshot` 7.4 MB and 0.9 s of market-data CPU,
+  `/valuations` 5.4 MB.
+- **A price preview checks the underlying against the whole watchlist**: 120–170 ms of pricing CPU;
+  one preview per second already pushes freshness past 1 s with one client.
+- **Every new trade makes pricing rebuild its index of 5 000 positions** (every 2 s): at 2 orders
+  per second freshness reaches 1 s with one client.
+- **The Trades & PnL screen returns 8.2 MB in 290–480 ms**: polled every 5 s, it fills the
+  blotter's core at about 15 traders (calculated).
+
+![Part 2, p95 by watching clients](../benchmark/results/desk_day/charts/desk_p95.png)
+![Part 2, market-data + pricing CPU](../benchmark/results/desk_day/charts/desk_cpu.png)
+
+Part 2b charts: [`benchmark/results/desk_day_trading/charts/`](../benchmark/results/desk_day_trading/charts/).
+
+**Limitations**
+
+- The whole desk on one laptop; other programs used a median of 1.3 cores during the runs.
+- p95 of orders and previews rests on about 30 samples per run.
+- Clients hit the services directly, not through the Vite proxy; they do not poll screens.
+- One process per service in every variant; many processes behind a shared message bus were not
+  measured.
+
+---
+
+## 6. CPU cost
+
+Cloud cost follows cores.
+
+**Per request** (Part 1, c = 50): CPU ms per request, which is also the cores one service needs
+for 1 000 requests per second.
 
 | | Bottle, 40 threads | FastAPI `def` | FastAPI async |
 | --- | --- | --- | --- |
@@ -188,245 +367,236 @@ CPU time per request in ms, at c = 50. The same number is how many cores one ser
 | S3 `/cpu`: computation | 4.97 | 4.71 | 4.62 |
 | S4 `/db`: database | 0.74 | 0.74 | **0.91** (async driver) |
 
-- **FastAPI itself is cheaper**: 0.04 ms less per request.
-- **Its async libraries cost more**: +63 % CPU when a request waits on a service, +23 % when it
-  queries the database. Nearly every handler here does one of the two.
-- **Net effect for this system**: async FastAPI needs more cores for the same traffic.
+**Per trader** (Part 2): market-data + pricing cores (per 100 watching clients).
 
-### 4.4 Charts
+| K | 10 | 50 | 100 | 200 |
+| --- | --- | --- | --- | --- |
+| `wsgiref` | 0.41 | 0.50 | 0.70 | 0.97 (0.48) |
+| gunicorn | 0.42 | 0.53 | 0.66 | 1.02 (0.51) |
+| FastAPI streams | 0.39 | 0.43 | 0.54 | 0.64 (0.32) |
 
-Throughput and p95 against concurrency.
+- **Async libraries cost more per request**: +63 % CPU when a request waits on a service, +23 %
+  on the database. Moving request handlers to async would raise the bill.
+- **Async streams cost less per trader**: at K = 200 market-data drops from 0.62 to 0.36 cores and
+  pricing from 0.40 to 0.28; together 37 % less.
+- **In business terms**: 200 traders' screens need about one core for market-data and pricing on
+  gunicorn and about two thirds of a core with FastAPI streams.
 
-![S1](../benchmark/results/charts/s1.png)
-![S2](../benchmark/results/charts/s2.png)
-![S3](../benchmark/results/charts/s3.png)
-![S4](../benchmark/results/charts/s4.png)
-![S5](../benchmark/results/charts/s5.png)
+---
 
-## 5. Interpretation
+## 7. Decision (ADR)
 
-- **S1, framework overhead** — lowest in FastAPI async; every variant answers in 0.1 ms at
-  c = 1, so it does not matter at this system's load.
-- **S2, waiting on another service** — equal up to 40 concurrent requests. Bottle threads and
-  FastAPI `def` both stop at 40 threads (≈ 710 req/s). FastAPI async has no thread limit: p95
-  90.5 vs 105 ms at c = 50; at c = 200 it is slower, because httpx costs 70 % more CPU per call.
-- **S3, computation** — same throughput on one core; only the order of service changes p95.
-- **S4, database** — a short query is CPU work (0.7 ms): FastAPI `def` = Bottle threads. The
-  async driver is slower: nothing to overlap, extra CPU.
-- **S5, open streams** — Bottle threads serve nothing from 40 open streams; FastAPI async is
-  unaffected. Bottle with 256 threads (checked once) also served `/health` in 1.1 ms beside 200.
-- **Longer waits** favour async: at the real APIs' 200 ms, 40 threads stop at 200 req/s.
+**ADR-002 · Serve the market-data and pricing streams with FastAPI · 29 September 2026**
 
-## 6. Criteria and decision (ADR)
-
-**ADR-001 · Bottle (WSGI) → FastAPI (ASGI), all six services · 24 September 2026**
-
-> **Decision: NO-GO. At today's load and for this application, stay on Bottle.**
->
-> **Next: replace the `wsgiref` development server with gunicorn threads (stage 4B).**
+> **Decision: GO for the streams, NO-GO for the rest.** FastAPI serves market-data's `/stream`
+> and pricing's `/valuation-stream`; every other route stays Bottle; the other four services stay
+> on gunicorn.
 
 **Why**
 
-- **No need for migration.** Bottle with enough threads stays under 100 ms and handles waiting
-  better than FastAPI (S2: 918 vs 697 req/s; at c = 200: 2 966 vs 380; extra run below).
-- **The framework alone changes nothing.** FastAPI `def` = Bottle threads (S2: 719 vs 711 req/s;
-  S4: 1 343 each).
-- **The weak spot is today's server.** `wsgiref` has a 1 s tail and timeouts under load;
-  gunicorn threads has neither.
-- **No performance problem today.** One UI polling every 2–10 s with 2–3 streams (2.3).
+- **The criterion passed on two counts**: FastAPI streams stay within the market-data and pricing
+  budgets at 200 clients, gunicorn at 100 (a); valuation freshness at K = 200 is 51 % lower,
+  beyond the spread (b).
+- **It costs less CPU, not more**: −37 % for market-data + pricing at K = 200.
+- **It holds under trading**: 5 and 20 traders trading at once change nothing (Part 2b).
+- **Request handlers stay synchronous**: Part 1 showed no gain for short database requests and
+  higher CPU for async libraries.
 
-**Context**: six Bottle services on `wsgiref`, a development server (2.1). Does ASGI let them
-scale better, and is migrating worth it now?
+**Context**: six Bottle services; ADR-001 (Part 1, 24 September) chose gunicorn threads over a
+full migration. Does ASGI help the desk's core at real volume?
 
-**Criteria**: [`docs/decision_criteria.md`, commit 174eb35](https://github.com/j-gulinski/trading-desk/blob/174eb351700b3fec30dff70c421b1ac1e7980609/docs/decision_criteria.md),
-committed before the first run. GO needs all four gates.
+**Criteria**: `docs/decision_criteria.md`, Part 2 (`c10e7dd`) and Part 2b (`1749779`), committed
+before the runs.
 
-**Gates** (stage 1, as committed; c = 50)
-
-| Gate: GO needs | Result: FastAPI vs the better Bottle (sync or 40 threads) |
+| Criterion | Result |
 | --- | --- |
-| **1. No regression**: FastAPI within 10 % of Bottle in S3, S4 | **FAIL**: S3 p95 FastAPI 380 ms, Bottle 256 ms |
-| **2. Real gain**: FastAPI p95 30 % lower or 2× throughput in S2 or S5 | **PASS**: S5 FastAPI 0.4 ms; Bottle answers nothing beside 50 streams |
-| **3. Cost**: ≤ 3 h per service | not scored; scope below |
-| **4. Need**: Bottle over 100 ms, FastAPI under | **PASS**: S2 Bottle 105 ms, FastAPI 90.5 ms |
-| **Result** | **NO-GO**: gate 1 fails |
+| (a) One K level higher within the market-data and pricing budgets | **yes**: FastAPI 200, gunicorn 100 |
+| (b) p95 ≥ 30 % lower at K = 200, beyond the spread | **yes, freshness**: 959 vs 1 960 ms; tick −24 % and preview −27 % do not count |
+| CPU per client ≤ +10 % | **yes**: −37 % |
+| Part 2b: the decision holds with many traders | **yes**: all variants within budget at T = 5 and 20 |
 
-- **Uncertainty**: median of 3 runs, spread 1–7 % (S4 up to 25 %); every difference above is
-  larger than the spread.
-- **Risks** (section 7): the worst are an order skipping the price check, stale prices and
-  PostgreSQL running out of connections.
-
-**Extra run: Bottle with more threads, a quick win**
-
-- **Why**: FastAPI won gates 2 and 4 only where Bottle ran out of its 40 threads (S2 above 40
-  clients, S5). Raising the limit is one gunicorn flag. Stage-1 "Bottle" also mixed two worker
-  types (`bottle-sync` in S3, S4; `bottle-threads` in S2, S5); a service runs one.
-- **What**: S1–S5 once more, one run per point: today's `wsgiref`, gunicorn with 256 threads (no
-  request waits for a thread), `fastapi-async`. `fastapi-async` came within 5 % of stage 1.
-
-| c = 50 unless noted | today: `wsgiref` | gunicorn, 256 threads | `fastapi-async` |
-| --- | --- | --- | --- |
-| S2, waits 50 ms | 656 req/s, p99 1 094 ms | 918 req/s, p99 61.7 ms | 697 req/s, p99 104 ms |
-| S2 at c = 200 | 1 700 req/s, p99 1 308 ms, timeouts | 2 966 req/s, p99 116 ms | 380 req/s, p99 782 ms |
-| S4, database | 1 249 req/s, p99 1 050 ms | 1 346 req/s, p99 98.9 ms | 1 134 req/s, p99 90.4 ms |
-| S1, `/health` | 7 016 req/s | 14 013 req/s | 33 960 req/s |
-
-- **Quick win over today's server**: gunicorn threads cuts p99 from about 1 s to under 120 ms;
-  throughput 2× in S1, +40 % in S2, +8 % in S4.
-- **Better than FastAPI where requests wait**: S2 918 vs 697 req/s; at c = 200, 2 966 vs 380.
-- **Gates against this Bottle**: gate 4 **fails, no need**: Bottle stays under 100 ms in S2, S4,
-  S5 (S2: 59.2 ms). Gate 1 still fails (S4: FastAPI 1 134 vs Bottle 1 346 req/s). Gate 2 passes
-  only on paper (S5: 0.4 vs 0.8 ms).
-- **What fails today**: `wsgiref`'s listen queue of 5 drops new connections under load; they
-  retry after 1 s, so p99 is about 1 s from c = 10. It also logs every request, as the services
-  do today.
-- **Charts** show p95, which hides that tail. All five: `benchmark/results/threads-check/`.
-
-![S2 extra run](../benchmark/results/threads-check/charts/s2.png)
-![S4 extra run](../benchmark/results/threads-check/charts/s4.png)
-![S5 extra run](../benchmark/results/threads-check/charts/s5.png)
-
-**Scope of a migration (gate 3)**
-
-- 50 endpoints in six `api.py`, errors kept as `{"error": …}`; uvicorn and `lifespan` in
-  `desk_runtime`
-- contract tests before and after: none today, about 100 endpoint × status cases
-- async where requests wait: handlers on the async database driver, three streams, calls between
-  services on `httpx.AsyncClient`
-- background jobs stay threads on the synchronous driver (54 `session_scope()` call sites in
-  total; risks 5, 6)
+- **Uncertainty**: (a) rests on a median of 959 ms against 1 000 ms; (b) and the CPU saving are
+  clear of the spread.
 
 **Options**
 
 | Option | For | Against |
 | --- | --- | --- |
-| 1. **Full migration** | no thread limit; Pydantic, OpenAPI | no gain at today's load; more CPU per call; about +30 MB RAM per service; the scope above |
-| 2. **gunicorn threads (chosen)** | one file changes (`service_runtime.py`); removes `wsgiref`'s tail | a thread per open stream; no Pydantic or OpenAPI |
-| 3. **FastAPI trial in market-data** (after 2) | the only service whose requests wait on external APIs; shows how FastAPI fits the rest | two frameworks at once; the largest service |
-
-**If built from scratch for heavy traffic: FastAPI, fully async**
-
-| Gains | Costs |
-| --- | --- |
-| open streams cost almost nothing: 200 streams, `/health` 0.4 ms, memory flat | more CPU per call: httpx 0.73 vs 0.43 ms, async driver 0.8–1.0 vs 0.7 ms |
-| waits need no threads: 1 000 req/s × 0.3 s wait = 300 threads (calculated) | short database requests gain nothing: S4 1 134 vs 1 346 req/s |
-| lowest overhead: S1 33 960 vs 14 013 req/s | computation still needs processes: S3 about 200 req/s per core everywhere |
-| Pydantic, OpenAPI, WebSocket built in | one blocking call freezes the whole service |
-
-- **Heavy traffic needs more than a framework**: state out of memory, many processes behind a
-  load balancer, computation on a queue. **Our one-process limit comes from in-memory state, not
-  from Bottle.**
-
-## 7. Risk analysis
-
-What could work worse than today after an async migration (`fastapi-async`), one process per
-service. P = probability, I = impact: L / M / H.
-
-| # | Risk | Category | P | I | Mitigation | Warning signal |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | **Error messages disappear from the UI.** FastAPI answers `{"detail": …}` and 422 by default; the UI shows `{"error": …}`; no tests would catch a missed path | process | H | M | contract tests on Bottle before the first change | error responses without an `error` key |
-| 2 | **An order skips the price check.** A Pydantic model drops fields it does not list; without `client_seen_price` trade-action does not check how far the price moved | technical | M | H | models that reject unknown fields; a contract test with a moved price | an order with a moved `client_seen_price` is accepted |
-| 3 | **Market-data freezes during a symbol search.** Search and refresh call the providers synchronously, up to 1.8 s; in `async def` that stops the stream that pricing and every UI read | technical | M | H | run provider calls with `asyncio.to_thread` | market-data `/health` p99 > 100 ms during a search |
-| 4 | **Prices go stale.** Pricing and blotter read their streams on `httpx.AsyncClient`; an error ends an async task silently, where today's thread reconnects | technical | M | H | reconnect loop inside the task; restart test per stream | pricing `/health`: `market_data_connection` not `CONNECTED` |
-| 5 | **A fix reaches only one copy of a query.** Background jobs stay threads on the synchronous driver, handlers move to the async one, so shared queries exist twice | technical | H | M | build each query once, run it on either session | queries defined in two places |
-| 6 | **PostgreSQL runs out of connections.** A second pool per service allows 6 × 2 × 15 = 180 connections; PostgreSQL allows 100 (today up to 90) | operational | M | H | smaller pools, total under 100 | open connections > 80 |
-| 7 | **More CPU per request.** Async database driver 0.8–1.0 vs 0.7 ms, httpx 0.73 vs 0.43 ms | performance | H | L | benchmark each service before and after | CPU per request above Bottle's at the same load |
-| 8 | **Migration stops halfway.** Services then differ in error handling and startup: two frameworks side by side | organisational | M | M | one service per commit; stop point agreed in advance | under half the services done at half the time |
-
-## 8. Refactor (GO) or alternative plan (NO-GO)
-
-*Stage 4A after GO, Stage 4B after NO-GO.*
-
-## 9. Conclusions and lessons
-
-*Written last.*
+| 1. Keep gunicorn everywhere | one runtime; enough up to about 100 clients | thread-per-stream; freshness over 1 s at 200 clients |
+| 2. **FastAPI for the streams (chosen)** | 200 clients within budget; −37 % CPU; 107 lines in the proof of concept | two runtimes; a bridge (`a2wsgi`) for the other routes |
+| 3. Full async migration | one framework | no gain for database requests; +23–63 % CPU per request; 43 endpoints to port |
 
 ---
 
-## 10. Appendices
+## 8. Risks
 
-### A. Endpoints
+What could go wrong with option 2 in production. P = probability, I = impact: L / M / H.
 
-All responses are JSON. Errors are `{"error": "..."}` with the HTTP status — also for
-unknown routes (404), wrong methods (405) and unhandled exceptions (500). SSE endpoints
-return `text/event-stream`.
+| # | Risk | P | I | Mitigation | Warning signal |
+| --- | --- | --- | --- | --- | --- |
+| 1 | **A blocking call on the event loop freezes every stream.** Only the stream hub runs on the loop; any synchronous code added to a native route stops all clients | M | H | native routes only for streams; review rule; a test holding a stream while a slow route runs | tick delivery p95 > 1 s while CPU < 50 % |
+| 2 | **The bridge becomes the new thread limit.** Other routes run in `a2wsgi`'s 40 workers; previews cost 120–170 ms CPU each | M | M | size the workers; make preview validation cheap | preview p95 > 300 ms |
+| 3 | **The gain is smaller than expected.** Freshness is limited by pricing's rebuild of 5 000 positions, not only by the server | M | M | fix the rebuild before scaling; measure again | freshness p95 > 1 s with pricing CPU < 50 % |
+| 4 | **Slow clients handled differently.** Overflow closes an asyncio queue instead of `EventHub`'s sentinel | L | M | the same overflow test for both hubs | overflow warnings without reconnects |
+| 5 | **Two runtimes to operate.** gunicorn and uvicorn differ in shutdown, logging and settings | H | L | one launcher in `desk_runtime`; same 5 s graceful stop and log format | `docker stop` > 10 s; log lines missing in the Logs view |
+| 6 | **New dependencies.** FastAPI, Starlette, uvicorn, `a2wsgi` (a small project) | M | M | pinned versions; the bridge can later be replaced by native routes | advisories against a pinned version |
+| 7 | **Error format drifts.** FastAPI answers `{"detail": …}` by default | L | L | only two native routes; a check that every error has an `error` key | error responses without `error` |
+| 8 | **Scope creeps into async database code.** Part 1: no gain, +23 % CPU | M | M | scope agreed: streams only | an async database driver added |
 
-**market-data-service**
+- **Top 3**: 1, 2, 3.
+
+---
+
+## 9. Alternative plan (stage 4B) and next step (stage 4A)
+
+**Stage 4B, after Part 1's NO-GO: gunicorn instead of `wsgiref` — implemented** (`3790d5d`)
+
+- gunicorn gthread, one worker per service; threads from `SERVER_THREADS`; startup work and
+  background threads in the worker; 5 s graceful stop; streams send a comment every 5 s so a
+  closed client frees its thread.
+
+| | Before (`wsgiref`) | After (gunicorn) |
+| --- | --- | --- |
+| Sample, S2 at c = 50 (Part 1) | 656 req/s, p99 1 094 ms | 918 req/s, p99 61.7 ms (256 threads) |
+| Desk: clients within budget (Part 2) | 50 | 100 |
+| Desk: valuation freshness at K = 100 | 1 029 ms | 719 ms |
+| `/health` beside 200 streams | 1 121 req/s, p95 12.7 ms | 6 393 req/s, p95 2.4 ms |
+| `docker stop` | 10.23 s, killed | 0.41–0.83 s; 5.31–5.40 s with open streams; clean exit |
+| Closed stream clients | threads kept until the next event (395 threads) | thread freed within 5 s |
+
+- **Cost**: 10–13 MB more memory per container; open streams are capped by the thread count (256
+  held 255 streams, then waited).
+
+**Stage 4A, after Part 2's GO: recommended next step**
+
+- Move variant 3 from `benchmark/desk_day/fastapi_streams.py` into `desk_runtime`: a launcher for
+  market-data and pricing; FastAPI, uvicorn and `a2wsgi` pinned; README; the full UI check.
+- Expected effect (Part 2): 200 instead of 100 clients within budget; −37 % market-data + pricing
+  CPU at 200 clients.
+
+**Revisit when**
+
+- the desk needs more than about 200 screens on one process per service;
+- services must run as several processes (then streams move to a shared message bus);
+- pricing's rebuild and the preview validation are fixed, and freshness is limited only by the
+  server.
+
+---
+
+## 10. Conclusions
+
+**Answers to the assignment's questions**
+
+1. **Problem and whether it exists**: thread-per-stream serving. Not at today's load (one UI, two
+   or three streams); it appears from about 200 watching clients on one desk.
+2. **What the scenarios measure**: Part 1, one request type at a time on a sample; Part 2, the
+   desk core at 10 000 instruments.
+3. **Uncertainty**: median of 3 runs. Up to 100 clients the variants overlap. At 200 the freshness
+   ranges do not overlap; (a) rests on a median 41 ms under budget.
+4. **What decided**: Part 2 criterion (a) and (b) on valuation freshness, with 37 % less CPU. It
+   would change under the conditions below.
+5. **Top 3 risks**: a blocking call on the event loop, the bridge's thread limit, a gain smaller
+   than expected (section 8).
+6. **Cost against the estimate**: the proof of concept is 107 lines; the forecast gave FastAPI
+   50–200 clients and GO a 40 % chance; the result is at the top of that range.
+7. **What instead, and its effect**: after Part 1, gunicorn: no 1 s tail, clean stops, 100 instead
+   of 50 clients on the desk (section 9).
+8. **Lessons**:
+   - **Benchmarks**: measure the application's own costs first (previews, logins and screens
+     limited the desk before the server did); keep the load client and other programs out of the
+     result (checked each run); warm up; alternate variants.
+   - **Async**: it pays where many connections wait (open streams), not in short database requests;
+     its libraries cost more CPU per request.
+
+**What would change the result**
+
+- **Many processes**: in-memory state keeps each service to one process; with a shared cache and
+  a message bus (e.g. Redis pub-sub) streams could be spread over processes, and the server model
+  would matter less.
+- **A cheaper pricing engine**: rebuilding 5 000 positions and validating previews against 10 000
+  instruments limit freshness in every variant.
+
+---
+
+## Appendix A. Endpoints
+
+All responses are JSON. Errors are `{"error": "..."}` with the HTTP status — also for unknown
+routes (404), wrong methods (405) and unhandled exceptions (500). SSE endpoints return
+`text/event-stream`. `/health` answers `{service, status}`; pricing and blotter add counters.
+
+**market-data-service** (14)
 
 | Method | Path | Params | Codes | Body |
 | --- | --- | --- | --- | --- |
-| GET | `/stream`, `/stream/<provider>` | — | 200, 404 | SSE: `market_tick`, `curve_tick`, `market_remove` |
+| GET | `/stream` | — | 200 | SSE: quote and curve updates |
 | GET | `/snapshot` | — | 200 | `{stream_id, event_id, spots, curves}` |
 | GET | `/curves`, `/curves/<provider>` | `raw` | 200, 404 | list of curves |
 | GET | `/curves/<provider>/<curve>/<as_of>` | `raw` | 200, 400, 404 | one curve |
-| POST | `/curves/refresh` | `curve`, `provider` | 200, 404 | `{refreshed, skipped}` |
-| GET | `/quotes` | `symbol`, `asset_class`, `provider` | 200 | list of quotes |
-| GET | `/quotes/<provider>/<symbol>` | — | 200, 404 | one quote |
 | GET | `/quotes/<provider>/<symbol>/history` | `limit` 1–200, `raw` | 200, 400, 404 | list of snapshots |
 | GET | `/watchlist` | — | 200 | list of items |
-| POST | `/watchlist` | JSON body | 201, 400, 404, 409, 422 | item |
+| POST | `/watchlist` | JSON body | 201, 400, 409, 422 | item |
 | DELETE | `/watchlist/<symbol>` | `provider` | 200, 404, 409 | removal result |
 | GET | `/fx/rates` | `to` | 200, 400 | `{to, rates}` |
-| GET | `/symbols/search` | `q` (≥ 2 chars) | 200, 400, 503 | `{query, results, provider_errors}` |
-| GET | `/providers`, `/providers/<name>/health` | — | 200, 404 | provider status |
-| POST | `/refresh` | `symbol`, `provider` | 200, 404, 422 | tick |
+| GET | `/symbols/search` | `q` (≥ 2 chars) | 200, 400 | `{query, results, provider_errors}` |
+| GET | `/providers` | — | 200 | provider status |
+| POST | `/refresh` | `symbol`, `provider` | 200, 404, 422, 429, 502, 503 | tick, or `{refreshed, skipped}` without `symbol` |
 | GET | `/health` | — | 200 | `{service, status}` |
 
-**pricing-service**
+**pricing-service** (8)
 
 | Method | Path | Params | Codes | Body |
 | --- | --- | --- | --- | --- |
+| GET | `/curves/<curve>/at` | `maturity_years`, `index_tenor` 3M/6M or `payments_per_year` | 200, 400, 404 | zero rate, discount factor, par rate |
 | GET | `/valuations` | — | 200 | list of valuations |
 | GET | `/valuations/<trade_id>` | — | 200, 404 | one valuation |
 | GET | `/book-risk` | — | 200 | list of book-risk records |
 | POST | `/price` | JSON body | 200, 400, 404, 409, 503 | priced instrument |
 | POST | `/scenario` | JSON body | 200, 400, 404 | scenario result |
-| GET | `/valuation-stream` | — | 200 | SSE: `valuation_update`, `book_risk_update` |
+| GET | `/valuation-stream` | — | 200 | SSE: valuation and book-risk updates |
 | GET | `/health` | — | 200 | `{service, status, …}` |
 
-**monitoring-service**
+**monitoring-service** (5)
 
 | Method | Path | Params | Codes | Body |
 | --- | --- | --- | --- | --- |
 | GET | `/status` | — | 200 | health of every target |
-| GET | `/audits` | `limit`, `since`, `severity`, `service`, `event_type`, `correlation_id`, `entity_id` | 200 | list of audit rows |
-| GET | `/logs` | `level`, `since_id`, `run_id`, `service`, `q`, `limit` | 200, 400 | `{lines, meta}` |
-| GET | `/logs/stream` | — | 200 | SSE: `run`, `log_line` |
+| GET | `/audits` | `limit`, `since`, `severity`, `service`, `event_type`, `correlation_id`, `entity_id` | 200, 400 | list of audit rows |
+| GET | `/logs` | `level`, `service`, `q`, `limit` (1–10 000) | 200, 400 | `{lines, meta}` |
+| GET | `/logs/stream` | — | 200 | SSE: `run`, then log lines |
 | GET | `/health` | — | 200 | `{service, status}` |
 
-**books-service**
+**books-service** (6)
 
 | Method | Path | Params | Codes | Body |
 | --- | --- | --- | --- | --- |
 | GET | `/books` | — | 200 | list of books |
 | GET | `/books/<book_id>` | — | 200, 404 | one book |
-| POST | `/books` | `name`, `expected_asset_class`, `description` | 201, 400, 409 | created book |
+| POST | `/books` | `name` (≤ 60), `expected_asset_class`, `description` (≤ 200) | 201, 400, 409 | created book |
 | PUT | `/books/<book_id>` | partial body | 200, 400, 404, 409 | updated book |
 | DELETE | `/books/<book_id>` | — | 200, 404, 409 | deactivated book |
 | GET | `/health` | — | 200 | `{service, status}` |
 
-**trade-action-service**
+**trade-action-service** (3)
 
 | Method | Path | Params | Codes | Body |
 | --- | --- | --- | --- | --- |
 | GET | `/instruments/term-schemas` | — | 200 | `{instruments, schemas, curves}` |
-| POST | `/trade-actions` | JSON intent | 202, 400, 422, 503 | acknowledgement |
-| POST | `/trade-actions/batch` | JSON array | 202, 400, 413, 422, 503 | `{accepted, rejected}` |
-| POST | `/trade-actions/close-all` | optional body | 202, 400, 503 | acknowledgement |
-| GET | `/queue/status` | — | 200 | counters |
+| POST | `/trade-actions` | JSON: `OPEN_TRADE`, `CLOSE_TRADE`, `REASSIGN_TRADES` | 201, 200 (replay, close, reassign), 400, 422 | result |
 | GET | `/health` | — | 200 | `{service, status}` |
 
-**blotter-service**
+**blotter-service** (7)
 
 | Method | Path | Params | Codes | Body |
 | --- | --- | --- | --- | --- |
 | GET | `/trades`, `/trades/overview` | `limit` 1–500, `offset`, `book_id`, `asset_class`, `status`, `symbol` | 200, 400 | list of trades / `{trades, books}` |
-| GET | `/trades/<trade_id>` | — | 200, 404 | `{trade, latest_valuation, valuation_history, audit_logs}` |
+| GET | `/trades/<trade_id>` | — | 200, 404 | trade with valuations and audit logs |
 | GET | `/trades/<trade_id>/valuations`, `…/audit-logs` | — | 200, 404 | list |
-| GET | `/books/summary` | — | 200 | list of book summaries |
+| GET | `/books/summary` | `currency` | 200, 400 | book summaries |
 | GET | `/health` | — | 200 | `{service, status, …}` |
 
-### B. Benchmark commands and versions
+## Appendix B. Commands and versions
+
+**Part 1**
 
 | | Command |
 | --- | --- |
@@ -443,10 +613,23 @@ SCENARIOS=s4 benchmark/run_benchmark.sh               # one scenario again
 docker compose -f benchmark/infra/compose.yml down    # removes the benchmark database
 ```
 
+**Part 2**
+
+```sh
+benchmark/run_desk_day.sh                                                     # K = 10 50 100 200, 3 variants, 3 runs, about 3.5 h
+RESULTS=results/desk_day_trading KS=50 TRADERS="5 20" benchmark/run_desk_day.sh  # Part 2b, about 1.5 h
+docker compose -f benchmark/infra/desk.compose.yml run --rm client python -m desk_day.analyze_desk
+docker compose -f benchmark/infra/desk.compose.yml down -v                     # removes the desk database
+```
+
 - **Versions**: Python 3.14.7, Bottle 0.13.4, gunicorn 26.2.0, FastAPI 0.141.1, uvicorn 0.53.0
-  (uvloop 0.22.1, httptools 0.8.0), httpx 0.28.1, requests 2.34.2, SQLAlchemy 2.0.52,
-  psycopg 3.3.4, PostgreSQL 18.6, oha 1.16.0. All pins: `benchmark/infra/requirements.txt`.
+  (uvloop 0.22.1, httptools 0.8.0), a2wsgi 1.10.10, httpx 0.28.1, requests 2.34.2,
+  SQLAlchemy 2.0.52, psycopg 3.3.4, PostgreSQL 18.6, oha 1.16.0. All pins:
+  `benchmark/infra/requirements.txt`; services: `requirements.txt`.
 - **Machine**: Apple M3 (4 fast + 4 efficient cores), 16 GB, macOS 27.0, mains power; Docker
-  Desktop 29.4, VM with 8 CPUs and 8 GB. Server on CPU 7, stub 6, PostgreSQL 4–5, load 0–3.
-- **Benchmark settings** (`benchmark/infra/compose.yml`): 15 database connections kept open,
-  log level WARNING, load generator may reuse closed ports.
+  Desktop 29.4, VM with 8 CPUs and 8 GB. Part 1: server on CPU 7, stub 6, PostgreSQL 4–5,
+  load 0–3.
+- **Part 1 settings** (`benchmark/infra/compose.yml`): 15 database connections kept open, log
+  level WARNING, load generator may reuse closed ports.
+- **Part 2 settings** (`benchmark/infra/desk.compose.yml`): 15 database connections per service,
+  log level WARNING, provider limits lifted, 64 quote requests in flight.
