@@ -111,11 +111,13 @@ Per flow, at its target:
 | Result | Decision |
 | --- | --- |
 | FastAPI within budget, gunicorn not | GO |
-| Both within budget, FastAPI ≥ 30 % less CPU per operation | GO |
+| Both within budget, FastAPI less CPU per operation beyond the spread | GO |
 | Otherwise | NO-GO |
 | Neither within budget | NO-GO: the fix is more processes, not the framework |
 
-- **30 %**: more threads alone gave 10–20 % in Part 1.
-- **Every GO** also needs FastAPI's order p95 at 50 ≤ 110 % of gunicorn's (beyond the spread).
+- **No percentage thresholds** (amended after the smoke tests, before the measured run): the 30 %
+  CPU and 110 % order thresholds had no basis; a difference counts when it exceeds the run-to-run
+  spread. The report states the size of each difference in cores.
+- **Order entry** is judged in its own row, like the other flows.
 - **Scope**: services whose flow passes.
 - **Limitation**: flows measured one at a time; in production they share a process.

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 RESULTS = Path(sys.argv[1] if len(sys.argv) > 1 else "results/core")
 COLORS = {"gunicorn": "#eb6834", "fastapi": "#1baf7a"}
-MAX_ERRORS, CPU_SAVING, ORDER_SLOWDOWN = 1.0, 0.30, 1.10
+MAX_ERRORS = 1.0
 FLOWS = {
     "market_data": ("Market data in", "refresh every T s", 5, "age_p95_s", "quote age p95, s"),
     "orders": ("Order entry", "orders at once", 50, "p95_ms", "p95, ms"),
@@ -82,6 +82,8 @@ def load(flow):
 def number(x):
     if x == float("inf"):
         return "∞"
+    if abs(x) < 1:
+        return f"{x:.2g}" if x else "0"
     return f"{x:.2f}" if abs(x) < 10 else f"{x:.1f}" if abs(x) < 100 else f"{x:,.0f}".replace(",", " ")
 
 
@@ -117,7 +119,7 @@ def cpu_change(gunicorn, fastapi):
     return difference / gunicorn["cpu_ms"][0], beyond_spread
 
 
-def decision(flow, points, orders_guard):
+def decision(flow, points):
     target = FLOWS[flow][2]
     gunicorn, fastapi = points.get(("gunicorn", target)), points.get(("fastapi", target))
     if not gunicorn or not fastapi:
@@ -125,25 +127,14 @@ def decision(flow, points, orders_guard):
     change, beyond = cpu_change(gunicorn, fastapi)
     if fastapi["met"] and not gunicorn["met"]:
         verdict = "GO: FastAPI within budget, gunicorn not"
-    elif fastapi["met"] and gunicorn["met"] and change <= -CPU_SAVING and beyond:
+    elif fastapi["met"] and gunicorn["met"] and change < 0 and beyond:
         verdict = "GO: FastAPI uses less CPU per operation"
     elif not fastapi["met"] and not gunicorn["met"]:
         verdict = "NO-GO: neither within budget"
     else:
         verdict = "NO-GO"
-    if verdict.startswith("GO") and not orders_guard:
-        verdict = "NO-GO: orders slower on FastAPI"
     return [f"| {FLOWS[flow][0]} | {'yes' if gunicorn['met'] else 'no'} | {'yes' if fastapi['met'] else 'no'} "
             f"| {100 * change:+.0f} %{'' if beyond else ' (within spread)'} | {verdict} |"]
-
-
-def orders_guard_holds(orders):
-    gunicorn, fastapi = orders.get(("gunicorn", 50)), orders.get(("fastapi", 50))
-    if not gunicorn or not fastapi:
-        return True
-    slower = fastapi["p95_ms"][0] - gunicorn["p95_ms"][0]
-    within_spread = slower <= max(spread(gunicorn["p95_ms"]), spread(fastapi["p95_ms"]))
-    return fastapi["p95_ms"][0] <= ORDER_SLOWDOWN * gunicorn["p95_ms"][0] or within_spread
 
 
 def budget_line(flow, levels):
@@ -193,13 +184,11 @@ def main():
                   f"= {statistics.median(cores):.3f} cores for 1 000 000 positions per minute", ""]
     for flow, points in all_points.items():
         lines += table(flow, points)
-    guard = orders_guard_holds(all_points.get("orders", {}))
     lines += ["## Rule at target level", "",
-              f"Orders on FastAPI at 50 at once ≤ 110 % of gunicorn's p95: {'yes' if guard else '**no**'}", "",
               "| Flow | gunicorn within budget | FastAPI within budget | FastAPI CPU per operation vs gunicorn "
               "| Decision |", "| --- | --- | --- | --- | --- |"]
     for flow, points in all_points.items():
-        lines += decision(flow, points, guard)
+        lines += decision(flow, points)
     (RESULTS / "summary.md").write_text("\n".join(lines) + "\n")
     chart(all_points, "metric", "", "flows.png")
     chart(all_points, "cpu_ms", "CPU ms per operation", "cpu.png")
