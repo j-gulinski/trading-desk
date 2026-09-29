@@ -8,6 +8,7 @@ import urllib.request
 from desk_runtime.serialization import to_json
 
 _OVERFLOW = object()
+HEARTBEAT_SECONDS = 5
 
 
 class EventHub:
@@ -40,7 +41,14 @@ class EventHub:
     def _frames(self, client, first_frame):
         try:
             yield first_frame
-            while (frame := client.get()) is not _OVERFLOW:
+            while True:
+                try:
+                    frame = client.get(timeout=HEARTBEAT_SECONDS)
+                except queue.Empty:
+                    yield ": ping\n\n"
+                    continue
+                if frame is _OVERFLOW:
+                    break
                 yield frame
         finally:
             with self._lock:
