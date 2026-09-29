@@ -21,8 +21,8 @@
 > **Decision: keep Bottle for request handling; serve the two live streams (prices and
 > valuations) with FastAPI.** Recommended as the next step.
 
-- **One desk process per service keeps 100 traders' screens within budget on gunicorn, 200 with
-  FastAPI serving the streams** (10 000 instruments, 5 000 open positions, live trading).
+- **One desk process per service keeps live prices and valuations within budget for 100 traders on
+  gunicorn, 200 with FastAPI serving the streams** (10 000 instruments, 5 000 open positions, live trading).
 - **At 200 traders, valuations reach the screen in about 1 s instead of 2 s**, and market-data +
   pricing use 37 % less CPU (0.64 vs 1.02 cores).
 - **Orders take 0.11–0.15 s in every variant**, also with 20 traders trading at once.
@@ -41,7 +41,7 @@ appendix A.
 | | |
 | --- | --- |
 | Server | gunicorn, one gthread worker per service (stage 4B); before it, `wsgiref`, a development server |
-| Threads | `SERVER_THREADS`, default 40: one thread per request or open stream; market-data, pricing and monitoring serve streams and use 256 |
+| Threads | `SERVER_THREADS`, default 40: one thread per request or open stream; in production market-data, pricing and monitoring serve streams and use 256 |
 | Processes | One worker per service: services keep live state in memory |
 | Database | SQLAlchemy ORM, synchronous sessions, psycopg 3; 15 connections per service (6 × 15 = 90, under PostgreSQL's default 100) |
 | Calls to other services | `urllib`: blocking, with timeouts |
@@ -171,7 +171,7 @@ The business core of the desk: quotes in, valuations out, trades through.
 | # | Variant | Serving |
 | --- | --- | --- |
 | 1 | `wsgiref` | the development server before stage 4B |
-| 2 | gunicorn | gthread, one worker, threads = 40 + K + 10 for market-data and pricing (stage 4B) |
+| 2 | gunicorn | gthread, one worker, threads = 40 + K + 10 for market-data and pricing in the benchmark (stage 4B) |
 | 3 | FastAPI streams | FastAPI serves `/stream` (market-data) and `/valuation-stream` (pricing); their other routes are the same Bottle app behind `a2wsgi` (40 workers); the other four services as in variant 2 |
 
 - **Same application code** in all variants; only the HTTP layer differs.
@@ -215,12 +215,12 @@ result.
 | S3 `/cpu` | 201 / 256 | 201 / 555 | 202 / 496 | 207 / 1 103 (p99 2 526) | 216 / 380 | 212 / 460 |
 | S4 `/db` | 1 117 / 48.5 | 1 343 / 120 | 1 346 / 72.6 | 1 249 / 19.0 (p99 1 050) | 1 094 / 73.2 | 1 343 / 57.6 |
 | S5 `/health` | – | 0 / all timeouts | 13 367 / 0.8 | 7 058 / 0.9 | 29 074 / 0.4 | – |
-| S2, c = 200 | 5.3, 71.5 % errors | 705 / 302 | 2 966 / 84.5 | 1 700 / 55.2 (p99 1 308) | 360 / 606 | 700 / 314 |
-| S3, c = 200 | 203 / 1 004 | 202 / 1 445 | 194 / 2 109 | 207 / 1 894, 4.4 % errors | 210 / 613, 3.8 % errors | 210 / 1 206 |
+| S2, c = 200 | 5.3, 71.5 % errors ✗ | 705 / 302 | 2 966 / 84.5 | 1 700 / 55.2 (p99 1 308) | 360 / 606 | 700 / 314 |
+| S3, c = 200 | 203 / 1 004 | 202 / 1 445 | 194 / 2 109 | 207 / 1 894, 4.4 % errors ✗ | 210 / 613, 3.8 % errors ✗ | 210 / 1 206 |
 
 † One run, 24 September. The others: median of 3 runs; spread typically 1–7 % of the median,
 S4 up to 25 %. Every range: `benchmark/results/summary.md`, `benchmark/results/threads-check/summary.md`.
-`–`: not measured.
+`–`: not measured. ✗: more than 1 % errors, the variant loses the point.
 
 **Observations**
 
@@ -379,8 +379,8 @@ for 1 000 requests per second.
   on the database. Moving request handlers to async would raise the bill.
 - **Async streams cost less per trader**: at K = 200 market-data drops from 0.62 to 0.36 cores and
   pricing from 0.40 to 0.28; together 37 % less.
-- **In business terms**: 200 traders' screens need about one core for market-data and pricing on
-  gunicorn and about two thirds of a core with FastAPI streams.
+- **In business terms**: live prices and valuations for 200 traders need about one core for
+  market-data and pricing on gunicorn and about two thirds of a core with FastAPI streams.
 
 ---
 
