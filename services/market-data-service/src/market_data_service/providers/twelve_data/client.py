@@ -6,7 +6,6 @@ from market_data_service.providers.base import (
     ProviderClient,
     ProviderRateLimited,
 )
-from market_data_service.config import TWELVE_DATA_BASE_URL
 from desk_domain.providers import TWELVE_DATA
 
 
@@ -22,7 +21,7 @@ def _data_error_detail(message):
 
 class TwelveDataClient(ProviderClient):
     provider = TWELVE_DATA
-    base_url = TWELVE_DATA_BASE_URL
+    base_url = "https://api.twelvedata.com"
 
     @staticmethod
     def provider_symbol(symbol, asset_class):
