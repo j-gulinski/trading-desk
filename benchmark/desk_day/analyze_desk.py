@@ -1,4 +1,4 @@
-"""Tables and charts for Part 2, the desk core."""
+"""Tables and charts for Part 2, the desk core, and Part 2b, many traders trading."""
 
 import json
 import re
@@ -14,7 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 RESULTS = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "results" / "desk_day"
-NAME = re.compile(r"(?P<variant>[a-z]+)_k(?P<k>\d+)_run\d+")
+NAME = re.compile(r"(?P<variant>[a-z]+)_k(?P<k>\d+)(?:_t(?P<t>\d+))?_run\d+")
 COLORS = {"wsgiref": "#e87ba4", "gunicorn": "#eb6834", "fastapi": "#1baf7a"}
 MARKERS = {"wsgiref": "o", "gunicorn": "s", "fastapi": "D"}
 KS = (10, 50, 100, 200)
@@ -24,6 +24,7 @@ TITLES = {"tick": "Tick delivery", "valuation": "Valuation freshness", "preview"
 BUDGETS = {"tick": 1000, "valuation": 1000, "preview": 300, "position": 3000, "execution": 500,
            "md_errors": 1.0, "errors": 1.0}
 MD_PRICING = ("tick", "valuation", "preview", "position", "md_errors")
+STREAMS = ("tick", "valuation", "position", "md_errors")
 BASELINE = "gunicorn"
 CANDIDATE = "fastapi"
 DECISION_K = 200
@@ -65,13 +66,15 @@ def read_run(path, k):
     if (path / "unstable").exists() or not (path / "summary.json").exists():
         return None
     summary = json.loads((path / "summary.json").read_text())
-    preview = json.loads((path / "preview.json").read_text())
     run = dict(summary["p95_ms"])
-    codes = preview["statusCodeDistribution"]
-    previews_ok = sum(n for code, n in codes.items() if code.startswith("2"))
-    unsent = sum(n for kind, n in preview["errorDistribution"].items() if kind != "aborted due to deadline")
-    previews = sum(codes.values()) + unsent
-    run["preview"] = preview["latencyPercentiles"]["p95"] * 1000 if previews_ok else None
+    run["preview"], previews, previews_ok = None, 0, 0
+    if (path / "preview.json").exists():
+        preview = json.loads((path / "preview.json").read_text())
+        codes = preview["statusCodeDistribution"]
+        previews_ok = sum(n for code, n in codes.items() if code.startswith("2"))
+        unsent = sum(n for kind, n in preview["errorDistribution"].items() if kind != "aborted due to deadline")
+        previews = sum(codes.values()) + unsent
+        run["preview"] = preview["latencyPercentiles"]["p95"] * 1000 if previews_ok else None
     orders = (summary["opens"], summary["closes"])
     trades = sum(n for side in orders for result, n in side.items() if result != "no_quote")
     trade_errors = sum(side.get("error", 0) for side in orders)
@@ -96,17 +99,22 @@ def read_run(path, k):
     return run
 
 
-def load_points():
+def trader_levels():
+    return sorted({int(match["t"]) for path in RESULTS.iterdir()
+                   if path.is_dir() and (match := NAME.fullmatch(path.name)) and match["t"]})
+
+
+def load_points(trading):
     runs = defaultdict(list)
     for path in sorted(RESULTS.iterdir()):
         match = NAME.fullmatch(path.name)
-        if path.is_dir() and match:
+        if path.is_dir() and match and bool(match["t"]) == trading:
             k = int(match["k"])
-            runs[match["variant"], k].append((path.name, read_run(path, k)))
+            runs[match["variant"], int(match["t"]) if trading else k].append((path.name, read_run(path, k)))
     points, flags = {}, []
     for key, named in runs.items():
         stable = [run for _, run in named if run]
-        points[key] = {"unstable": len(stable) < len(named)}
+        points[key] = {"unstable": len(stable) < len(named), "previews": any((RESULTS / name / "preview.json").exists() for name, _ in named)}
         for metric in (*TITLES, "cores", "cores_per_100"):
             values = [run[metric] for run in stable if run.get(metric) is not None]
             points[key][metric] = Stat(statistics.median(values), min(values), max(values)) if values else None
@@ -131,7 +139,7 @@ def within(point, metric):
 
 
 def cell(point, metric):
-    if point is None:
+    if point is None or (metric == "preview" and not point["previews"]):
         return "–"
     value = point[metric]
     text = f"{number(value.median)} ({number(value.high - value.low)})" if value else "no data"
@@ -143,10 +151,11 @@ def variants(points):
     return [variant for variant in COLORS if any(v == variant for v, _ in points)]
 
 
-def table(points, header, row):
-    lines = [header, "", f"| variant | {' | '.join(f'K = {k}' for k in KS)} |", "| --- |" + " --- |" * len(KS)]
+def table(points, levels, axis, header, row):
+    lines = [header, "", f"| variant | {' | '.join(f'{axis} = {k}' for k in levels)} |",
+             "| --- |" + " --- |" * len(levels)]
     for v in variants(points):
-        lines.append(f"| {v} | " + " | ".join(row(points.get((v, k))) for k in KS) + " |")
+        lines.append(f"| {v} | " + " | ".join(row(points.get((v, k))) for k in levels) + " |")
     return "\n".join(lines)
 
 
@@ -174,12 +183,16 @@ def latency_gains(points):
             and cand[m].median <= 0.7 * base[m].median and beyond_spread(cand[m], base[m])]
 
 
+def cpu_within(pair):
+    base, cand = pair[0]["cores_per_100"], pair[1]["cores_per_100"]
+    return not (cand.median > 1.1 * base.median and beyond_spread(cand, base))
+
+
 def cpu_check(points):
     for k in reversed(KS):
         pair = stable_pair(points, k)
         if pair and pair[0]["cores_per_100"] and pair[1]["cores_per_100"]:
-            base, cand = pair[0]["cores_per_100"], pair[1]["cores_per_100"]
-            return k, not (cand.median > 1.1 * base.median and beyond_spread(cand, base))
+            return k, cpu_within(pair)
     return None, False
 
 
@@ -197,7 +210,22 @@ def decision(points):
         f"- Market-data and pricing: **{'GO' if (a or gains) and cpu_ok else 'NO-GO'}**"])
 
 
-def plot(ax, points, metric, title, budget=None):
+def trading_decision(points, levels):
+    held = [t for t in levels if all(within(points.get((BASELINE, t)), m) for m in STREAMS)]
+    kept = [t for t in held if all(within(points.get((CANDIDATE, t)), m) for m in STREAMS)]
+    streams_ok = kept == held
+    cpu_t = held[-1] if held else next((t for t in reversed(levels) if stable_pair(points, t)), None)
+    pair = stable_pair(points, cpu_t) if cpu_t is not None else None
+    cpu_ok = bool(pair and pair[0]["cores_per_100"] and pair[1]["cores_per_100"] and cpu_within(pair))
+    return "\n".join([
+        f"- T within the market-data and pricing budgets, {BASELINE}: {', '.join(map(str, held)) or 'none'}",
+        f"- {CANDIDATE} within those budgets at each of them: **{'yes' if streams_ok else 'no'}**",
+        f"- Market-data + pricing CPU per client at most 10 % higher (T = {cpu_t if cpu_t is not None else '–'}): "
+        f"**{'yes' if cpu_ok else 'no'}**",
+        f"- The Part 2 GO for the streams: **{'stands' if streams_ok and cpu_ok else 'withdrawn'}**"])
+
+
+def plot(ax, points, levels, axis, metric, title, budget=None):
     for variant, color in COLORS.items():
         rows = sorted((k, p[metric]) for (v, k), p in points.items() if v == variant and p[metric])
         if rows:
@@ -206,21 +234,22 @@ def plot(ax, points, metric, title, budget=None):
                         marker=MARKERS[variant], markersize=7, linewidth=2, label=variant)
     if budget is not None:
         ax.axhline(budget, color="#888888", linestyle="--", linewidth=1, label="budget")
-    ax.set(xscale="log", title=title, xlabel="K clients", xticks=KS, xticklabels=[str(k) for k in KS], ylim=(0, None))
+    ax.set(xscale="log", title=title, xlabel="T traders" if axis == "T" else "K clients", xticks=levels,
+           xticklabels=[str(k) for k in levels], ylim=(0, None))
     ax.minorticks_off()
     ax.grid(alpha=0.3)
     ax.spines[["top", "right"]].set_visible(False)
 
 
-def charts(points):
+def charts(points, levels, axis, heading):
     (RESULTS / "charts").mkdir(exist_ok=True)
     latency, axes = plt.subplots(2, 3, figsize=(14, 8))
     for ax, metric in zip(axes.flat, ("tick", "valuation", "preview", "position", "execution", "md_errors")):
         unit = ", %" if metric == "md_errors" else ", p95 ms"
-        plot(ax, points, metric, TITLES[metric] + unit, BUDGETS[metric])
-    latency.suptitle("Part 2: the desk core — median, bars = min–max of runs")
+        plot(ax, points, levels, axis, metric, TITLES[metric] + unit, BUDGETS[metric])
+    latency.suptitle(f"{heading} — median, bars = min–max of runs")
     cpu, ax = plt.subplots(figsize=(6, 4))
-    plot(ax, points, "cores", "Market-data + pricing CPU, cores")
+    plot(ax, points, levels, axis, "cores", "Market-data + pricing CPU, cores")
     for figure, name in ((latency, "desk_p95"), (cpu, "desk_cpu")):
         figure.axes[0].legend(frameon=False)
         figure.tight_layout()
@@ -228,9 +257,10 @@ def charts(points):
     plt.close("all")
 
 
-def metric_table(points, metric):
+def metric_table(points, levels, axis, metric):
     unit = "%" if metric.endswith("errors") else "ms, p95"
-    return table(points, f"## {TITLES[metric]} ({unit}, budget {BUDGETS[metric]:g})", lambda p: cell(p, metric))
+    return table(points, levels, axis, f"## {TITLES[metric]} ({unit}, budget {BUDGETS[metric]:g})",
+                 lambda p: cell(p, metric))
 
 
 def cpu_cell(point):
@@ -240,13 +270,17 @@ def cpu_cell(point):
 
 
 def main():
-    points, flags = load_points()
-    charts(points)
-    parts = ["# Part 2: the desk core", "", "Median of runs (spread = max − min). ✓ within budget, ✗ out.", "",
-             "## Decision", "", decision(points), "", "## Flagged runs", "", "\n".join(flags) or "- none"]
+    traders = trader_levels()
+    levels, axis = (traders, "T") if traders else (KS, "K")
+    heading = "Part 2b: many traders trading" if traders else "Part 2: the desk core"
+    points, flags = load_points(bool(traders))
+    charts(points, levels, axis, heading)
+    parts = [f"# {heading}", "", "Median of runs (spread = max − min). ✓ within budget, ✗ out.", "",
+             "## Decision", "", trading_decision(points, levels) if traders else decision(points), "",
+             "## Flagged runs", "", "\n".join(flags) or "- none"]
     for metric in TITLES:
-        parts += ["", metric_table(points, metric)]
-    parts += ["", table(points, "## Market-data + pricing CPU: cores (per 100 clients)", cpu_cell),
+        parts += ["", metric_table(points, levels, axis, metric)]
+    parts += ["", table(points, levels, axis, "## Market-data + pricing CPU: cores (per 100 clients)", cpu_cell),
               "", "![p95](charts/desk_p95.png)", "", "![cpu](charts/desk_cpu.png)"]
     (RESULTS / "summary.md").write_text("\n".join(parts) + "\n")
     print("\n".join(parts))

@@ -1,4 +1,4 @@
-"""K clients watch the desk's price and valuation streams while the desk trades at a fixed rate."""
+"""K clients watch the desk's price and valuation streams while the desk, or T traders, trade."""
 
 import argparse
 import asyncio
@@ -35,6 +35,7 @@ HEALTH_EVERY = 10
 MEASURE = 150
 SAMPLED = 10
 OPEN_RATE = 0.2
+TRADER_EVERY = 20
 PREVIEW_RATE = 0.2
 HELD = set(HELD_SYMBOLS)
 PREVIEW = {
@@ -191,6 +192,12 @@ class Load:
                 "client_seen_price": self.board[symbol]["sell_price"], "client_request_id": str(uuid.uuid4()),
             })
 
+    async def trader(self, books, tasks):
+        await asyncio.sleep(random.uniform(0, TRADER_EVERY))
+        while True:
+            tasks.append(asyncio.create_task(self.trade(books)))
+            await asyncio.sleep(TRADER_EVERY * random.uniform(0.5, 1.5))
+
     async def watch_pricing(self):
         while True:
             try:
@@ -200,11 +207,12 @@ class Load:
                 pass
             await asyncio.sleep(HEALTH_EVERY)
 
-    def summary(self, client_cores):
+    def summary(self, traders, client_cores):
         self.samples["position"] = [max(0.0, self.first_seen[trade_id] - at) * 1000
                                     for trade_id, at in self.confirmed.items() if trade_id in self.first_seen]
         return {
             "stable_at": self.start,
+            "traders": traders,
             "p95_ms": {name: p95(values) for name, values in self.samples.items()},
             "pricing_lag_p95_s": p95(self.lags),
             "opens": self.outcomes["open"],
@@ -215,7 +223,7 @@ class Load:
         }
 
 
-async def run(k, out):
+async def run(k, traders, out):
     out.mkdir(parents=True, exist_ok=True)
     rate = max(1.0, k / 10)
     async with httpx.AsyncClient(timeout=READ_TIMEOUT) as client:
@@ -231,15 +239,18 @@ async def run(k, out):
             await asyncio.sleep(0.5)
         stable = time.time()
         (out / "stable").write_text(f"{stable}\n")
-        # Stage 2: measured window with previews, trading and pricing health
+        # Stage 2: measured window with trading and pricing health; previews only without traders
         load.start = stable
         cpu_from = time.process_time()
-        oha = await asyncio.create_subprocess_exec(
-            "oha", "-z", f"{MEASURE}s", "-q", f"{PREVIEW_RATE:g}", "-t", f"{WRITE_TIMEOUT}s",
-            "--no-tui", "--output-format", "json", "-m", "POST", "-H", "Content-Type: application/json",
-            "-d", json.dumps(PREVIEW), f"{PRICING}/price", stdout=asyncio.subprocess.PIPE)
+        oha = None
+        if not traders:
+            oha = await asyncio.create_subprocess_exec(
+                "oha", "-z", f"{MEASURE}s", "-q", f"{PREVIEW_RATE:g}", "-t", f"{WRITE_TIMEOUT}s",
+                "--no-tui", "--output-format", "json", "-m", "POST", "-H", "Content-Type: application/json",
+                "-d", json.dumps(PREVIEW), f"{PRICING}/price", stdout=asyncio.subprocess.PIPE)
         tasks.append(asyncio.create_task(load.watch_pricing()))
-        for i in range(int(MEASURE * OPEN_RATE)):
+        tasks += [asyncio.create_task(load.trader(books, tasks)) for _ in range(traders)]
+        for i in range(0 if traders else int(MEASURE * OPEN_RATE)):
             await asyncio.sleep(max(0.0, stable + i / OPEN_RATE - time.time()))
             tasks.append(asyncio.create_task(load.trade(books)))
         await asyncio.sleep(stable + MEASURE - time.time())
@@ -247,8 +258,9 @@ async def run(k, out):
         for task in tasks:
             task.cancel()
         # Stage 3: write what happened inside the window
-        (out / "preview.json").write_bytes((await oha.communicate())[0])
-        (out / "summary.json").write_text(json.dumps(load.summary(client_cores), indent=2) + "\n")
+        if oha:
+            (out / "preview.json").write_bytes((await oha.communicate())[0])
+        (out / "summary.json").write_text(json.dumps(load.summary(traders, client_cores), indent=2) + "\n")
         (out / "done").write_text(f"{time.time()}\n")
     return 0
 
@@ -256,6 +268,7 @@ async def run(k, out):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--clients", type=int, required=True)
+    parser.add_argument("--traders", type=int, default=0)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
-    raise SystemExit(uvloop.run(run(args.clients, Path(args.out))))
+    raise SystemExit(uvloop.run(run(args.clients, args.traders, Path(args.out))))
