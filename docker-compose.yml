@@ -6,14 +6,11 @@ x-logging: &default-logging
 
 x-service: &service
   env_file: .env
-  environment: &service-env
+  environment:
     DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    DATABASE_POOL_SIZE: 15
-    DATABASE_MAX_OVERFLOW: 0
   volumes:
     - ./logs:/var/log/trading
   restart: unless-stopped
-  stop_grace_period: 10s
   logging: *default-logging
 
 services:
@@ -57,9 +54,6 @@ services:
     container_name: market-data-service
     ports:
       - "8001:8001"
-    environment:
-      <<: *service-env
-      SERVER_THREADS: 256
     depends_on:
       db-migrations:
         condition: service_completed_successfully
@@ -74,9 +68,6 @@ services:
     container_name: pricing-service
     ports:
       - "8002:8002"
-    environment:
-      <<: *service-env
-      SERVER_THREADS: 256
     depends_on:
       db-migrations:
         condition: service_completed_successfully
@@ -93,9 +84,6 @@ services:
     container_name: monitoring-service
     ports:
       - "8003:8003"
-    environment:
-      <<: *service-env
-      SERVER_THREADS: 256
     depends_on:
       db-migrations:
         condition: service_completed_successfully

@@ -55,7 +55,7 @@ services:
 
   bottle-wsgiref:
     <<: *server
-    command: ["python", "-c", "from sample_wsgi.wsgiref_server import ThreadedServer; from sample_wsgi.app import app; app.run(host='0.0.0.0', port=8000, server=ThreadedServer)"]
+    command: ["python", "-c", "from desk_runtime.service_runtime import ThreadedServer; from sample_wsgi.app import app; app.run(host='0.0.0.0', port=8000, server=ThreadedServer)"]
 
   bottle-threads-256:
     <<: *server
