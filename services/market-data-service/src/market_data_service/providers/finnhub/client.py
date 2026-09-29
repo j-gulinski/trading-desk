@@ -1,11 +1,10 @@
 from market_data_service.providers.base import ProviderClient, ProviderDataError
-from market_data_service.config import FINNHUB_BASE_URL
 from desk_domain.providers import FINNHUB
 
 
 class FinnhubClient(ProviderClient):
     provider = FINNHUB
-    base_url = FINNHUB_BASE_URL
+    base_url = "https://finnhub.io/api/v1"
 
     api_key_param = "token"
 

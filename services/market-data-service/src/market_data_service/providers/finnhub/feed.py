@@ -11,7 +11,6 @@ from market_data_service.config import (
     FINNHUB_PROVIDER_LIMIT_PER_MINUTE,
     FINNHUB_CLOSED_POLL_SECONDS,
     FINNHUB_MARKET_STATUS_REFRESH_SECONDS,
-    FINNHUB_POLL_CONCURRENCY,
     FINNHUB_PROVIDER_CLOCK_LAG_SECONDS,
     FINNHUB_TIER1_POLL_SECONDS,
     FINNHUB_TIER2_POLL_SECONDS,
@@ -30,8 +29,6 @@ def _tier_seconds(entry):
 
 class FinnhubFeed(SymbolQuoteFeed):
     """US equity quotes on tier cadences, slowed down while the US market is closed."""
-
-    poll_concurrency = FINNHUB_POLL_CONCURRENCY
 
     def __init__(self, *args):
         super().__init__(*args)
