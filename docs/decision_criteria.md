@@ -117,3 +117,24 @@ valuations out, trades through. 10 000 instruments refreshed from a provider stu
   - and in both cases uses at most 10 % more market-data + pricing CPU per client.
 - **NO-GO** otherwise.
 - Order execution is reported but does not decide: variant 3 does not change trade-action.
+
+## Part 2b: many traders trading
+
+Added on 2026-09-29, after the Part 2 results and before any Part 2b run. Part 2 traded as one
+order flow of 12 orders per minute; this checks the Part 2 decision when many traders trade at once.
+
+### Load
+
+- Same desk, variants and timing as Part 2; K = 50 watching clients.
+- T = 5, 20 traders at once; each opens a spot order about every 20 s (random phase) and closes it
+  about 60 s later: 0.25 and 1 order per second on average. No price previews.
+- 3 runs per point, variants interleaved.
+
+### Decision
+
+- **The Part 2 GO for the streams stands** if, at every T where variant 2 stays within the
+  market-data and pricing budgets (tick delivery, freshness, position on screen, their errors),
+  variant 3 does too, and market-data + pricing CPU per client is at most 10 % higher.
+- **Otherwise the GO is withdrawn.**
+- Order execution and its errors are reported (`wsgiref` vs gunicorn, stage 4B) and do not decide:
+  variant 3 does not change trade-action.
