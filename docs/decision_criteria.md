@@ -63,3 +63,54 @@ S1 is not gated: the frameworks differ by microseconds per request.
 - WebSocket or many concurrent stream clients are needed;
 - a service has to run as more than one process;
 - an async database driver is adopted.
+
+---
+
+## Part 2: the desk's core flows
+
+Does FastAPI handle the desk's core flows better or cheaper than gunicorn?
+
+### Variants
+
+| Variant | Server | Provider calls | Database |
+| --- | --- | --- | --- |
+| gunicorn (today) | Bottle, 1 worker, 40 threads + 1 per open stream | `httpx.Client`, 1 250 threads | sync, 15 connections |
+| FastAPI | uvicorn, 1 worker, all async | `httpx.AsyncClient`, 1 250 at once | async, 15 connections |
+
+- Same test app in both, built on `desk_pricing`; 10 000 instruments, 1 000 000 positions.
+- 1 250 calls in flight = top level (5 000/s × 0.2 s) + 25 %: the limit never decides.
+
+### Flows
+
+| Flow | Service | Load | Levels | Target | Budget |
+| --- | --- | --- | --- | --- | --- |
+| Market data in | market-data | each instrument refreshed every T s; provider answers in 200 ms | T = 10 / 5 / 2 s | T = 5 s | ≥ 98 % refreshes on time; quote age p95 ≤ T + 1 s |
+| Order entry | trade-action | insert trade + update position, one transaction | 10 / 50 / 200 orders at once | 50 | p95 ≤ 500 ms |
+| Valuation stream | pricing | K subscribers, 50 updates/s each | K = 50 / 200 / 500 | 200 | delivery p95 ≤ 1 s |
+
+- **On time**: a refresh not started before its next due time is missed.
+- **Subscribers**: a test program, not the UI; delay read on 5 of the K streams.
+
+### Measurement
+
+- 10 s warm-up; measured 60 s (market data) or 30 s; 3 runs, variants interleaved.
+- Median of 3; a difference counts only beyond the larger spread (max − min).
+- More than 1 % errors → the variant misses the point.
+- CPU per operation = server cores ÷ operations per second.
+- Revaluation: one sizing number, cores to revalue 1 000 000 positions per minute.
+
+### Rule
+
+Per flow, at its target:
+
+| Result | Decision |
+| --- | --- |
+| FastAPI within budget, gunicorn not | GO |
+| Both within budget, FastAPI ≥ 30 % less CPU per operation | GO |
+| Otherwise | NO-GO |
+| Neither within budget | NO-GO: the fix is more processes, not the framework |
+
+- **30 %**: more threads alone gave 10–20 % in Part 1.
+- **Every GO** also needs FastAPI's order p95 at 50 ≤ 110 % of gunicorn's (beyond the spread).
+- **Scope**: services whose flow passes.
+- **Limitation**: flows measured one at a time; in production they share a process.
