@@ -1,0 +1,20 @@
+{
+  "stable_at": 1790661413.2377326,
+  "traders": 20,
+  "p95_ms": {
+    "tick": 59.23,
+    "valuation": 266.92,
+    "execution": 136.97,
+    "position": 2384.69
+  },
+  "pricing_lag_p95_s": 0.19,
+  "opens": {
+    "ok": 143
+  },
+  "closes": {
+    "ok": 88
+  },
+  "streams_opened": 100,
+  "streams_dropped": 0,
+  "client_cores": 0.072
+}
