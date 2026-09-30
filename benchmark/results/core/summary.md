@@ -43,6 +43,23 @@ Median of runs (min–max).
 | fastapi | 200 | 6.74 (6.37–6.77) | 0 (0–0) | 0.13 (0.13–0.14) | 0.013 (0.013–0.014) | 3 | yes |
 | fastapi | 500 | 8.38 (7.07–9.72) | 0 (0–0) | 0.17 (0.17–0.22) | 0.0068 (0.0068–0.0088) | 3 | yes |
 
+## Provider client libraries
+
+One run per point, 10 s; the stub answers in 200 ms.
+
+| client | model | in flight | calls/s | CPU ms per call | errors |
+| --- | --- | --- | --- | --- | --- |
+| httpx | threads | 400 | 133 | 10.527 | 0 |
+| httpx | threads | 1000 | 159 | 9.731 | 0 |
+| requests | threads | 400 | 1960 | 0.326 | 0 |
+| requests | threads | 1000 | 3528 | 0.335 | 0 |
+| urllib3 | threads | 400 | 1960 | 0.212 | 0 |
+| urllib3 | threads | 1000 | 4934 | 0.17 | 0 |
+| httpx | async | 400 | 124 | 9.98 | 0 |
+| httpx | async | 1000 | 240 | 8.178 | 2 |
+| aiohttp | async | 400 | 1932 | 0.088 | 0 |
+| aiohttp | async | 1000 | 4872 | 0.056 | 0 |
+
 ## Rule at target level
 
 | Flow | gunicorn within budget | FastAPI within budget | FastAPI CPU per operation vs gunicorn | Decision |

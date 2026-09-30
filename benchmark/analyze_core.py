@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 RESULTS = Path(sys.argv[1] if len(sys.argv) > 1 else "results/core")
 COLORS = {"gunicorn": "#eb6834", "fastapi": "#1baf7a"}
 MAX_ERRORS = 1.0
+INSTRUMENTS = 10_000
 FLOWS = {
     "market_data": ("Market data in", "refresh every T s", 5, "age_p95_s", "quote age p95, s"),
     "orders": ("Order entry", "orders at once", 50, "p95_ms", "p95, ms"),
@@ -141,31 +142,38 @@ def decision(flow, points):
             f"| {100 * change:+.0f} %{'' if beyond else ' (within spread)'} | {verdict} |"]
 
 
-def budget_line(flow, levels):
+def load_axis(flow, levels):
     if flow == "market_data":
+        ordered = sorted(levels, reverse=True)
+        return ordered, [f"{INSTRUMENTS // level:,}".replace(",", " ") for level in ordered], "refreshes per second due"
+    return sorted(levels), [str(level) for level in sorted(levels)], FLOWS[flow][1]
+
+
+def budget_values(flow, metric, levels):
+    if metric == "age_p95_s":
         return [level + 1 for level in levels]
-    return [500 if flow == "orders" else 1000] * len(levels)
+    if metric == "p95_ms":
+        return [500] * len(levels)
+    return None
 
 
-def chart(all_points, key, ylabel, name):
-    figure, axes = plt.subplots(1, len(all_points), figsize=(4.2 * len(all_points), 3.4), squeeze=False)
-    axes = axes[0]
-    for axis, (flow, points) in zip(axes, all_points.items()):
-        title, level_name, _, metric, unit = FLOWS[flow]
-        metric = metric if key == "metric" else key
+def chart(all_points, panels, name):
+    figure, axes = plt.subplots(1, len(panels), figsize=(4.4 * len(panels), 3.4), squeeze=False)
+    for axis, (flow, metric, ylabel) in zip(axes[0], panels):
+        points = all_points[flow]
+        levels, labels, xlabel = load_axis(flow, {level for _, level in points})
+        positions = range(len(levels))
         for variant, color in COLORS.items():
-            levels = sorted(level for v, level in points if v == variant)
-            values = [points[variant, level][metric] for level in levels]
-            medians = [value[0] for value in values]
-            errors = [[m - v[1] for m, v in zip(medians, values)], [v[2] - m for m, v in zip(medians, values)]]
-            axis.errorbar(levels, medians, yerr=errors, color=color, marker="o", capsize=3, label=variant)
-        if key == "metric":
-            levels = sorted({level for _, level in points})
-            axis.plot(levels, budget_line(flow, levels), color="#888", linestyle="--", linewidth=1, label="budget")
-        axis.set(title=title, xlabel=level_name, ylabel=unit if key == "metric" else ylabel)
-        axis.set_xticks(sorted({level for _, level in points}))
+            medians = [points[variant, level][metric][0] for level in levels]
+            axis.plot(positions, medians, color=color, marker="o", linewidth=2, label=variant)
+        budget = budget_values(flow, metric, levels)
+        if budget:
+            axis.plot(positions, budget, color="#888", linestyle="--", linewidth=1, label="budget")
+        axis.set(title=FLOWS[flow][0], xlabel=xlabel, ylabel=ylabel)
+        axis.set_xticks(list(positions), labels)
+        axis.set_ylim(bottom=0)
         axis.grid(alpha=0.3)
-    axes[0].legend()
+    axes[0][0].legend()
     figure.tight_layout()
     (RESULTS / "charts").mkdir(exist_ok=True)
     figure.savefig(RESULTS / "charts" / name, dpi=150)
@@ -188,14 +196,27 @@ def main():
                   f"= {statistics.median(cores):.3f} cores for 1 000 000 positions per minute", ""]
     for flow, points in all_points.items():
         lines += table(flow, points)
+    if (RESULTS / "clients.jsonl").exists():
+        lines += ["## Provider client libraries", "", "One run per point, 10 s; the stub answers in 200 ms.", "",
+                  "| client | model | in flight | calls/s | CPU ms per call | errors |", "|" + " --- |" * 6]
+        for line in (RESULTS / "clients.jsonl").read_text().splitlines():
+            c = json.loads(line)
+            lines.append(f"| {c['client']} | {c['model']} | {c['in_flight']} | {c['calls_per_s']} "
+                         f"| {c['cpu_ms_per_call']} | {c['errors']} |")
+        lines.append("")
     lines += ["## Rule at target level", "",
               "| Flow | gunicorn within budget | FastAPI within budget | FastAPI CPU per operation vs gunicorn "
               "| Decision |", "| --- | --- | --- | --- | --- |"]
     for flow, points in all_points.items():
         lines += decision(flow, points)
     (RESULTS / "summary.md").write_text("\n".join(lines) + "\n")
-    chart(all_points, "metric", "", "flows.png")
-    chart(all_points, "cpu_ms", "CPU ms per operation", "cpu.png")
+    if len(all_points) == len(FLOWS):
+        chart(all_points, [("market_data", "age_p95_s", "quote age p95, s"), ("orders", "p95_ms", "p95, ms"),
+                           ("valuation_stream", "delivery_p95_ms", "delivery p95, ms")], "latency.png")
+        chart(all_points, [("market_data", "ops_per_s", "refreshes per second"),
+                           ("orders", "ops_per_s", "orders per second"),
+                           ("valuation_stream", "ops_per_s", "updates delivered per second")], "throughput.png")
+        chart(all_points, [(flow, "cpu_ms", f"CPU ms per {OPERATION[flow]}") for flow in FLOWS], "cpu.png")
     print((RESULTS / "summary.md").read_text())
 
 
