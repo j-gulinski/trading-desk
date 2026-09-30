@@ -84,7 +84,11 @@ def number(x):
         return "∞"
     if abs(x) < 1:
         return f"{x:.2g}" if x else "0"
-    return f"{x:.2f}" if abs(x) < 10 else f"{x:.1f}" if abs(x) < 100 else f"{x:,.0f}".replace(",", " ")
+    if abs(x) < 10:
+        return f"{x:.2f}"
+    if abs(round(x, 1)) < 100:
+        return f"{x:.1f}"
+    return f"{x:,.0f}".replace(",", " ")
 
 
 def cell(value):
