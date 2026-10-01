@@ -1,0 +1,3 @@
+{"model": "Black-Scholes, desk_pricing.european_option.black_scholes", "positions": 1000000, "us_per_position": 1.02, "cores_for_1m_positions_per_minute": 0.017}
+{"model": "Black-Scholes, desk_pricing.european_option.black_scholes", "positions": 1000000, "us_per_position": 0.834, "cores_for_1m_positions_per_minute": 0.0139}
+{"model": "Black-Scholes, desk_pricing.european_option.black_scholes", "positions": 1000000, "us_per_position": 0.825, "cores_for_1m_positions_per_minute": 0.0137}

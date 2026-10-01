@@ -1,0 +1,10 @@
+{"client": "httpx", "model": "threads", "in_flight": 400, "calls_per_s": 133, "cpu_ms_per_call": 10.527, "errors": 0}
+{"client": "httpx", "model": "threads", "in_flight": 1000, "calls_per_s": 159, "cpu_ms_per_call": 9.731, "errors": 0}
+{"client": "requests", "model": "threads", "in_flight": 400, "calls_per_s": 1960, "cpu_ms_per_call": 0.326, "errors": 0}
+{"client": "requests", "model": "threads", "in_flight": 1000, "calls_per_s": 3528, "cpu_ms_per_call": 0.335, "errors": 0}
+{"client": "urllib3", "model": "threads", "in_flight": 400, "calls_per_s": 1960, "cpu_ms_per_call": 0.212, "errors": 0}
+{"client": "urllib3", "model": "threads", "in_flight": 1000, "calls_per_s": 4934, "cpu_ms_per_call": 0.17, "errors": 0}
+{"client": "httpx", "model": "async", "in_flight": 400, "calls_per_s": 124, "cpu_ms_per_call": 9.98, "errors": 0}
+{"client": "httpx", "model": "async", "in_flight": 1000, "calls_per_s": 240, "cpu_ms_per_call": 8.178, "errors": 2}
+{"client": "aiohttp", "model": "async", "in_flight": 400, "calls_per_s": 1932, "cpu_ms_per_call": 0.088, "errors": 0}
+{"client": "aiohttp", "model": "async", "in_flight": 1000, "calls_per_s": 4872, "cpu_ms_per_call": 0.056, "errors": 0}
